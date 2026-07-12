@@ -26,6 +26,19 @@ install_deps() {
         missing+=("netcat")
     fi
 
+    # Check for JS Runtime (Required by yt-dlp for YouTube Decryption)
+    local has_js=false
+    for js in node deno bun qjs; do
+        if command -v "$js" >/dev/null 2>&1; then
+            has_js=true
+            break
+        fi
+    done
+    
+    if [ "$has_js" = false ]; then
+        missing+=("nodejs")
+    fi
+
     if [ ${#missing[@]} -eq 0 ]; then
         echo -e "${GREEN}✅ All core dependencies are already installed.${NC}"
         return
@@ -49,6 +62,7 @@ install_deps() {
     elif command -v brew >/dev/null 2>&1; then # macOS
         for pkg in "${missing[@]}"; do
             [ "$pkg" == "netcat" ] && continue
+            [ "$pkg" == "nodejs" ] && pkg="node"
             brew install "$pkg"
         done
     elif command -v pacman >/dev/null 2>&1; then # Arch
@@ -87,6 +101,15 @@ if [ ! -f "$CONF_DIR/mpv.conf" ]; then
     echo -e "${GREEN}✅ Installed default mpv.conf${NC}"
 else
     echo -e "${YELLOW}ℹ️  ~/.config/mpv/mpv.conf already exists. Keeping yours.${NC}"
+fi
+
+# --- YT-DLP Configuration ---
+YTDLP_CONF_DIR="$HOME/.config/yt-dlp"
+mkdir -p "$YTDLP_CONF_DIR"
+if ! grep -q -- "--js-runtimes node" "$YTDLP_CONF_DIR/config" 2>/dev/null; then
+    echo -e "${CYAN}🔧 Configuring yt-dlp to use Node.js for YouTube decryption...${NC}"
+    echo "--js-runtimes node" >> "$YTDLP_CONF_DIR/config"
+    echo -e "${GREEN}✅ yt-dlp configuration updated.${NC}"
 fi
 
 # --- Playlists ---
