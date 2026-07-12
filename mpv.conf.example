@@ -1,0 +1,82 @@
+# 🎵 MPV Configuration - Polished Edition
+# Save this as ~/.config/mpv/mpv.conf
+
+# ═════════ VIDEO & HARDWARE ═════════
+vo=gpu
+hwdec=auto              # Robust: Works on Android (mediacodec) and WSL (vaapi/nvdec)
+profile=gpu-hq          # High quality profile
+interpolation=yes       # Helps with frame consistency
+tscale=oversample       # Smooths out frame timing
+
+# ═════════ GENERAL ═════════
+input-ipc-server=~/.mpv-socket
+keep-open=yes           # Don't close on last file
+save-position-on-quit=no
+watch-later-directory=~/.config/mpv/watch_later
+resume-playback=no
+
+# ═════════ TERMINAL UI ═════════
+msg-color=yes
+msg-module=yes
+term-osd-bar=yes
+term-osd-bar-chars='[=>-]'  # Restored classic arrow style
+cursor-autohide=1000
+
+# ═════════ METADATA ═════════
+# Only show essential tags in terminal (hides long descriptions/comments)
+display-tags=Artist,Album,Title,Date,Genre
+
+# ═════════ AUDIO ═════════
+audio-channels=stereo
+volume=100
+volume-max=200          # More headroom for quiet tracks
+audio-file-auto=fuzzy
+gapless-audio=yes       # Better for albums
+audio-normalize-downmix=yes
+audio-pitch-correction=yes
+
+# ═════════ CACHE & STREAMING ═════════
+cache=yes
+cache-secs=60           # Buffer 60s of audio
+demuxer-max-bytes=256MiB
+demuxer-max-back-bytes=128MiB
+demuxer-readahead-secs=60
+ytdl=yes
+# High Quality: Prefer best audio (Opus 160k), fallback to best quality
+ytdl-format=bestaudio/best
+# Explicitly use yt-dlp and add robust options
+script-opts=ytdl_hook-ytdl_path=yt-dlp
+ytdl-raw-options=cookies=~/.config/mpv/cookies.txt,user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",no-check-certificates=,js-runtimes=node,remote-components=ejs:github
+stream-buffer-size=16MiB
+tls-verify=no           # Fallback for WSL SSL certificate issues
+
+# ═════════ OSD ═════════
+osd-level=1
+osd-duration=2500
+# Smart Status Line: Shows Title > Time > Volume
+osd-status-msg='${media-title}\n${?pause==yes:■ }${!pause==yes:▶️ } ⏱️ ${time-pos}/${duration} (${percent-pos}%) │ 🔊 ${volume}%${?speed!=1.0: │ ⚡ ${speed}x}'
+osd-playing-msg='Now Playing: ${media-title}'
+
+# ═════════ PROFILES ═════════
+
+# 🎵 Default Music Profile (Audio Only)
+[default]
+profile-cond=video_format==nil
+video=no
+term-osd=force
+term-status-msg=' 🎵 [${playlist-pos-1}/${playlist-count}] ${media-title}\n ${?pause==yes:||}${!pause==yes:|>} (${time-pos} / ${duration})  {💫 Progress: ${percent-pos}%}  [🔊 Volume: ${volume}%]'
+
+# 🖥️ Visualizer / Video Profile
+[video-mode]
+profile-cond=video_format~=nil
+video=no
+# Buffer settings for smoother streaming
+cache-secs=10
+demuxer-readahead-secs=20
+
+# 🎧 Audio FX Profiles (for q fx + manual hotkeys)
+[flat-audio]
+af=
+
+[dolby-like]
+af=lavfi=[firequalizer=zero_phase=on:gain_entry='entry(40,4);entry(80,3);entry(160,1.5);entry(320,0.2);entry(1000,0);entry(2800,1.2);entry(6000,2);entry(12000,1.4)'],acompressor=threshold=-18dB:ratio=2.2:attack=20:release=250:makeup=3,alimiter=limit=0.97
