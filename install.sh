@@ -1,65 +1,123 @@
 #!/usr/bin/env bash
-# Installer for q - Advanced MPV Queue Manager
+# Advanced Installer for q - Smart MPV Queue Manager
+
+cd "$(dirname "$0")" || exit 1
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 CYAN='\033[0;36m'
+YELLOW='\033[1;33m'
 NC='\033[0m'
 
-echo -e "${CYAN}🚀 Installing q...${NC}"
+echo -e "${CYAN}🚀 Starting Advanced Installation of q...${NC}"
 
-# 1. Create local bin directory
+# --- Dependency Resolution Engine ---
+install_deps() {
+    local deps=("mpv" "yt-dlp" "fzf" "jq")
+    local missing=()
+    
+    for cmd in "${deps[@]}"; do
+        if ! command -v "$cmd" >/dev/null 2>&1; then
+            missing+=("$cmd")
+        fi
+    done
+    
+    if ! command -v nc >/dev/null 2>&1; then
+        missing+=("netcat")
+    fi
+
+    if [ ${#missing[@]} -eq 0 ]; then
+        echo -e "${GREEN}✅ All core dependencies are already installed.${NC}"
+        return
+    fi
+    
+    echo -e "${YELLOW}⚠️  Missing dependencies detected: ${missing[*]}${NC}"
+    echo -e "${CYAN}🔧 Attempting automatic installation...${NC}"
+    
+    if command -v pkg >/dev/null 2>&1; then # Termux
+        pkg update
+        for pkg in "${missing[@]}"; do
+            [ "$pkg" == "netcat" ] && pkg="netcat-openbsd"
+            pkg install -y "$pkg"
+        done
+    elif command -v apt-get >/dev/null 2>&1; then # Debian/Ubuntu/Kali
+        sudo apt-get update
+        for pkg in "${missing[@]}"; do
+            [ "$pkg" == "netcat" ] && pkg="netcat-openbsd"
+            sudo apt-get install -y "$pkg"
+        done
+    elif command -v brew >/dev/null 2>&1; then # macOS
+        for pkg in "${missing[@]}"; do
+            [ "$pkg" == "netcat" ] && continue
+            brew install "$pkg"
+        done
+    elif command -v pacman >/dev/null 2>&1; then # Arch
+        for pkg in "${missing[@]}"; do
+            [ "$pkg" == "netcat" ] && pkg="gnu-netcat"
+            sudo pacman -S --noconfirm "$pkg"
+        done
+    elif command -v dnf >/dev/null 2>&1; then # Fedora
+        for pkg in "${missing[@]}"; do
+            [ "$pkg" == "netcat" ] && pkg="nc"
+            sudo dnf install -y "$pkg"
+        done
+    else
+        echo -e "${RED}❌ Could not detect package manager. Please manually install: ${missing[*]}${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}✅ Dependencies installed successfully.${NC}"
+}
+
+install_deps
+
+# --- Core Files Installation ---
 DEST_DIR="$HOME/.local/bin/mpv"
 mkdir -p "$DEST_DIR"
 
-# 2. Copy core files
+echo -e "${CYAN}📦 Installing core executables...${NC}"
 cp -r q q_modules "$DEST_DIR/"
 chmod +x "$DEST_DIR/q"
+echo -e "${GREEN}✅ q installed to $DEST_DIR${NC}"
 
-# 3. Handle mpv.conf
+# --- Configuration ---
 CONF_DIR="$HOME/.config/mpv"
 mkdir -p "$CONF_DIR"
 if [ ! -f "$CONF_DIR/mpv.conf" ]; then
     cp mpv.conf.example "$CONF_DIR/mpv.conf"
     echo -e "${GREEN}✅ Installed default mpv.conf${NC}"
 else
-    echo -e "${RED}⚠️  ~/.config/mpv/mpv.conf already exists. Skipping...${NC}"
+    echo -e "${YELLOW}ℹ️  ~/.config/mpv/mpv.conf already exists. Keeping yours.${NC}"
 fi
 
-# 4. Copy bundled playlists
+# --- Playlists ---
 PLAYLIST_DEST="$HOME/.local/share/mpv/playlists"
 mkdir -p "$PLAYLIST_DEST"
 if [ -d "playlists" ]; then
-    echo -e "${CYAN}🎵 Installing bundled playlists...${NC}"
-    # Use -n (no clobber) so we don't overwrite user's existing playlists if they reinstall
     cp -rn playlists/* "$PLAYLIST_DEST/" 2>/dev/null || true
-    echo -e "${GREEN}✅ Playlists installed to $PLAYLIST_DEST${NC}"
+    echo -e "${GREEN}✅ Bundled playlists safely integrated into $PLAYLIST_DEST${NC}"
 fi
 
-# 5. Reminder for cookies
-echo -e "${CYAN}🍪 Tip: For reliable YouTube playback, export your cookies to:${NC}"
-echo -e "   \033[1m~/.config/mpv/cookies.txt${NC}"
-
-# 6. Update PATH and MPV Wrapper
+# --- Shell Wrapper & PATH ---
 SHELL_RC=""
 [[ "$SHELL" == */zsh ]] && SHELL_RC="$HOME/.zshrc"
 [[ "$SHELL" == */bash ]] && SHELL_RC="$HOME/.bashrc"
-# Fallback if SHELL is not set or weird
 [ -z "$SHELL_RC" ] && [ -f "$HOME/.bashrc" ] && SHELL_RC="$HOME/.bashrc"
 
 if [ -n "$SHELL_RC" ]; then
-    # Add PATH if necessary
-    if [[ ":$PATH:" != *":$DEST_DIR:"* ]] && ! grep -q "PATH.*$DEST_DIR" "$SHELL_RC"; then
-        echo -e "\nexport PATH=\"\$PATH:$DEST_DIR\"" >> "$SHELL_RC"
+    # PATH Marker
+    if ! grep -q "# --- Q PATH START ---" "$SHELL_RC"; then
+        echo -e "\n# --- Q PATH START ---" >> "$SHELL_RC"
+        echo "export PATH=\"\$PATH:$DEST_DIR\"" >> "$SHELL_RC"
+        echo "# --- Q PATH END ---" >> "$SHELL_RC"
         echo -e "${GREEN}✅ Added $DEST_DIR to PATH in $SHELL_RC${NC}"
     fi
 
-    # Add MPV Wrapper if necessary
-    if ! grep -q "function mpv()" "$SHELL_RC"; then
-        echo -e "${CYAN}🔧 Adding mandatory mpv wrapper function to $SHELL_RC...${NC}"
+    # MPV Wrapper Marker
+    if ! grep -q "function mpv()" "$SHELL_RC" && ! grep -q "# --- Q MPV WRAPPER START ---" "$SHELL_RC"; then
+        echo -e "${CYAN}🔧 Injecting mandatory mpv IPC wrapper function...${NC}"
         cat << 'EOF' >> "$SHELL_RC"
 
-# MPV Wrapper for 'q' command IPC
+# --- Q MPV WRAPPER START ---
 function mpv() {
     SOCKET="$HOME/.mpv-socket"
     if [ -e "$SOCKET" ]; then rm "$SOCKET"; fi
@@ -69,11 +127,11 @@ function mpv() {
 if [ -n "$BASH_VERSION" ]; then
     export -f mpv
 fi
+# --- Q MPV WRAPPER END ---
 EOF
-        echo -e "${GREEN}✅ Added mpv wrapper to $SHELL_RC${NC}"
+        echo -e "${GREEN}✅ Wrapper injected into $SHELL_RC${NC}"
     fi
-
-    echo -e "${CYAN}👉 Run 'source $SHELL_RC' or restart your terminal to apply changes.${NC}"
+    echo -e "${CYAN}👉 Note: Run 'source $SHELL_RC' or restart terminal to apply changes.${NC}"
 fi
 
-echo -e "${GREEN}✨ Installation complete! Type 'q' to start.${NC}"
+echo -e "${GREEN}✨ Installation flawlessly finished! Type 'q' to start.${NC}"

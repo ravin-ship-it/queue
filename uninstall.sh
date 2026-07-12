@@ -1,5 +1,7 @@
-#!/bin/bash
-# Uninstaller for q - Advanced MPV Queue Manager
+#!/usr/bin/env bash
+# Advanced Uninstaller for q - Interactive Component Checklist
+
+cd "$(dirname "$0")" || exit 1
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -7,62 +9,78 @@ CYAN='\033[0;36m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-echo -e "${CYAN}🗑️  Uninstalling q...${NC}"
+echo -e "${CYAN}🗑️  Starting Advanced Cleanup Checklist for q...${NC}"
+echo -e "You will be prompted to confirm removal for each component.\n"
 
-# 1. Stop MPV if running
-if command -v q >/dev/null; then
+# Stop Q if running
+if command -v q >/dev/null 2>&1; then
     q -stop >/dev/null 2>&1
 fi
 
-# 2. Remove Binary and Modules
-DEST_DIR="$HOME/.local/bin/mpv"
-if [ -d "$DEST_DIR" ]; then
-    rm -f "$DEST_DIR/q"
-    rm -rf "$DEST_DIR/q_modules"
-    # Only remove the directory if it's empty
-    rmdir "$DEST_DIR" 2>/dev/null
-    echo -e "${GREEN}✅ Removed q and modules from $DEST_DIR${NC}"
-fi
-
-# 3. Remove Cache and State
-if [ -d "$HOME/.cache/mpv" ]; then
-    rm -rf "$HOME/.cache/mpv"
-    echo -e "${GREEN}✅ Removed cache and state files${NC}"
-fi
-
-# 4. Remove Playlists (Optional/Keep them?)
-echo -e "${YELLOW}❓ Do you want to remove your saved playlists in ~/.local/share/mpv/playlists? (y/n)${NC}"
-read -r -n 1 -p "> " choice
-echo ""
-if [[ "$choice" == "y" ]]; then
-    rm -rf "$HOME/.local/share/mpv/playlists"
-    echo -e "${GREEN}✅ Removed playlists${NC}"
-else
-    echo -e "${CYAN}ℹ️  Skipped playlist removal.${NC}"
-fi
-
-# 5. Handle mpv.conf (Warning only)
-if [ -f "$HOME/.config/mpv/mpv.conf" ]; then
-    echo -e "${YELLOW}⚠️  I did NOT remove ~/.config/mpv/mpv.conf to avoid breaking your other mpv setups.${NC}"
-    echo -e "   Remove it manually if you no longer need it."
-fi
-
-# 6. Cleanup IPC Socket
 rm -f "$HOME/.mpv-socket"
 
-# 7. Cleanup PATH from Shell RCs
+# Helper for interactive checklist
+prompt_remove() {
+    local target="$1"
+    local desc="$2"
+    local is_dir="$3"
+    
+    if [ "$is_dir" = "true" ] && [ -d "$target" ] || [ "$is_dir" = "false" ] && [ -f "$target" ]; then
+        echo -e "${YELLOW}Found: ${desc}${NC} (${target})"
+        read -r -n 1 -p "Remove this component? [y/N] > " choice
+        echo ""
+        if [[ "$choice" =~ ^[Yy]$ ]]; then
+            rm -rf "$target"
+            echo -e "${GREEN}✅ Removed $target${NC}\n"
+        else
+            echo -e "${CYAN}⏭️  Kept $target${NC}\n"
+        fi
+    fi
+}
+
+echo -e "${CYAN}--- File Components ---${NC}"
+
+# Core
+prompt_remove "$HOME/.local/bin/mpv/q" "Core Executable" "false"
+prompt_remove "$HOME/.local/bin/mpv/q_modules" "Core Modules" "true"
+
+# Data
+prompt_remove "$HOME/.cache/mpv" "Cache & State Data" "true"
+prompt_remove "$HOME/.local/share/mpv/playlists" "Saved Playlists" "true"
+
+# Configs
+prompt_remove "$HOME/.config/mpv/mpv.conf" "MPV Configuration File" "false"
+prompt_remove "$HOME/.config/mpv/cookies.txt" "YouTube-DL Cookies" "false"
+
+# Shell Config Cleanup
+echo -e "${CYAN}--- Shell Configuration Cleanup ---${NC}"
 for RC in "$HOME/.bashrc" "$HOME/.zshrc"; do
     if [ -f "$RC" ]; then
-        if grep -q "export PATH=\".*:$DEST_DIR\"" "$RC"; then
-            # Portable sed removal (works on GNU and BSD/macOS)
-            sed "\|export PATH=\".*:$DEST_DIR\"|d" "$RC" > "$RC.tmp" && mv "$RC.tmp" "$RC"
-            echo -e "${GREEN}✅ Cleaned up PATH in $RC${NC}"
+        # Check PATH Marker
+        if grep -q "# --- Q PATH START ---" "$RC"; then
+            echo -e "${YELLOW}Found Q PATH entry in $RC${NC}"
+            read -r -n 1 -p "Remove the PATH entry? [y/N] > " choice
+            echo ""
+            if [[ "$choice" =~ ^[Yy]$ ]]; then
+                sed "\|# --- Q PATH START ---|,\|# --- Q PATH END ---|d" "$RC" > "$RC.tmp" && mv "$RC.tmp" "$RC"
+                echo -e "${GREEN}✅ Cleaned up PATH in $RC${NC}\n"
+            fi
+        fi
+        
+        # Check Wrapper Marker
+        if grep -q "# --- Q MPV WRAPPER START ---" "$RC"; then
+            echo -e "${YELLOW}Found Q MPV wrapper function in $RC${NC}"
+            read -r -n 1 -p "Remove the wrapper function? [y/N] > " choice
+            echo ""
+            if [[ "$choice" =~ ^[Yy]$ ]]; then
+                sed "\|# --- Q MPV WRAPPER START ---|,\|# --- Q MPV WRAPPER END ---|d" "$RC" > "$RC.tmp" && mv "$RC.tmp" "$RC"
+                echo -e "${GREEN}✅ Removed mpv() wrapper from $RC${NC}\n"
+            fi
         fi
     fi
 done
 
-# 8. Cleanup MPV Wrapper Warning
-echo -e "${YELLOW}⚠️  Note: If the installer added an 'mpv()' wrapper function to your ~/.bashrc or ~/.zshrc,${NC}"
-echo -e "   ${YELLOW}you may want to manually remove it if you plan to use mpv outside of q.${NC}"
+# Clean up empty bin dir
+[ -d "$HOME/.local/bin/mpv" ] && rmdir "$HOME/.local/bin/mpv" 2>/dev/null
 
-echo -e "${GREEN}✨ q has been successfully uninstalled.${NC}"
+echo -e "${GREEN}✨ Checklist complete! Run this uninstaller anytime to clean up remaining items!${NC}"

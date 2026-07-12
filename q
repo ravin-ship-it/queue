@@ -1,6 +1,41 @@
 #!/usr/bin/env bash
 # Advanced Queue Manager (Synced Fetch Edition) - Finalized
 
+# --- SELF-HEALING & ENVIRONMENT VALIDATION ---
+# Ensure essential directories exist
+mkdir -p "$HOME/.cache/mpv" 2>/dev/null
+mkdir -p "$HOME/.local/share/mpv/playlists" 2>/dev/null
+touch "$HOME/.cache/mpv/yt_cache.txt" 2>/dev/null
+
+# Clean up dead sockets automatically
+if [ -S "$HOME/.mpv-socket" ]; then
+    if ! (echo '{}' | nc -U -w 1 "$HOME/.mpv-socket" >/dev/null 2>&1); then
+        rm -f "$HOME/.mpv-socket"
+    fi
+fi
+
+# Validate Modules
+MODULE_DIR="$HOME/.local/bin/mpv/q_modules"
+if [ ! -d "$MODULE_DIR" ]; then
+    echo -e "\033[0;31m❌ FATAL: Core modules are missing! (Did you accidentally delete q_modules?)\033[0m"
+    echo -e "\033[0;36m👉 Fix: Please re-run 'install.sh' from your q-production folder.\033[0m"
+    exit 1
+fi
+
+# Validate Dependencies
+for dep in mpv yt-dlp fzf jq; do
+    if ! command -v "$dep" >/dev/null 2>&1; then
+        echo -e "\033[0;31m❌ FATAL: Missing dependency: $dep\033[0m"
+        echo -e "\033[0;36m👉 Fix: Please re-run 'install.sh' from your q-production folder to auto-install.\033[0m"
+        exit 1
+    fi
+done
+if ! command -v nc >/dev/null 2>&1; then
+    echo -e "\033[0;31m❌ FATAL: Missing dependency: netcat (nc)\033[0m"
+    echo -e "\033[0;36m👉 Fix: Please re-run 'install.sh'.\033[0m"
+    exit 1
+fi
+
 # --- MODULES ---
 MODULE_DIR="$HOME/.local/bin/mpv/q_modules"
 source "$MODULE_DIR/ui.sh"
