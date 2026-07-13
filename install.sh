@@ -96,12 +96,12 @@ echo -e "${GREEN}✅ q installed to $DEST_DIR${NC}"
 # --- Configuration ---
 CONF_DIR="$HOME/.config/mpv"
 mkdir -p "$CONF_DIR"
-if [ ! -f "$CONF_DIR/mpv.conf" ]; then
-    cp mpv.conf.example "$CONF_DIR/mpv.conf"
-    echo -e "${GREEN}✅ Installed default mpv.conf${NC}"
-else
-    echo -e "${YELLOW}ℹ️  ~/.config/mpv/mpv.conf already exists. Keeping yours.${NC}"
+if [ -f "$CONF_DIR/mpv.conf" ]; then
+    cp "$CONF_DIR/mpv.conf" "$CONF_DIR/mpv.conf.bak"
+    echo -e "${YELLOW}ℹ️  Backed up existing mpv.conf to mpv.conf.bak${NC}"
 fi
+cp mpv.conf.example "$CONF_DIR/mpv.conf"
+echo -e "${GREEN}✅ Installed fresh mpv.conf${NC}"
 
 # --- YT-DLP Configuration ---
 YTDLP_CONF_DIR="$HOME/.config/yt-dlp"
@@ -136,9 +136,11 @@ if [ -n "$SHELL_RC" ]; then
     fi
 
     # MPV Wrapper Marker
-    if ! grep -q "function mpv()" "$SHELL_RC" && ! grep -q "# --- Q MPV WRAPPER START ---" "$SHELL_RC"; then
-        echo -e "${CYAN}🔧 Injecting mandatory mpv IPC wrapper function...${NC}"
-        cat << 'EOF' >> "$SHELL_RC"
+    if grep -q "# --- Q MPV WRAPPER START ---" "$SHELL_RC"; then
+        sed -i '/# --- Q MPV WRAPPER START ---/,/# --- Q MPV WRAPPER END ---/d' "$SHELL_RC"
+    fi
+    echo -e "${CYAN}🔧 Injecting mandatory mpv IPC wrapper function...${NC}"
+    cat << 'EOF' >> "$SHELL_RC"
 
 # --- Q MPV WRAPPER START ---
 function mpv() {
@@ -152,8 +154,7 @@ if [ -n "$BASH_VERSION" ]; then
 fi
 # --- Q MPV WRAPPER END ---
 EOF
-        echo -e "${GREEN}✅ Wrapper injected into $SHELL_RC${NC}"
-    fi
+    echo -e "${GREEN}✅ Wrapper injected into $SHELL_RC${NC}"
     echo -e "${CYAN}👉 Note: Run 'source $SHELL_RC' or restart terminal to apply changes.${NC}"
 fi
 
