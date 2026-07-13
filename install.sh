@@ -142,12 +142,10 @@ if [ -n "$SHELL_RC" ]; then
 
 # --- Q MPV WRAPPER START ---
 function mpv() {
-    if command -v termux-wake-lock >/dev/null 2>&1; then termux-wake-lock; fi
     SOCKET="$HOME/.mpv-socket"
     if [ -e "$SOCKET" ]; then rm "$SOCKET"; fi
     command mpv --idle --input-ipc-server="$SOCKET" "$@"
     rm -f "$SOCKET"
-    if command -v termux-wake-unlock >/dev/null 2>&1; then termux-wake-unlock; fi
 }
 if [ -n "$BASH_VERSION" ]; then
     export -f mpv
