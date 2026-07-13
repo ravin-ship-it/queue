@@ -47,7 +47,7 @@ ytdl=yes
 ytdl-format=bestaudio/best
 # Explicitly use yt-dlp and add robust options
 script-opts=ytdl_hook-ytdl_path=yt-dlp
-ytdl-raw-options=cookies=~/.config/mpv/cookies.txt,user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",no-check-certificates=,js-runtimes=node,remote-components=ejs:github
+ytdl-raw-options=cookies=~/.config/mpv/cookies.txt,user-agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",no-check-certificates=,js-runtimes=node,remote-components=ejs:github,extractor-args=youtube:player_client=android_creator
 stream-buffer-size=16MiB
 tls-verify=no           # Fallback for WSL SSL certificate issues
 

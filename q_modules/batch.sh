@@ -115,7 +115,7 @@ execute_batch() {
         if [ "$MPV_RUNNING" = true ]; then
             if [ ${#PLAYLIST_URLS[@]} -gt 1 ]; then
                 # Fetch count before adding to know where to resume
-                local init_count=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
+                local init_count=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
                 
                 echo -e "${C_PINK}🚀 Queuing ${C_ORANGE}${#PLAYLIST_URLS[@]}${C_PINK} tracks...${C_RESET}"
                 local batch_cmds=""
@@ -138,7 +138,7 @@ execute_batch() {
                     local q_json_cmd=$(jq -nc --arg path "$q_clean_url" '{"command": ["loadfile", $path, "append-play"]}')
                     batch_cmds+="${q_json_cmd}\n"
                 done
-                echo -e "$batch_cmds" | nc -U -w 1 "$SOCKET" > /dev/null
+                echo -e "$batch_cmds" | nc -N -U -w 1 "$SOCKET" > /dev/null
                 echo -e "${C_GREEN}✅ All tracks added to queue.${C_RESET}"
                 
                 # Auto-resume if MPV was idle (start at the first new track)
@@ -166,7 +166,8 @@ execute_batch() {
                     CACHE_MEM["$clean_url"]="${title}"$'\t'"${artist}"$'\t'"${dur}"
                 fi
             done
-            mpv --idle --input-ipc-server="$SOCKET" "${PLAYLIST_URLS[@]}" >/dev/null 2>&1 & disown
+            if command -v termux-wake-lock >/dev/null 2>&1; then termux-wake-lock; fi
+            ( command mpv --idle --no-terminal --input-ipc-server="$SOCKET" "${PLAYLIST_URLS[@]}" </dev/null >/dev/null 2>&1 & )
             
             # Update state for subsequent queries in this loop
             echo -e "${C_GRAY}⏳ Waiting for MPV socket...${C_RESET}"
