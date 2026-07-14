@@ -308,6 +308,10 @@ format_track_log() {
     final_artist="${final_artist//\//, }"
     
     [ -n "$final_artist" ] && [ "$final_artist" != "null" ] && [ "$final_artist" != "$clean_fname" ] && [ "$final_artist" != "N/A" ] && [ "$final_artist" != "Unknown" ] && artist_part=" ${C_GRAY}by${C_RESET} ${C_LIGHT_PINK}$final_artist${C_RESET}"
+    # Fallback: fetch live duration from mpv if cache miss
+    if { [ -z "$cached_duration" ] || [ "$cached_duration" == "null" ] || [ "$cached_duration" == "0:00" ]; } && [ -S "$SOCKET" ]; then
+        cached_duration=$(echo '{"command":["get_property","duration-string"]}' | nc -U -w 0.5 "$SOCKET" 2>/dev/null | jq -r '.data // ""')
+    fi
     [ -n "$cached_duration" ] && [ "$cached_duration" != "null" ] && [ "$cached_duration" != "0:00" ] && dur_part=" ${C_ORANGE}[$cached_duration]${C_RESET}"
     
     echo -e "${C_WHITE}[${C_ORANGE}${idx}${C_WHITE}] ${C_CYAN}${display_title}${C_RESET}${artist_part}${dur_part}"
