@@ -89,7 +89,7 @@ DEST_DIR="$HOME/.local/bin/mpv"
 mkdir -p "$DEST_DIR"
 
 echo -e "${CYAN}📦 Installing core executables...${NC}"
-cp -r q q_modules "$DEST_DIR/"
+cp -rf q q_modules "$DEST_DIR/"
 chmod +x "$DEST_DIR/q"
 echo -e "${GREEN}✅ q installed to $DEST_DIR${NC}"
 
