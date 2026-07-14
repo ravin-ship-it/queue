@@ -36,13 +36,11 @@ check_and_resume() {
     ( sleep 5; rm -f "$resume_cd" ) >/dev/null 2>&1 & disown
 
     if [ "$MPV_RUNNING" = true ]; then
-        local idle=$(echo '{ "command": ["get_property", "idle-active"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // "false"')
+        local raw_state=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","eof-reached"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | (.[0].data // false), (.[1].data // false)')
+        IFS=$'\n' read -r is_idle is_eof <<< "$raw_state"
         
-        # DEBUG LOG
-        # echo -e "${C_GRAY}[Debug] Idle: $idle | Index: ${force_idx:-Next}${C_RESET}"
-        
-        # If idle, we must intervene
-        if [ "$idle" == "true" ]; then
+        # If idle or paused at EOF, we must intervene
+        if [ "$is_idle" == "true" ] || [ "$is_eof" == "true" ]; then
             if [ -n "$force_idx" ]; then
                  echo -e "${C_PINK}⚡ Auto-Resuming at index ${C_ORANGE}$((force_idx + 1))${C_PINK}...${C_RESET}"
                  

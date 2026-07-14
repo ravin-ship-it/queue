@@ -10,7 +10,7 @@ tscale=oversample       # Smooths out frame timing
 
 # ═════════ GENERAL ═════════
 input-ipc-server=~/.mpv-socket
-#keep-open=yes           # Don't close on last file
+keep-open=yes           # Don't close on last file
 save-position-on-quit=no
 watch-later-directory=~/.config/mpv/watch_later
 resume-playback=no

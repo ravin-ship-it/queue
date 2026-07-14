@@ -766,14 +766,15 @@ start_idle_monitor() {
             fi
 
             # Batch get essential properties (increased timeout to 2s for stability)
-            local raw=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","playlist-count"]}\n{"command":["get_property","playlist-pos"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","time-remaining"]}' | nc -N -U -w 2 "$SOCKET" 2>/dev/null | jq -s -j -r '
+            local raw=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","playlist-count"]}\n{"command":["get_property","playlist-pos"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","time-remaining"]}\n{"command":["get_property","eof-reached"]}' | nc -N -U -w 2 "$SOCKET" 2>/dev/null | jq -s -j -r '
                 map(select(.event == null)) |
                 (if .[0].data == null then "true" else .[0].data end), "\t",
                 (.[1].data // 0), "\t",
                 (if .[2].data == null then -1 else .[2].data end), "\t",
                 (.[3].data // "no"), "\t",
                 (.[4].data // "no"), "\t",
-                (.[5].data // 100)
+                (.[5].data // 100), "\t",
+                (.[6].data // "false")
             ' 2>/dev/null)
 
             if [ -z "$raw" ]; then 
@@ -782,8 +783,13 @@ start_idle_monitor() {
                 continue 
             fi
             
-            IFS=$'\t' read -r idle count pos loop_p loop_f rem <<< "$raw"
+            IFS=$'\t' read -r idle count pos loop_p loop_f rem eof <<< "$raw"
             local current_idx=$((pos + 1))
+            
+            # If EOF is reached on the last file, we should consider it IDLE so Auto Mode triggers correctly
+            if [ "$eof" == "true" ] && [ "$pos" -eq $((count - 1)) ]; then
+                idle="true"
+            fi
             
             # Combine loop status
             local active_loop="no"
