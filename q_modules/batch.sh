@@ -112,6 +112,28 @@ execute_batch() {
 
     # 2. Process Queue/Play (If selected or implicit)
     if [ "$DO_QUEUE" = true ] || ([ ${#TARGET_FILES[@]} -eq 0 ] && [ ${#PLAYLIST_URLS[@]} -gt 0 ]); then
+        if [ "$MPV_RUNNING" = false ]; then
+            if [ -f "$LAST_PLAYLIST_FILE" ] && [ -s "$LAST_PLAYLIST_FILE" ]; then
+                echo -e "${C_PINK}🚀 Starting MPV and restoring session...${C_RESET}"
+                cmd_play >/dev/null 2>&1
+                for i in {1..20}; do
+                    [ -S "$SOCKET" ] && break
+                    sleep 0.2
+                done
+                MPV_RUNNING=true
+            else
+                echo -e "${C_PINK}🚀 Starting MPV...${C_RESET}"
+                if command -v termux-wake-lock >/dev/null 2>&1; then termux-wake-lock; fi
+                ( command mpv --idle --no-terminal --input-ipc-server="$SOCKET" </dev/null >/dev/null 2>&1 & )
+                for i in {1..20}; do
+                    [ -S "$SOCKET" ] && break
+                    sleep 0.2
+                done
+                MPV_RUNNING=true
+                start_idle_monitor
+            fi
+        fi
+
         if [ "$MPV_RUNNING" = true ]; then
             if [ ${#PLAYLIST_URLS[@]} -gt 1 ]; then
                 # Fetch count before adding to know where to resume
@@ -153,37 +175,6 @@ execute_batch() {
                 
                 queue_item_ipc "${q_url}" "${q_title}" "${q_artist}" "${q_dur}"
             fi
-        else
-            echo -e "${C_PINK}🚀 Starting MPV...${C_RESET}"
-            for i in "${!PLAYLIST_URLS[@]}"; do
-                url="${PLAYLIST_URLS[$i]}"
-                title="${PLAYLIST_TITLES[$i]}"
-                artist="${PLAYLIST_ARTISTS[$i]}"
-                dur="${PLAYLIST_DURATIONS[$i]}"
-                if [ -n "$title" ] && [ "$title" != "$url" ]; then
-                    clean_url=$(echo "$url" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
-                    printf "%s\t%s\t%s\t%s\n" "$clean_url" "$title" "$artist" "$dur" >> "$CACHE_FILE"
-                    CACHE_MEM["$clean_url"]="${title}"$'\t'"${artist}"$'\t'"${dur}"
-                fi
-            done
-            if command -v termux-wake-lock >/dev/null 2>&1; then termux-wake-lock; fi
-            ( command mpv --idle --no-terminal --input-ipc-server="$SOCKET" "${PLAYLIST_URLS[@]}" </dev/null >/dev/null 2>&1 & )
-            
-            # Update state for subsequent queries in this loop
-            echo -e "${C_GRAY}⏳ Waiting for MPV socket...${C_RESET}"
-            for i in {1..20}; do
-                [ -S "$SOCKET" ] && break
-                sleep 0.2
-            done
-            MPV_RUNNING=true
-            
-            # Start the idle monitor
-            start_idle_monitor
-            
-            # Sync logs with playback start
-            wait_for_playback_start
-            log_now_playing "|> Playing: "
-            save_current_playlist >/dev/null 2>&1 & 
         fi
     fi
     

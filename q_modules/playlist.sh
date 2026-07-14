@@ -205,8 +205,12 @@ cmd_playlist_list() {
         # Play First immediately, append rest
         local first_url=$(echo "$selection" | head -n1 | awk -F'::' '{print $2}')
         if [ "$MPV_RUNNING" = true ]; then
-            local json_cmd=$(jq -nc --arg path "$first_url" '{"command": ["loadfile", $path, "replace"]}')
+            local count=$(echo '{"command": ["get_property", "playlist-count"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
+            local json_cmd=$(jq -nc --arg path "$first_url" '{"command": ["loadfile", $path, "append-play"]}')
             send_ipc "$json_cmd" > /dev/null
+            
+            local play_cmd=$(jq -nc --argjson idx "$count" '{"command": ["playlist-play-index", $idx]}')
+            send_ipc "$play_cmd" > /dev/null
             # Append others
             echo "$selection" | tail -n +2 | awk -F'::' '{print $2}' | while IFS= read -r url; do
                 local json_cmd=$(jq -nc --arg path "$url" '{"command": ["loadfile", $path, "append-play"]}')
