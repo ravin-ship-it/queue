@@ -9,7 +9,7 @@ touch "$HOME/.cache/mpv/yt_cache.txt" 2>/dev/null
 
 # Clean up dead sockets automatically
 if [ -S "$HOME/.mpv-socket" ]; then
-    if ! (echo '{}' | nc -U -w 1 "$HOME/.mpv-socket" >/dev/null 2>&1); then
+    if ! (echo '{}' | nc -N -U -w 1 "$HOME/.mpv-socket" >/dev/null 2>&1); then
         rm -f "$HOME/.mpv-socket"
     fi
 fi
@@ -191,8 +191,8 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
                 
                 # Disable looping to allow Auto Mode to manage discovery at the end of the queue
                 if [ "$MPV_RUNNING" = true ]; then
-                    echo '{ "command": ["set_property", "loop-file", "no"] }' | nc -U -w 1 "$SOCKET" > /dev/null
-                    echo '{ "command": ["set_property", "loop-playlist", "no"] }' | nc -U -w 1 "$SOCKET" > /dev/null
+                    echo '{ "command": ["set_property", "loop-file", "no"] }' | nc -N -U -w 1 "$SOCKET" > /dev/null
+                    echo '{ "command": ["set_property", "loop-playlist", "no"] }' | nc -N -U -w 1 "$SOCKET" > /dev/null
                 fi
 
                 echo -e "${C_PINK}🤖 Auto Mode: ENABLED${C_RESET}"
@@ -323,7 +323,7 @@ if [ -z "$1" ]; then
     [ "$MPV_RUNNING" = true ] && start_idle_monitor
 
     # Get initial status
-    mapfile -t init < <(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","shuffle"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","af"]}' | nc -U -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | .[0].data // 0, .[1].data // false, .[2].data // "no", .[3].data // "no", (if .[4].data == null or .[4].data == [] then "off" else "on" end)')    
+    mapfile -t init < <(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","shuffle"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","af"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | .[0].data // 0, .[1].data // false, .[2].data // "no", .[3].data // "no", (if .[4].data == null or .[4].data == [] then "off" else "on" end)')    
     init_count="${init[0]}"; init_shuf="${init[1]}"; init_loop_f="${init[2]}"; init_loop_p="${init[3]}"; init_af="${init[4]}"
 
     STATUS_ICONS=""
@@ -350,7 +350,7 @@ if [ -z "$1" ]; then
         last_radio_state="init"; last_af="$init_af"
 
         while true; do
-            raw=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","filename"]}\n{"command":["get_property","playlist-count"]}\n{"command":["get_property","shuffle"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","playlist-pos-1"]}\n{"command":["get_property","af"]}' | nc -U -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r '
+            raw=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","filename"]}\n{"command":["get_property","playlist-count"]}\n{"command":["get_property","shuffle"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","playlist-pos-1"]}\n{"command":["get_property","af"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r '
                 map(select(.event == null)) |
                 (if .[0].data == null then true else .[0].data end), "\t",
                 ((.[1].data // .[2].data) // "😴💤" | gsub("\n"; " ")), "\t",
@@ -435,7 +435,7 @@ if [ -z "$1" ]; then
     # Re-validate if MPV is actually running before processing selection
     # (Socket might have started while we were in FZF)
     if [ "$MPV_RUNNING" = false ]; then
-        if [ -S "$SOCKET" ] && { fuser -s "$SOCKET" 2>/dev/null || pgrep -x mpv >/dev/null; }; then
+        if [ -S "$SOCKET" ] && echo '{ "command": ["get_property", "idle-active"] }' | nc -N -U -w 1 "$SOCKET" &>/dev/null; then
             MPV_RUNNING=true
         fi
     fi
@@ -443,7 +443,7 @@ if [ -z "$1" ]; then
     if [ -n "$selection" ]; then
         count=$(echo "$selection" | wc -l)
         # Pre-fetch track info for any actions below
-        track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc -U -w 1 "$SOCKET")
+        track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc -N -U -w 1 "$SOCKET")
         
         if [ "$count" -gt 1 ] || [ -f "$SELECTION_MODE_FILE" ]; then
              action=$(echo -e "  |>  Play Selected\n  ✖  Remove from Queue\n  ✚  Save to Playlist" | \
@@ -518,7 +518,7 @@ if [ -z "$1" ]; then
 
              # 3. Remove from Queue
              if echo "$action" | grep -q "Remove"; then
-                 track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc -U -w 1 "$SOCKET")
+                 track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc -N -U -w 1 "$SOCKET")
                  current_idx=$(echo "$track_info" | jq -r '.data | to_entries[] | select(.value.current) | .key + 1' 2>/dev/null)
                  
                  was_playing=false
@@ -539,14 +539,14 @@ if [ -z "$1" ]; then
                          removed_playing_title="$mpv_title"
                      fi
 
-                     echo "{ \"command\": [\"playlist-remove\", $((idx - 1))] }" | nc -U -w 1 "$SOCKET" > /dev/null
+                     echo "{ \"command\": [\"playlist-remove\", $((idx - 1))] }" | nc -N -U -w 1 "$SOCKET" > /dev/null
                  done < <(echo "$selection" | sort -nr)
                  
                  echo -e "${C_PINK}✖  Removed ${C_ORANGE}$count${C_PINK} tracks.${C_RESET}"
                  save_current_playlist true >/dev/null 2>&1 & disown
                  
                  if [ "$was_playing" = true ]; then
-                     is_paused=$(echo '{ "command": ["get_property", "pause"] }' | nc -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // "false"')
+                     is_paused=$(echo '{ "command": ["get_property", "pause"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // "false"')
                      wait_for_playback_start
                      if [ "$is_paused" == "true" ]; then
                          log_now_playing "|| Paused: "

@@ -95,7 +95,7 @@ cmd_playlist_load() {
             echo -e "${C_PINK}📂 Staged ${C_ORANGE}${count}${C_PINK} tracks from ${C_CYAN}${name}${C_PINK} to session.${C_RESET}"
         else
             if [[ "$load_mode" == *"Replace"* ]]; then
-                echo '{"command": ["playlist-clear"]}' | nc -U -w 1 "$SOCKET" > /dev/null
+                echo '{"command": ["playlist-clear"]}' | nc -N -U -w 1 "$SOCKET" > /dev/null
                 load_mode="Append" # Switch to append for remaining files in loop
             fi
 
