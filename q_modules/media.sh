@@ -135,7 +135,8 @@ fetch_and_display_url_info() {
         
         if [ "$is_current" == "true" ]; then
             local mpv_props=$(echo -e '{"command":["get_property","file-format"]}\n{"command":["get_property","audio-codec-name"]}\n{"command":["get_property","audio-bitrate"]}\n{"command":["get_property","audio-params/samplerate"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | (.[0].data // "N/A"), (.[1].data // "N/A"), (.[2].data // "N/A"), (.[3].data // "N/A")')
-            IFS=$'\n' read -r fmt codec bitrate rate <<< "$mpv_props"
+            mapfile -t props <<< "$mpv_props"
+            local fmt="${props[0]}" codec="${props[1]}" bitrate="${props[2]}" rate="${props[3]}"
             
             if [ "$bitrate" != "N/A" ] && [[ "$bitrate" =~ ^[0-9]+$ ]]; then
                 bitrate="$((bitrate / 1000)) kbps"
