@@ -865,9 +865,10 @@ cmd_play() {
             log_now_playing "|> Restored & Playing: "
         else
             # Check if idle (Queue finished)
-            local is_idle=$(echo '{ "command": ["get_property", "idle-active"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // "false"')
+            local raw_state=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","eof-reached"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | (.[0].data // false), (.[1].data // false)')
+            IFS=$'\n' read -r is_idle is_eof <<< "$raw_state"
             
-            if [ "$is_idle" == "true" ]; then
+            if [ "$is_idle" == "true" ] || [ "$is_eof" == "true" ]; then
                 # Restart from first track if idle
                 echo '{ "command": ["set_property", "playlist-pos", 0] }' | nc -N -U -w 1 "$SOCKET" > /dev/null
                 echo '{ "command": ["set_property", "pause", false] }' | nc -N -U -w 1 "$SOCKET" > /dev/null
