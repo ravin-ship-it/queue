@@ -1,6 +1,7 @@
 fetch_and_display_url_info() {
     local input="$1"
     local force_title="$2" # Optional override title (e.g. from playlist)
+    local is_current="$3"
     
     echo -e "${C_PINK}🎵 Fetching Remote Metadata...${C_RESET}"
     
@@ -131,6 +132,23 @@ fetch_and_display_url_info() {
         print_boxed_line "${C_TEAL}Likes:    ${C_WHITE}${likes}${C_RESET}"
         print_boxed_line "${C_TEAL}Uploaded: ${C_WHITE}${date}${C_RESET}"
         print_boxed_line "${C_TEAL}Queue:    ${queue_display}"
+        
+        if [ "$is_current" == "true" ]; then
+            local mpv_props=$(echo -e '{"command":["get_property","file-format"]}\n{"command":["get_property","audio-codec-name"]}\n{"command":["get_property","audio-bitrate"]}\n{"command":["get_property","audio-params/samplerate"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | (.[0].data // "N/A"), (.[1].data // "N/A"), (.[2].data // "N/A"), (.[3].data // "N/A")')
+            IFS=$'\n' read -r fmt codec bitrate rate <<< "$mpv_props"
+            
+            if [ "$bitrate" != "N/A" ] && [[ "$bitrate" =~ ^[0-9]+$ ]]; then
+                bitrate="$((bitrate / 1000)) kbps"
+            fi
+            
+            echo -e "${C_PURPLE}├${H_LINE:2}┤${C_RESET}"
+            print_boxed_line "${C_PINK}🎵 Current Playback Quality${C_RESET}"
+            print_boxed_line "" true
+            print_boxed_line "  ${C_TEAL}Format:  ${C_WHITE}$fmt${C_RESET}" true
+            print_boxed_line "  ${C_TEAL}Codec:   ${C_WHITE}$codec${C_RESET}" true
+            print_boxed_line "  ${C_TEAL}Bitrate: ${C_WHITE}$bitrate${C_RESET}" true
+            print_boxed_line "  ${C_TEAL}Rate:    ${C_WHITE}${rate} Hz${C_RESET}" true
+        fi
         
         # --- SMART SECTION DISPLAY ---
         
@@ -477,7 +495,7 @@ cmd_info() {
 
     # *** SMART UPGRADE: If filename is a URL, use remote fetcher! ***
     if [[ "$filename" =~ ^http.* ]]; then
-        fetch_and_display_url_info "$filename" "$title"
+        fetch_and_display_url_info "$filename" "$title" "$is_current_target"
         return
     fi
 
