@@ -263,6 +263,10 @@ cmd_remove() {
             echo -e "${C_PINK}✖  Removed ${formatted_track}"
         done
         
+        # Let mpv settle after removal before querying state
+        # Without this delay, socket queries race with mpv's track transition
+        sleep 0.5
+        
         # Check playback status if we affected the playing track
         if [ "$was_playing_removed" = true ]; then
             local is_paused=$(echo '{ "command": ["get_property", "pause"] }' | nc -N -U -w 1 "$HOME/.mpv-socket" 2>/dev/null | jq -r '.data // "false"')
@@ -286,7 +290,8 @@ cmd_remove() {
         # Pass removed playing track meta to maintain discovery vibe
         ( auto_queue_related "$removed_playing_title" "$removed_playing_filename" ) >/dev/null 2>&1 & disown
         
-        save_current_playlist true >/dev/null 2>&1 & disown
+        # Delay save to avoid racing with mpv during track transition
+        ( sleep 2; save_current_playlist true ) >/dev/null 2>&1 & disown
     fi
 }
 cmd_move() {

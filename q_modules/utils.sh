@@ -92,6 +92,14 @@ save_current_playlist() {
     if [ -n "$raw" ] && [ "$raw" != "null" ]; then
         local playlist_items=$(echo "$raw" | jq -r '.[0].data[].filename // empty' 2>/dev/null)
         if [ -n "$playlist_items" ]; then
+            # Safety: Don't overwrite a large saved playlist with a tiny one
+            # This prevents race-condition wipes when socket returns stale data during track transitions
+            local new_count=$(echo "$playlist_items" | wc -l)
+            local old_count=0
+            [ -s "$LAST_PLAYLIST_FILE" ] && old_count=$(wc -l < "$LAST_PLAYLIST_FILE")
+            if [ "$new_count" -le 1 ] && [ "$old_count" -gt 10 ]; then
+                return
+            fi
             echo "$playlist_items" > "${LAST_PLAYLIST_FILE}.tmp"
             mv "${LAST_PLAYLIST_FILE}.tmp" "$LAST_PLAYLIST_FILE"
             # Save other properties to a separate state file
