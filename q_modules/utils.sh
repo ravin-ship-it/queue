@@ -87,24 +87,32 @@ save_current_playlist() {
         if [ $((now - last_save)) -lt 30 ]; then return; fi
     fi
 
+    # Small delay when forced to allow MPV state to settle after IPC edits
+    [ "$force" == "true" ] && sleep 0.2
+
     local raw=$(echo -e '{"command":["get_property","playlist"]}\n{"command":["get_property","shuffle"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","playlist-pos"]}' | nc -N -U -w 2 "$SOCKET" 2>/dev/null | jq -s -c -r 'map(select(.event == null))')
     
     if [ -n "$raw" ] && [ "$raw" != "null" ]; then
-        local playlist_items=$(echo "$raw" | jq -r '.[0].data[].filename // empty' 2>/dev/null)
-        if [ -n "$playlist_items" ]; then
-            # Safety: Don't overwrite a large saved playlist with a tiny one
-            # This prevents race-condition wipes when socket returns stale data during track transitions
-            local new_count=$(echo "$playlist_items" | wc -l)
-            local old_count=0
-            [ -s "$LAST_PLAYLIST_FILE" ] && old_count=$(wc -l < "$LAST_PLAYLIST_FILE")
-            if [ "$new_count" -le 1 ] && [ "$old_count" -gt 10 ]; then
-                return
+        # Dynamically locate the response element containing the playlist array
+        local playlist_items=$(echo "$raw" | jq -r '.[] | select(.data != null and (.data | type == "array")) | .data[].filename // empty' 2>/dev/null)
+        local playlist_found=$(echo "$raw" | jq -r '.[] | select(.data != null and (.data | type == "array")) | "true"' 2>/dev/null | head -n 1)
+
+        if [ "$playlist_found" == "true" ]; then
+            local new_count=0
+            if [ -n "$playlist_items" ]; then
+                new_count=$(echo "$playlist_items" | grep -cve '^\s*$')
             fi
-            echo "$playlist_items" > "${LAST_PLAYLIST_FILE}.tmp"
-            mv "${LAST_PLAYLIST_FILE}.tmp" "$LAST_PLAYLIST_FILE"
-            # Save other properties to a separate state file
-            echo "$raw" | jq -c '.[1:] | {shuffle: .[0].data, loop_file: .[1].data, loop_playlist: .[2].data, pos: .[3].data}' > "$HOME/.cache/mpv/state.json.tmp"
-            mv "$HOME/.cache/mpv/state.json.tmp" "$HOME/.cache/mpv/state.json"
+            
+            if [ "$new_count" -gt 0 ]; then
+                echo "$playlist_items" > "${LAST_PLAYLIST_FILE}.tmp" && mv "${LAST_PLAYLIST_FILE}.tmp" "$LAST_PLAYLIST_FILE"
+            elif [ "$new_count" -eq 0 ]; then
+                # Queue is genuinely empty
+                > "$LAST_PLAYLIST_FILE"
+            fi
+
+            # Save state properties to state.json
+            echo "$raw" | jq -c 'map(select(.data != null and (.data | type != "array"))) | {shuffle: .[0].data, loop_file: .[1].data, loop_playlist: .[2].data, pos: .[3].data}' 2>/dev/null > "$HOME/.cache/mpv/state.json.tmp"
+            [ -s "$HOME/.cache/mpv/state.json.tmp" ] && mv "$HOME/.cache/mpv/state.json.tmp" "$HOME/.cache/mpv/state.json"
         fi
     fi
 }
@@ -272,13 +280,13 @@ fetch_missing_background() {
     load_cache_to_memory
 
     # Get current playlist from MPV
-    local playlist_json=$(echo '{ "command": ["get_property", "playlist"] }' | nc -N -U -w 1 "$SOCKET")
+    local playlist_json=$(echo '{ "command": ["get_property", "playlist"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null)
     
     # Extract HTTP URLs that are NOT in cache or have old format
     local parallel_limit=5
     local current_jobs=0
 
-    echo "$playlist_json" | jq -r '.data[].filename' | grep '^http' | while IFS= read -r raw_url; do
+    echo "$playlist_json" | jq -s -r 'map(select(.event == null)) | .[0].data | select(type == "array") | .[].filename' 2>/dev/null | grep '^http' | while IFS= read -r raw_url; do
         [ -z "$raw_url" ] && continue
         
         # Clean URL

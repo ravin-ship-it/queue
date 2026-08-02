@@ -14,14 +14,6 @@ if [ -S "$HOME/.mpv-socket" ]; then
     fi
 fi
 
-# Validate Modules
-MODULE_DIR="$HOME/.local/bin/mpv/q_modules"
-if [ ! -d "$MODULE_DIR" ]; then
-    echo -e "\033[0;31m❌ FATAL: Core modules are missing! (Did you accidentally delete q_modules?)\033[0m"
-    echo -e "\033[0;36m👉 Fix: Please re-run 'install.sh' from your q-production folder.\033[0m"
-    exit 1
-fi
-
 # Validate Dependencies
 for dep in mpv yt-dlp fzf jq; do
     if ! command -v "$dep" >/dev/null 2>&1; then
@@ -37,7 +29,17 @@ if ! command -v nc >/dev/null 2>&1; then
 fi
 
 # --- MODULES ---
-MODULE_DIR="$HOME/.local/bin/mpv/q_modules"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -d "$SCRIPT_DIR/q_modules" ]; then
+    MODULE_DIR="$SCRIPT_DIR/q_modules"
+else
+    MODULE_DIR="$HOME/.local/bin/mpv/q_modules"
+fi
+if [ ! -d "$MODULE_DIR" ]; then
+    echo -e "\033[0;31m❌ FATAL: Core modules are missing! (Did you accidentally delete q_modules?)\033[0m"
+    echo -e "\033[0;36m👉 Fix: Please re-run 'install.sh' from your q-production folder.\033[0m"
+    exit 1
+fi
 source "$MODULE_DIR/ui.sh"
 source "$MODULE_DIR/utils.sh"
 source "$MODULE_DIR/playlist.sh"
@@ -443,7 +445,7 @@ if [ -z "$1" ]; then
     if [ -n "$selection" ]; then
         count=$(echo "$selection" | wc -l)
         # Pre-fetch track info for any actions below
-        track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc -N -U -w 1 "$SOCKET")
+        track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null)
         
         if [ "$count" -gt 1 ] || [ -f "$SELECTION_MODE_FILE" ]; then
              action=$(echo -e "  |>  Play Selected\n  ✖  Remove from Queue\n  ✚  Save to Playlist" | \
@@ -518,8 +520,8 @@ if [ -z "$1" ]; then
 
              # 3. Remove from Queue
              if echo "$action" | grep -q "Remove"; then
-                 track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc -N -U -w 1 "$SOCKET")
-                 current_idx=$(echo "$track_info" | jq -r '.data | to_entries[] | select(.value.current) | .key + 1' 2>/dev/null)
+                 track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null)
+                 current_idx=$(echo "$track_info" | jq -s -r 'map(select(.event == null)) | .[0].data | to_entries[] | select(.value.current) | .key + 1' 2>/dev/null)
                  
                  was_playing=false
                  removed_playing_filename=""
@@ -543,7 +545,7 @@ if [ -z "$1" ]; then
                  done < <(echo "$selection" | sort -nr)
                  
                  echo -e "${C_PINK}✖  Removed ${C_ORANGE}$count${C_PINK} tracks.${C_RESET}"
-                 save_current_playlist true >/dev/null 2>&1 & disown
+                 ( sleep 0.3; save_current_playlist true ) >/dev/null 2>&1 & disown
                  
                  if [ "$was_playing" = true ]; then
                      is_paused=$(echo '{ "command": ["get_property", "pause"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // "false"')

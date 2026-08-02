@@ -14,8 +14,8 @@ fetch_and_display_url_info() {
     # Clean URL: strip everything after space or tab to remove title
     local clean_url="${input%%\\t*}"
     clean_url="${clean_url%%[[:space:]]*}"
-    # Remove tracking params
-    clean_url=$(echo "$clean_url" | sed 's/[?&]si=.*//; s/[?&]t=.*//')
+    # Remove tracking params safely without destroying video ID
+    clean_url=$(echo "$clean_url" | sed -E 's/([?&])(si|t|pp|feature)=[^&]*&?/\1/g; s/[?&]$//; s/\?&/?/')
 
     local search_term="$video_id"
     [ -z "$search_term" ] && search_term="$clean_url"
@@ -23,16 +23,57 @@ fetch_and_display_url_info() {
     # Queue Check
     local queue_status="Not in queue"
     local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null)
-    local queue_idx=$(echo "$track_info" | jq -r --arg term "$search_term" \
-        'select(.data != null) | .data | to_entries | .[] | 
+    local queue_idx=$(echo "$track_info" | jq -s -r --arg term "$search_term" \
+        'map(select(.event == null)) | .[0].data | select(type == "array") | to_entries | .[] | 
         select((.value.filename | contains($term))) | 
         .key + 1
-    ' | head -n 1)
+    ' 2>/dev/null | head -n 1)
     [ -n "$queue_idx" ] && [ "$queue_idx" != "null" ] && queue_status="Queued at #$queue_idx"
     
     # Fetch Metadata (Robustly)
-    local json_dump=$(yt-dlp --dump-json --no-warnings --skip-download --ignore-errors --flat-playlist -- "$clean_url" 2>/dev/null)
-    [ -z "$json_dump" ] && { echo -e "${C_PINK}🙈 Failed to fetch info... the internet might be playing hide and seek!${C_RESET}"; return; }
+    local opts=("--dump-json" "--no-warnings" "--skip-download" "--ignore-errors" "--flat-playlist")
+    [ -n "$COOKIES_FILE" ] && [ -f "$COOKIES_FILE" ] && opts+=("--cookies" "$COOKIES_FILE")
+    local json_dump=$(yt-dlp "${opts[@]}" -- "$clean_url" 2>/dev/null)
+    if [ -z "$json_dump" ]; then
+        if [ -n "$force_title" ] || [ "$is_current" == "true" ]; then
+            local display_t="${force_title:-$clean_url}"
+            local queue_display="${C_ORANGE}${queue_status}${C_RESET}"
+            if [[ "$queue_status" == *"Queued at"* ]]; then
+                local idx=$(echo "$queue_status" | grep -oP '\d+')
+                queue_display="${C_TEAL}Queued at ${C_WHITE}[${C_ORANGE}${idx}${C_WHITE}]${C_RESET}"
+            fi
+
+            print_header_box "${C_PINK}🪷 Track Metadata${C_RESET}"
+            print_boxed_line "${C_TEAL}Title:    ${C_CYAN}${display_t:0:$((INNER_WIDTH-12))}${C_RESET}"
+            print_boxed_line "${C_TEAL}Source:   ${C_VIOLET}${clean_url:0:$((INNER_WIDTH-12))}${C_RESET}"
+            print_boxed_line "${C_TEAL}Queue:    ${queue_display}"
+            print_boxed_line "${C_GRAY}(Remote details restricted by YouTube bot protection)${C_RESET}"
+            
+            if [ "$is_current" == "true" ]; then
+                local mpv_extended=$(echo -e '{"command":["get_property","file-format"]}\n{"command":["get_property","audio-codec"]}\n{"command":["get_property","audio-params/samplerate"]}\n{"command":["get_property","duration"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | (.[0].data // "N/A"), (.[1].data // "N/A"), (.[2].data // "N/A"), (.[3].data // "N/A")')
+                mapfile -t ext_props <<< "$mpv_extended"
+                local fmt="${ext_props[0]}" codec="${ext_props[1]}" rate="${ext_props[2]}" dur="${ext_props[3]}"
+                
+                if [ "$dur" != "N/A" ] && [[ "$dur" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+                    dur=$(printf "%d:%02d" "$((${dur%.*} / 60))" "$((${dur%.*} % 60))")
+                fi
+
+                echo -e "${C_PURPLE}├${H_LINE:2}┤${C_RESET}"
+                print_boxed_line "${C_PINK}🎵 Current Playback Quality${C_RESET}"
+                print_boxed_line "  ${C_TEAL}Format:  ${C_WHITE}$fmt${C_RESET}" true
+                print_boxed_line "  ${C_TEAL}Codec:   ${C_WHITE}$codec${C_RESET}" true
+                print_boxed_line "  ${C_TEAL}Rate:    ${C_WHITE}${rate} Hz${C_RESET}" true
+                print_boxed_line "  ${C_TEAL}Duration: ${C_WHITE}$dur${C_RESET}" true
+            fi
+            printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
+            B_LINE=${B_LINE// /─}
+            echo -e "${C_GRAY}${B_LINE}${C_RESET}"
+            return
+        else
+            echo -e "${C_PINK}🙈 Failed to fetch info... the internet might be playing hide and seek!${C_RESET}"
+            return
+        fi
+    fi
     
     # Check if we have multiple lines (Playlist) or single line
     local line_count=$(echo "$json_dump" | wc -l)
@@ -401,10 +442,10 @@ log_now_playing() {
         if [ "$count" -gt 0 ]; then
             # If there are tracks, try to find the one marked 'current'
             local pl_json=$(echo '{"command":["get_property","playlist"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null)
-            local fallback_idx=$(echo "$pl_json" | jq -r 'map(select(.event == null)) | .[0].data | to_entries[] | select(.value.current) | .key + 1' 2>/dev/null)
+            local fallback_idx=$(echo "$pl_json" | jq -s -r 'map(select(.event == null)) | .[0].data | to_entries[] | select(.value.current) | .key + 1' 2>/dev/null)
             if [ -n "$fallback_idx" ] && [ "$fallback_idx" != "null" ]; then
                 curr_idx="$fallback_idx"
-                local item=$(echo "$pl_json" | jq -r 'map(select(.event == null)) | .[0].data['$((curr_idx - 1))']')
+                local item=$(echo "$pl_json" | jq -s -r 'map(select(.event == null)) | .[0].data['$((curr_idx - 1))']')
                 filename=$(echo "$item" | jq -r '.filename // ""')
                 title=$(echo "$item" | jq -r '.title // ""')
             elif [ "$idle" == "true" ]; then
@@ -464,19 +505,19 @@ cmd_info() {
     local header_title="Track Info"
     
     if [ -z "$index" ]; then
-        index=$(echo '{ "command": ["get_property", "playlist-pos-1"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // empty')
+        index=$(echo '{ "command": ["get_property", "playlist-pos-1"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // empty' | head -n 1)
         [ -z "$index" ] && { echo -e "${C_PINK}🔇 Nothing is currently playing in your queue list${C_RESET}"; return; }
         header_title="Current Track"
         is_current_target=true
     else
         header_title="Track Info [${index}]"
-        local curr=$(echo '{ "command": ["get_property", "playlist-pos-1"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // "-1"')
+        local curr=$(echo '{ "command": ["get_property", "playlist-pos-1"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // "-1"' | head -n 1)
         if [ "$index" == "$curr" ]; then is_current_target=true; fi
     fi
 
-    local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc -N -U -w 1 "$SOCKET")
-    local count=$(echo "$track_info" | jq -r 'select(.data != null and (.data|type == "array")) | .data | length // 0')
-    local item_json=$(echo "$track_info" | jq -r "select(.data != null and (.data|type == \"array\")) | .data[$((index - 1))]" )
+    local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null)
+    local count=$(echo "$track_info" | jq -s -r 'map(select(.event == null)) | .[0].data | select(type == "array") | length // 0')
+    local item_json=$(echo "$track_info" | jq -s -c -r "map(select(.event == null)) | .[0].data | select(type == \"array\") | .[$((index - 1))] // empty" 2>/dev/null)
     
     if [ -z "$item_json" ] || [ "$item_json" == "null" ]; then
         echo -e "${C_PINK}🚫 Track ${C_WHITE}[${C_ORANGE}${index}${C_WHITE}] ${C_PINK}does not exist. Max Track ${C_WHITE}[${C_ORANGE}${count}${C_WHITE}]${C_RESET}"
@@ -513,12 +554,11 @@ cmd_info() {
 
     # Extended Info (Only available if track is currently playing AND local)
     if [ "$is_current_target" == "true" ]; then
-        local fmt=$(echo '{ "command": ["get_property", "file-format"] }' | nc -N -U -w 1 "$SOCKET" | jq -r '.data // "N/A"')
-        local codec=$(echo '{ "command": ["get_property", "audio-codec"] }' | nc -N -U -w 1 "$SOCKET" | jq -r '.data // "N/A"')
-        local rate=$(echo '{ "command": ["get_property", "audio-params/samplerate"] }' | nc -N -U -w 1 "$SOCKET" | jq -r '.data // "N/A"')
-        local dur=$(echo '{ "command": ["get_property", "duration"] }' | nc -N -U -w 1 "$SOCKET" | jq -r '.data // "N/A"')
+        local mpv_extended=$(echo -e '{"command":["get_property","file-format"]}\n{"command":["get_property","audio-codec"]}\n{"command":["get_property","audio-params/samplerate"]}\n{"command":["get_property","duration"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | (.[0].data // "N/A"), (.[1].data // "N/A"), (.[2].data // "N/A"), (.[3].data // "N/A")')
+        mapfile -t ext_props <<< "$mpv_extended"
+        local fmt="${ext_props[0]}" codec="${ext_props[1]}" rate="${ext_props[2]}" dur="${ext_props[3]}"
         
-        if [ "$dur" != "N/A" ]; then
+        if [ "$dur" != "N/A" ] && [[ "$dur" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
             dur=$(printf "%d:%02d" "$((${dur%.*} / 60))" "$((${dur%.*} % 60))")
         fi
 
