@@ -35,7 +35,7 @@ check_dependencies() {
     command -v yt-dlp >/dev/null || missing+=("yt-dlp")
     command -v fzf >/dev/null || missing+=("fzf")
     command -v jq >/dev/null || missing+=("jq")
-    command -v nc >/dev/null || missing+=("netcat (openbsd)")
+    command -v nc >/dev/null || command -v ncat >/dev/null || command -v socat >/dev/null || missing+=("netcat/ncat/socat")
     
     if [ ${#missing[@]} -gt 0 ]; then
         echo -e "${C_PINK}❌ Missing Dependencies:${C_RESET} ${missing[*]}"

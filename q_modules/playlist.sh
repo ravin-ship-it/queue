@@ -95,7 +95,7 @@ cmd_playlist_load() {
             echo -e "${C_PINK}📂 Staged ${C_ORANGE}${count}${C_PINK} tracks from ${C_CYAN}${name}${C_PINK} to session.${C_RESET}"
         else
             if [[ "$load_mode" == *"Replace"* ]]; then
-                echo '{"command": ["playlist-clear"]}' | nc -N -U -w 1 "$SOCKET" > /dev/null
+                echo '{"command": ["playlist-clear"]}' | mpv_nc 1 > /dev/null
                 load_mode="Append" # Switch to append for remaining files in loop
             fi
 
@@ -205,7 +205,7 @@ cmd_playlist_list() {
         # Play First immediately, append rest
         local first_url=$(echo "$selection" | head -n1 | awk -F'::' '{print $2}')
         if [ "$MPV_RUNNING" = true ]; then
-            local count=$(echo '{"command": ["get_property", "playlist-count"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
+            local count=$(echo '{"command": ["get_property", "playlist-count"]}' | mpv_nc 1 2>/dev/null | jq -r '.data // 0')
             local json_cmd=$(jq -nc --arg path "$first_url" '{"command": ["loadfile", $path, "append-play"]}')
             send_ipc "$json_cmd" > /dev/null
             

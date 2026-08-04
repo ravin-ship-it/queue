@@ -22,7 +22,7 @@ fetch_and_display_url_info() {
 
     # Queue Check
     local queue_status="Not in queue"
-    local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null)
+    local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | mpv_nc 1 2>/dev/null)
     local queue_idx=$(echo "$track_info" | jq -s -r --arg term "$search_term" \
         'map(select(.event == null)) | .[0].data | select(type == "array") | to_entries | .[] | 
         select((.value.filename | contains($term))) | 
@@ -50,7 +50,7 @@ fetch_and_display_url_info() {
             print_boxed_line "${C_GRAY}(Remote details restricted by YouTube bot protection)${C_RESET}"
             
             if [ "$is_current" == "true" ]; then
-                local mpv_extended=$(echo -e '{"command":["get_property","file-format"]}\n{"command":["get_property","audio-codec"]}\n{"command":["get_property","audio-params/samplerate"]}\n{"command":["get_property","duration"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | (.[0].data // "N/A"), (.[1].data // "N/A"), (.[2].data // "N/A"), (.[3].data // "N/A")')
+                local mpv_extended=$(echo -e '{"command":["get_property","file-format"]}\n{"command":["get_property","audio-codec"]}\n{"command":["get_property","audio-params/samplerate"]}\n{"command":["get_property","duration"]}' | mpv_nc 1 2>/dev/null | jq -s -r 'map(select(.event == null)) | (.[0].data // "N/A"), (.[1].data // "N/A"), (.[2].data // "N/A"), (.[3].data // "N/A")')
                 mapfile -t ext_props <<< "$mpv_extended"
                 local fmt="${ext_props[0]}" codec="${ext_props[1]}" rate="${ext_props[2]}" dur="${ext_props[3]}"
                 
@@ -175,7 +175,7 @@ fetch_and_display_url_info() {
         print_boxed_line "${C_TEAL}Queue:    ${queue_display}"
         
         if [ "$is_current" == "true" ]; then
-            local mpv_props=$(echo -e '{"command":["get_property","file-format"]}\n{"command":["get_property","audio-codec-name"]}\n{"command":["get_property","audio-bitrate"]}\n{"command":["get_property","audio-params/samplerate"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | (.[0].data // "N/A"), (.[1].data // "N/A"), (.[2].data // "N/A"), (.[3].data // "N/A")')
+            local mpv_props=$(echo -e '{"command":["get_property","file-format"]}\n{"command":["get_property","audio-codec-name"]}\n{"command":["get_property","audio-bitrate"]}\n{"command":["get_property","audio-params/samplerate"]}' | mpv_nc 1 2>/dev/null | jq -s -r 'map(select(.event == null)) | (.[0].data // "N/A"), (.[1].data // "N/A"), (.[2].data // "N/A"), (.[3].data // "N/A")')
             mapfile -t props <<< "$mpv_props"
             local fmt="${props[0]}" codec="${props[1]}" bitrate="${props[2]}" rate="${props[3]}"
             
@@ -275,7 +275,7 @@ wait_for_playback_start() {
     # Wait for playback start (Buffering)
     echo -ne "${C_GRAY}⏳ Buffering...${C_RESET}\r"
     for w in {1..150}; do
-        local raw=$(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","time-pos"]}\n{"command":["get_property","playlist-pos"]}' | nc -N -U -w 0.5 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | .[0].data // 0, .[1].data // "false", .[2].data // "", .[3].data // -1')
+        local raw=$(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","time-pos"]}\n{"command":["get_property","playlist-pos"]}' | mpv_nc 1 2>/dev/null | jq -s -r 'map(select(.event == null)) | .[0].data // 0, .[1].data // "false", .[2].data // "", .[3].data // -1')
         mapfile -t status <<< "$raw"
         local count="${status[0]}"; local idle="${status[1]}"; local tpos="${status[2]}"; local pos="${status[3]}"
         
@@ -388,7 +388,7 @@ log_now_playing() {
     local paused="false"
     local artist_tag=""
     for i in {1..30}; do
-        local raw=$(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","playlist-pos"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","playlist"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","pause"]}\n{"command":["get_property","metadata"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r '
+        local raw=$(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","playlist-pos"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","playlist"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","pause"]}\n{"command":["get_property","metadata"]}' | mpv_nc 1 2>/dev/null | jq -s -j -r '
             map(select(.event == null)) |
             (.[0].data // 0), "\t",
             (.[1].data // -1), "\t",
@@ -441,7 +441,7 @@ log_now_playing() {
     if [ -z "$curr_idx" ]; then
         if [ "$count" -gt 0 ]; then
             # If there are tracks, try to find the one marked 'current'
-            local pl_json=$(echo '{"command":["get_property","playlist"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null)
+            local pl_json=$(echo '{"command":["get_property","playlist"]}' | mpv_nc 1 2>/dev/null)
             local fallback_idx=$(echo "$pl_json" | jq -s -r 'map(select(.event == null)) | .[0].data | to_entries[] | select(.value.current) | .key + 1' 2>/dev/null)
             if [ -n "$fallback_idx" ] && [ "$fallback_idx" != "null" ]; then
                 curr_idx="$fallback_idx"
@@ -457,7 +457,7 @@ log_now_playing() {
 
     # Final attempt to get details if we have an index but no meta
     if [ -n "$curr_idx" ] && [ -z "$filename" ]; then
-        local item_json=$(echo "{\"command\":[\"get_property\", \"playlist/$((curr_idx - 1))\"]}" | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // empty')
+        local item_json=$(echo "{\"command\":[\"get_property\", \"playlist/$((curr_idx - 1))\"]}" | mpv_nc 1 2>/dev/null | jq -r '.data // empty')
         filename=$(echo "$item_json" | jq -r '.filename // ""')
         title=$(echo "$item_json" | jq -r '.title // ""')
     fi
@@ -479,7 +479,7 @@ log_now_playing() {
         
         if [ -z "${CACHE_MEM[$clean_url]}" ]; then
              # Simple duration fetch if possible
-             local live_dur=$(echo '{"command":["get_property","duration-string"]}' | nc -N -U -w 0.5 "$SOCKET" 2>/dev/null | jq -r '.data // "0:00"')
+             local live_dur=$(echo '{"command":["get_property","duration-string"]}' | mpv_nc 1 2>/dev/null | jq -r '.data // "0:00"')
              [ "$live_dur" == "null" ] && live_dur="0:00"
              
              # Save to cache file
@@ -505,17 +505,17 @@ cmd_info() {
     local header_title="Track Info"
     
     if [ -z "$index" ]; then
-        index=$(echo '{ "command": ["get_property", "playlist-pos-1"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // empty' | head -n 1)
+        index=$(echo '{ "command": ["get_property", "playlist-pos-1"] }' | mpv_nc 1 2>/dev/null | jq -r 'select(.event == null) | .data // empty' | head -n 1)
         [ -z "$index" ] && { echo -e "${C_PINK}🔇 Nothing is currently playing in your queue list${C_RESET}"; return; }
         header_title="Current Track"
         is_current_target=true
     else
         header_title="Track Info [${index}]"
-        local curr=$(echo '{ "command": ["get_property", "playlist-pos-1"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // "-1"' | head -n 1)
+        local curr=$(echo '{ "command": ["get_property", "playlist-pos-1"] }' | mpv_nc 1 2>/dev/null | jq -r 'select(.event == null) | .data // "-1"' | head -n 1)
         if [ "$index" == "$curr" ]; then is_current_target=true; fi
     fi
 
-    local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null)
+    local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | mpv_nc 1 2>/dev/null)
     local count=$(echo "$track_info" | jq -s -r 'map(select(.event == null)) | .[0].data | select(type == "array") | length // 0')
     local item_json=$(echo "$track_info" | jq -s -c -r "map(select(.event == null)) | .[0].data | select(type == \"array\") | .[$((index - 1))] // empty" 2>/dev/null)
     
@@ -554,7 +554,7 @@ cmd_info() {
 
     # Extended Info (Only available if track is currently playing AND local)
     if [ "$is_current_target" == "true" ]; then
-        local mpv_extended=$(echo -e '{"command":["get_property","file-format"]}\n{"command":["get_property","audio-codec"]}\n{"command":["get_property","audio-params/samplerate"]}\n{"command":["get_property","duration"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | (.[0].data // "N/A"), (.[1].data // "N/A"), (.[2].data // "N/A"), (.[3].data // "N/A")')
+        local mpv_extended=$(echo -e '{"command":["get_property","file-format"]}\n{"command":["get_property","audio-codec"]}\n{"command":["get_property","audio-params/samplerate"]}\n{"command":["get_property","duration"]}' | mpv_nc 1 2>/dev/null | jq -s -r 'map(select(.event == null)) | (.[0].data // "N/A"), (.[1].data // "N/A"), (.[2].data // "N/A"), (.[3].data // "N/A")')
         mapfile -t ext_props <<< "$mpv_extended"
         local fmt="${ext_props[0]}" codec="${ext_props[1]}" rate="${ext_props[2]}" dur="${ext_props[3]}"
         
@@ -575,7 +575,7 @@ cmd_info() {
 
 cmd_next() {
     if [ "$MPV_RUNNING" = false ]; then echo -e "${C_PINK}😴💤 MPV isn't running... it must be taking a nap${C_RESET}"; return; fi
-    echo '{ "command": ["playlist-next"] }' | nc -N -U -w 1 "$SOCKET" > /dev/null
+    echo '{ "command": ["playlist-next"] }' | mpv_nc 1 > /dev/null
 
     # Proactive auto-queue check after moving next
     ( auto_queue_related ) >/dev/null 2>&1 & disown
@@ -586,7 +586,7 @@ cmd_next() {
 
 cmd_prev() {
     if [ "$MPV_RUNNING" = false ]; then echo -e "${C_PINK}😴💤 MPV isn't running... it must be taking a nap${C_RESET}"; return; fi
-    echo '{ "command": ["playlist-prev"] }' | nc -N -U -w 1 "$SOCKET" > /dev/null
+    echo '{ "command": ["playlist-prev"] }' | mpv_nc 1 > /dev/null
 
     # Proactive auto-queue check after moving back (maybe we are now at the end?)
     ( auto_queue_related ) >/dev/null 2>&1 & disown
@@ -600,7 +600,7 @@ cmd_stop() {
     
     # 1. Try polite quit first if socket exists
     if [ -S "$SOCKET" ]; then
-        echo '{ "command": ["quit"] }' | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
+        echo '{ "command": ["quit"] }' | mpv_nc 1 > /dev/null 2>&1
     fi
     
     # 2. Aggressive cleanup of any background mpv instances
@@ -627,10 +627,10 @@ cmd_volume() {
     
     # Set absolute volume if a plain number is provided
     if [[ "$input" =~ ^[0-9]+$ ]]; then
-        echo "{ \"command\": [\"set_property\", \"volume\", ${input}] }" | nc -N -U -w 1 "$SOCKET" > /dev/null
+        echo "{ \"command\": [\"set_property\", \"volume\", ${input}] }" | mpv_nc 1 > /dev/null
     fi
 
-    local vol=$(echo '{ "command": ["get_property", "volume"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // "0"')
+    local vol=$(echo '{ "command": ["get_property", "volume"] }' | mpv_nc 1 2>/dev/null | jq -r '.data // "0"')
     # Truncate decimal
     vol=${vol%.*}
     echo -e "🔊 ${C_PINK}Volume:${C_RESET} ${C_CYAN}${vol}%${C_RESET}"
@@ -643,7 +643,7 @@ cmd_audio_fx() {
     fi
 
     local mode="${1:-toggle}"
-    local af_json=$(echo '{ "command": ["get_property", "af"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -c '.data')
+    local af_json=$(echo '{ "command": ["get_property", "af"] }' | mpv_nc 1 2>/dev/null | jq -c '.data')
     local is_on="false"
 
     if [ -n "$af_json" ] && [ "$af_json" != "null" ]; then
@@ -652,11 +652,11 @@ cmd_audio_fx() {
 
     case "$mode" in
         on)
-            echo '{ "command": ["apply-profile", "dolby-like"] }' | nc -N -U -w 1 "$SOCKET" > /dev/null
+            echo '{ "command": ["apply-profile", "dolby-like"] }' | mpv_nc 1 > /dev/null
             echo -e "🎛️ ${C_PINK}Audio FX:${C_RESET} ${C_GREEN}ON${C_RESET} ${C_GRAY}(dolby-like)${C_RESET}"
             ;;
         off)
-            echo '{ "command": ["apply-profile", "flat-audio"] }' | nc -N -U -w 1 "$SOCKET" > /dev/null
+            echo '{ "command": ["apply-profile", "flat-audio"] }' | mpv_nc 1 > /dev/null
             echo -e "🎛️ ${C_PINK}Audio FX:${C_RESET} ${C_ORANGE}OFF${C_RESET} ${C_GRAY}(flat-audio)${C_RESET}"
             ;;
         status)
@@ -668,10 +668,10 @@ cmd_audio_fx() {
             ;;
         toggle|*)
             if [ "$is_on" = "true" ]; then
-                echo '{ "command": ["apply-profile", "flat-audio"] }' | nc -N -U -w 1 "$SOCKET" > /dev/null
+                echo '{ "command": ["apply-profile", "flat-audio"] }' | mpv_nc 1 > /dev/null
                 echo -e "🎛️ ${C_PINK}Audio FX:${C_RESET} ${C_ORANGE}OFF${C_RESET} ${C_GRAY}(flat-audio)${C_RESET}"
             else
-                echo '{ "command": ["apply-profile", "dolby-like"] }' | nc -N -U -w 1 "$SOCKET" > /dev/null
+                echo '{ "command": ["apply-profile", "dolby-like"] }' | mpv_nc 1 > /dev/null
                 echo -e "🎛️ ${C_PINK}Audio FX:${C_RESET} ${C_GREEN}ON${C_RESET} ${C_GRAY}(dolby-like)${C_RESET}"
             fi
             ;;
@@ -690,17 +690,17 @@ cmd_loop() {
         local emoji="🔂"
     fi
 
-    local current=$(echo "{ \"command\": [\"get_property\", \"$prop\"] }" | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // "no"')
+    local current=$(echo "{ \"command\": [\"get_property\", \"$prop\"] }" | mpv_nc 1 2>/dev/null | jq -r '.data // "no"')
     
     # Fetch data needed for status
-    local track_json=$(echo '{ "command": ["get_property", "playlist"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null)
+    local track_json=$(echo '{ "command": ["get_property", "playlist"] }' | mpv_nc 1 2>/dev/null)
     local count=$(echo "$track_json" | jq -r '.data | length // 0')
     
     if [ "$current" == "inf" ] || [ "$current" == "yes" ]; then
-        echo "{ \"command\": [\"set_property\", \"$prop\", \"no\"] }" | nc -N -U -w 1 "$SOCKET" > /dev/null
+        echo "{ \"command\": [\"set_property\", \"$prop\", \"no\"] }" | mpv_nc 1 > /dev/null
         echo -e "${C_ORANGE}${emoji} ${label}: OFF${C_RESET}"
     else
-        echo "{ \"command\": [\"set_property\", \"$prop\", \"inf\"] }" | nc -N -U -w 1 "$SOCKET" > /dev/null
+        echo "{ \"command\": [\"set_property\", \"$prop\", \"inf\"] }" | mpv_nc 1 > /dev/null
         if [ "$mode" == "single" ]; then
             local current_item=$(echo "$track_json" | jq -c '.data[] | select(.current)')
             local f=$(echo "$current_item" | jq -r '.filename')
@@ -725,7 +725,7 @@ check_auto_trigger() {
     # Do not trigger if single track loop is active (respect user manual override)
     if [ "$loop" == "inf" ] || [ "$loop" == "yes" ]; then
         # Check specifically if it's loop-file
-        local is_lf=$(echo '{ "command": ["get_property", "loop-file"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // "no"')
+        local is_lf=$(echo '{ "command": ["get_property", "loop-file"] }' | mpv_nc 1 2>/dev/null | jq -r '.data // "no"')
         if [ "$is_lf" != "no" ]; then return; fi
     fi
     
@@ -806,7 +806,7 @@ start_idle_monitor() {
             fi
 
             # Batch get essential properties (increased timeout to 2s for stability)
-            local raw=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","playlist-count"]}\n{"command":["get_property","playlist-pos"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","time-remaining"]}\n{"command":["get_property","eof-reached"]}' | nc -N -U -w 2 "$SOCKET" 2>/dev/null | jq -s -j -r '
+            local raw=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","playlist-count"]}\n{"command":["get_property","playlist-pos"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","time-remaining"]}\n{"command":["get_property","eof-reached"]}' | mpv_nc 2 2>/dev/null | jq -s -j -r '
                 map(select(.event == null)) |
                 (if .[0].data == null then "true" else .[0].data end), "\t",
                 (.[1].data // 0), "\t",
@@ -844,10 +844,10 @@ start_idle_monitor() {
                 # Give Auto Mode a moment to trigger before reminding
                 sleep 3
                 # Re-check if still idle
-                local still_idle=$(echo '{"command":["get_property","idle-active"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // "true"')
+                local still_idle=$(echo '{"command":["get_property","idle-active"]}' | mpv_nc 1 2>/dev/null | jq -r '.data // "true"')
                 if [ "$still_idle" == "true" ]; then
                     # Check if Auto Mode actually did something (count increased)
-                    local still_count=$(echo '{"command":["get_property","playlist-count"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
+                    local still_count=$(echo '{"command":["get_property","playlist-count"]}' | mpv_nc 1 2>/dev/null | jq -r '.data // 0')
                     if [ "$still_count" -eq 0 ]; then
                         echo "[$(date +%T)] [Monitor] Auto Mode is active but queue is empty... fetching?" >> "$HOME/.cache/mpv/auto_debug.log"
                     fi
@@ -867,7 +867,7 @@ cmd_play() {
 
     # Re-validate if MPV is actually running before trying to start it
     if [ "$MPV_RUNNING" = false ]; then
-        if [ -S "$SOCKET" ] && echo '{ "command": ["get_property", "idle-active"] }' | nc -N -U -w 1 "$SOCKET" &>/dev/null; then
+        if [ -S "$SOCKET" ] && echo '{ "command": ["get_property", "idle-active"] }' | mpv_nc 1 &>/dev/null; then
             MPV_RUNNING=true
         fi
     fi
@@ -892,7 +892,7 @@ cmd_play() {
         
         # Stabilization: Wait for playlist to populate (max 3s)
         for i in {1..15}; do
-             local cnt=$(echo '{"command":["get_property","playlist-count"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0' 2>/dev/null)
+             local cnt=$(echo '{"command":["get_property","playlist-count"]}' | mpv_nc 1 2>/dev/null | jq -r '.data // 0' 2>/dev/null)
              if [[ "$cnt" =~ ^[0-9]+$ ]] && [ "$cnt" -gt 0 ]; then break; fi
              sleep 0.2
         done
@@ -905,8 +905,8 @@ cmd_play() {
         [[ ! "$start_idx" =~ ^[0-9]+$ ]] && start_idx=0
 
         # Force Playback Start
-        echo "{ \"command\": [\"playlist-play-index\", $start_idx] }" | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
-        echo '{ "command": ["set_property", "pause", false] }' | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
+        echo "{ \"command\": [\"playlist-play-index\", $start_idx] }" | mpv_nc 1 > /dev/null 2>&1
+        echo '{ "command": ["set_property", "pause", false] }' | mpv_nc 1 > /dev/null 2>&1
 
         MPV_RUNNING=true
         just_started=true
@@ -925,31 +925,31 @@ cmd_play() {
     if [ -z "$index" ]; then
         # If we just started, force play. Otherwise, toggle or restart if idle.
         if [ "$just_started" = true ]; then
-            echo '{ "command": ["set_property", "pause", false] }' | nc -N -U -w 1 "$SOCKET" > /dev/null
+            echo '{ "command": ["set_property", "pause", false] }' | mpv_nc 1 > /dev/null
             wait_for_playback_start
             log_now_playing "|> Restored & Playing: "
         else
             # Check if idle (Queue finished)
-            local raw_state=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","eof-reached"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | (.[0].data // false), (.[1].data // false)')
+            local raw_state=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","eof-reached"]}' | mpv_nc 1 2>/dev/null | jq -s -r 'map(select(.event == null)) | (.[0].data // false), (.[1].data // false)')
             IFS=$'\n' read -r is_idle is_eof <<< "$raw_state"
             
             if [ "$is_idle" == "true" ] || [ "$is_eof" == "true" ]; then
                 # Restart from first track if idle
-                echo '{ "command": ["set_property", "playlist-pos", 0] }' | nc -N -U -w 1 "$SOCKET" > /dev/null
-                echo '{ "command": ["set_property", "pause", false] }' | nc -N -U -w 1 "$SOCKET" > /dev/null
+                echo '{ "command": ["set_property", "playlist-pos", 0] }' | mpv_nc 1 > /dev/null
+                echo '{ "command": ["set_property", "pause", false] }' | mpv_nc 1 > /dev/null
                 wait_for_playback_start
                 log_now_playing "|> Playing: "
             else
                 # Toggle pause property directly for atomic sync
-                local current_pause=$(echo '{ "command": ["get_property", "pause"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // "false"')
+                local current_pause=$(echo '{ "command": ["get_property", "pause"] }' | mpv_nc 1 2>/dev/null | jq -r '.data // "false"')
                 
                 if [ "$current_pause" == "true" ]; then
-                    echo '{ "command": ["set_property", "pause", false] }' | nc -N -U -w 1 "$SOCKET" > /dev/null
+                    echo '{ "command": ["set_property", "pause", false] }' | mpv_nc 1 > /dev/null
                     # Brief wait for state propagation
                     sleep 0.1
                     log_now_playing ""
                 else
-                    echo '{ "command": ["set_property", "pause", true] }' | nc -N -U -w 1 "$SOCKET" > /dev/null
+                    echo '{ "command": ["set_property", "pause", true] }' | mpv_nc 1 > /dev/null
                     # Brief wait for state propagation
                     sleep 0.1
                     log_now_playing ""
@@ -971,7 +971,7 @@ cmd_play() {
     fi
 
     # Validate Index
-    local count=$(echo '{"command":["get_property","playlist-count"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0' 2>/dev/null)
+    local count=$(echo '{"command":["get_property","playlist-count"]}' | mpv_nc 1 2>/dev/null | jq -r '.data // 0' 2>/dev/null)
     if [[ ! "$count" =~ ^[0-9]+$ ]] || [ "$index" -lt 1 ] || [ "$index" -gt "$count" ]; then
         [[ ! "$count" =~ ^[0-9]+$ ]] && count="0"
         # Use local ESC-safe colors for the log
@@ -984,9 +984,9 @@ cmd_play() {
 
 
     # Set pos AND force unpause (Separate commands for maximum compatibility)
-    echo "{\"command\":[\"set_property\",\"playlist-pos\",$((index - 1))]}" | nc -N -U -w 1 "$SOCKET" > /dev/null
-    echo "{\"command\":[\"seek\",0,\"absolute\"]}" | nc -N -U -w 1 "$SOCKET" > /dev/null
-    echo "{\"command\":[\"set_property\",\"pause\",false]}" | nc -N -U -w 1 "$SOCKET" > /dev/null
+    echo "{\"command\":[\"set_property\",\"playlist-pos\",$((index - 1))]}" | mpv_nc 1 > /dev/null
+    echo "{\"command\":[\"seek\",0,\"absolute\"]}" | mpv_nc 1 > /dev/null
+    echo "{\"command\":[\"set_property\",\"pause\",false]}" | mpv_nc 1 > /dev/null
     
     wait_for_playback_start
     log_now_playing "|> Playing: "

@@ -137,7 +137,7 @@ execute_batch() {
         if [ "$MPV_RUNNING" = true ]; then
             if [ ${#PLAYLIST_URLS[@]} -gt 1 ]; then
                 # Fetch count before adding to know where to resume
-                local init_count=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
+                local init_count=$(echo '{ "command": ["get_property", "playlist-count"] }' | mpv_nc 1 2>/dev/null | jq -r '.data // 0')
                 
                 echo -e "${C_PINK}🚀 Queuing ${C_ORANGE}${#PLAYLIST_URLS[@]}${C_PINK} tracks...${C_RESET}"
                 local batch_cmds=""
@@ -160,7 +160,7 @@ execute_batch() {
                     local q_json_cmd=$(jq -nc --arg path "$q_clean_url" '{"command": ["loadfile", $path, "append-play"]}')
                     batch_cmds+="${q_json_cmd}\n"
                 done
-                echo -e "$batch_cmds" | nc -N -U -w 1 "$SOCKET" > /dev/null
+                echo -e "$batch_cmds" | mpv_nc 1 > /dev/null
                 echo -e "${C_GREEN}✅ All tracks added to queue.${C_RESET}"
                 
                 # Auto-resume if MPV was idle (start at the first new track)
