@@ -21,7 +21,7 @@ perform_search() {
     # Apply cookies if they exist
     [ -f "$COOKIES_FILE" ] && YTDL_OPTS+=("--cookies" "$COOKIES_FILE")
 
-    yt-dlp "${YTDL_OPTS[@]}" -- "$QUERY" > "$TMP_RESULTS"
+    run_with_timeout 30s yt-dlp "${YTDL_OPTS[@]}" -- "$QUERY" > "$TMP_RESULTS" 2>/dev/null
     
     if [ ! -s "$TMP_RESULTS" ]; then 
         echo -e "${C_PINK}🔍🤷 No results found for \"$QUERY\"... try another magic word?${C_RESET}"

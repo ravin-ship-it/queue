@@ -33,7 +33,7 @@ fetch_and_display_url_info() {
     # Fetch Metadata (Robustly)
     local opts=("--dump-json" "--no-warnings" "--skip-download" "--ignore-errors" "--flat-playlist")
     [ -n "$COOKIES_FILE" ] && [ -f "$COOKIES_FILE" ] && opts+=("--cookies" "$COOKIES_FILE")
-    local json_dump=$(yt-dlp "${opts[@]}" -- "$clean_url" 2>/dev/null)
+    local json_dump=$(run_with_timeout 30s yt-dlp "${opts[@]}" -- "$clean_url" 2>/dev/null)
     if [ -z "$json_dump" ]; then
         if [ -n "$force_title" ] || [ "$is_current" == "true" ]; then
             local display_t="${force_title:-$clean_url}"
@@ -485,7 +485,7 @@ log_now_playing() {
              # Save to cache file
              printf "%s\t%s\t%s\t%s\n" "$clean_url" "$title" "$artist_tag" "$live_dur" >> "$CACHE_FILE"
              # Update memory for current session
-             CACHE_MEM["$clean_url"]="${title}\t${artist_tag}\t${live_dur}"
+             CACHE_MEM["$clean_url"]="${title}"$'\t'"${artist_tag}"$'\t'"${live_dur}"
         fi
     fi
 }
@@ -797,6 +797,7 @@ start_idle_monitor() {
         echo "[$(date +%T)] [Monitor] Started Idle Monitor (PID: $BASHPID)." >> "$HOME/.cache/mpv/auto_debug.log"
 
         local was_playing=false
+        local consecutive_socket_failures=0
         while [ -f "$HOME/.cache/mpv/auto_enabled" ]; do
             if [ ! -S "$SOCKET" ]; then
                 # If MPV is gone, the monitor's job is done for now.
@@ -818,10 +819,25 @@ start_idle_monitor() {
             ' 2>/dev/null)
 
             if [ -z "$raw" ]; then 
-                # Socket might be busy or lagging, don't kill the monitor
+                ((consecutive_socket_failures++))
+                # If socket is unresponsive for 5 consecutive check cycles (15s) while MPV process exists
+                if [ "$consecutive_socket_failures" -ge 5 ]; then
+                    if pgrep -u "$(whoami)" -f "mpv --idle" >/dev/null 2>&1; then
+                        echo "[$(date +%T)] [Monitor] MPV IPC socket unresponsive (network stall). Auto-recovering MPV..." >> "$HOME/.cache/mpv/auto_debug.log"
+                        pkill -u "$(whoami)" -f "mpv --idle" >/dev/null 2>&1
+                        rm -f "$SOCKET"
+                        sleep 1
+                        if is_online; then
+                            cmd_play >/dev/null 2>&1 &
+                        fi
+                    fi
+                    consecutive_socket_failures=0
+                fi
                 sleep 3
                 continue 
             fi
+            
+            consecutive_socket_failures=0
             
             IFS=$'\t' read -r idle count pos loop_p loop_f rem eof <<< "$raw"
             local current_idx=$((pos + 1))
@@ -882,7 +898,12 @@ cmd_play() {
         # Use the reliable mpv wrapper function from .bashrc (android client compatible)
         # Note: We don't remove the socket here manually as the wrapper does it on exit.
         if command -v termux-wake-lock >/dev/null 2>&1; then termux-wake-lock; fi
-        ( command mpv --idle --no-terminal --input-ipc-server="$SOCKET" --playlist="$LAST_PLAYLIST_FILE" </dev/null >/dev/null 2>&1 & )
+        ( command mpv --idle --no-terminal \
+            --network-timeout=15 \
+            --stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5 \
+            --cache=yes --cache-secs=300 --demuxer-readahead-secs=300 \
+            --demuxer-max-bytes=256MiB --demuxer-max-back-bytes=128MiB \
+            --input-ipc-server="$SOCKET" --playlist="$LAST_PLAYLIST_FILE" </dev/null >/dev/null 2>&1 & )
         
         # Wait for socket
         for i in {1..30}; do

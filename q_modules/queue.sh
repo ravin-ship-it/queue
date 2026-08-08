@@ -16,7 +16,7 @@ show_queue() {
         else
             echo "😴💤 MPV isn't running"
         fi
-        exit 0
+        return 0
     fi
 
     # Only show the outer box if output is a TTY (direct terminal)
@@ -652,6 +652,11 @@ auto_queue_related() {
 
     # --- PROTOCOL: Liveness Check ---
     if [ "$MPV_RUNNING" = false ] && [ "$force_fetch" != "true" ]; then
+        return
+    fi
+
+    if ! is_online; then
+        echo "[$(date +%T)] [Network] Offline - Skipping auto-discovery fetch." >> "$debug_log"
         return
     fi
 

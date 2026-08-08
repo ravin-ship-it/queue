@@ -116,7 +116,7 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
     case "$CMD" in
         -rm) 
             shift
-            declare -a targets
+            targets=()
             while [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]] && [[ ! "$1" =~ $SMART_CMDS ]]; do
                 targets+=("$1")
                 shift
@@ -294,7 +294,7 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
             ;; 
         -pl-rm) 
             shift
-            declare -a targets
+            targets=()
             while [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]] && [[ ! "$1" =~ $SMART_CMDS ]]; do
                 targets+=("$1")
                 shift
@@ -330,6 +330,10 @@ if [ -z "$1" ]; then
 
     STATUS_ICONS=""
     P_DEEP_PINK="\033[38;5;197m"
+    P_RESET="\033[0m"
+    P_TEAL="\033[1;38;5;37m"
+    P_YELLOW="\033[1;33m"
+    P_PURPLE="\033[1;38;5;171m"
     [ "$init_shuf" == "true" ] && STATUS_ICONS="${STATUS_ICONS}${P_DEEP_PINK} ><${P_RESET}"
     [ "$init_loop_f" == "inf" ] && STATUS_ICONS="${STATUS_ICONS}${P_DEEP_PINK} ⟳1${P_RESET}"
     [ "$init_loop_p" == "inf" ] && STATUS_ICONS="${STATUS_ICONS}${P_DEEP_PINK} ⟳${P_RESET}"
@@ -350,6 +354,7 @@ if [ -z "$1" ]; then
         last_title=""; last_count="$init_count"; last_shuf="$init_shuf"
         last_lf="$init_loop_f"; last_lp="$init_loop_p"; last_idle="false"
         last_radio_state="init"; last_af="$init_af"
+        socket_failures=0
 
         while true; do
             raw=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","filename"]}\n{"command":["get_property","playlist-count"]}\n{"command":["get_property","shuffle"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","playlist-pos-1"]}\n{"command":["get_property","af"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r '
@@ -364,7 +369,12 @@ if [ -z "$1" ]; then
                 (if .[8].data == null or .[8].data == [] then "off" else "on" end)
             ' 2>/dev/null)
             
-            [ -z "$raw" ] && { sleep 1; continue; }
+            if [ -z "$raw" ]; then
+                ((socket_failures++))
+                if [ "$socket_failures" -ge 15 ]; then break; fi
+                sleep 2; continue
+            fi
+            socket_failures=0
             IFS=$'\t' read -r idle curr_title curr_count curr_shuf curr_lf curr_lp curr_idx curr_af <<< "$raw"
 
             curr_radio="off"
@@ -418,7 +428,7 @@ if [ -z "$1" ]; then
     SELECTION_MODE_FILE="$HOME/.cache/mpv/q_selection_mode_$$"
     rm -f "$SELECTION_MODE_FILE"
     
-    trap "kill $MONITOR_PID 2>/dev/null; rm -f \"$HOME/.cache/mpv/fzf_sock\" \"$FZF_SOCK\" \"$SELECTION_MODE_FILE\"" EXIT
+    trap "kill $MONITOR_PID 2>/dev/null; wait $MONITOR_PID 2>/dev/null; rm -f \"$HOME/.cache/mpv/fzf_sock\" \"$FZF_SOCK\" \"$SELECTION_MODE_FILE\"" EXIT
 
     selection=$(show_queue | fzf --multi --ansi --height=100% --layout=reverse --border \
         --listen="$FZF_SOCK" \

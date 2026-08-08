@@ -26,6 +26,10 @@ check_socket() {
     [ -S "$SOCKET" ] && echo '{ "command": ["get_property", "idle-active"] }' | nc -N -U -w 1 "$SOCKET" &>/dev/null
 }
 
+is_online() {
+    ping -c 1 -W 2 1.1.1.1 &>/dev/null || ping -c 1 -W 2 8.8.8.8 &>/dev/null || curl -s --max-time 3 -o /dev/null https://www.google.com &>/dev/null
+}
+
 check_and_resume() {
     local force_idx="$1"
     
@@ -275,6 +279,10 @@ fetch_missing_background() {
         fi
     fi
     trap 'rm -rf "$LOCK_DIR"' EXIT
+
+    if ! is_online; then
+        return
+    fi
 
     # Load cache once for this background run
     load_cache_to_memory
