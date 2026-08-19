@@ -81,6 +81,7 @@ send_ipc() {
 
 save_current_playlist() {
     local force="${1:-false}"
+    local allow_empty="${2:-false}"
     [ "$MPV_RUNNING" = false ] && return
     
     # Cooldown of 30 seconds to avoid spamming IO and CPU with large playlists
@@ -109,8 +110,9 @@ save_current_playlist() {
             
             if [ "$new_count" -gt 0 ]; then
                 echo "$playlist_items" > "${LAST_PLAYLIST_FILE}.tmp" && mv "${LAST_PLAYLIST_FILE}.tmp" "$LAST_PLAYLIST_FILE"
-            elif [ "$new_count" -eq 0 ]; then
-                # Queue is genuinely empty
+                cp -f "$LAST_PLAYLIST_FILE" "${LAST_PLAYLIST_FILE}.bak" 2>/dev/null
+            elif [ "$new_count" -eq 0 ] && [ "$allow_empty" == "true" ]; then
+                # Queue is genuinely cleared by explicit user command (e.g. q -clr)
                 > "$LAST_PLAYLIST_FILE"
             fi
 
@@ -246,7 +248,7 @@ fetch_title_bg() {
     local url="$1"
     (
         local COOKIES_FILE="$HOME/.config/mpv/cookies.txt"
-        local YTDL_OPTS=("--print" "%(title)s\t%(uploader)s\t%(duration_string)s" "--no-warnings" "--skip-download")
+        local YTDL_OPTS=("--js-runtimes" "node" "--extractor-args" "youtube:player_client=android,web" "--print" "%(title)s\t%(uploader)s\t%(duration_string)s" "--no-warnings" "--skip-download")
         [ -f "$COOKIES_FILE" ] && YTDL_OPTS+=("--cookies" "$COOKIES_FILE")
 
         local info=$(run_with_timeout 30s yt-dlp "${YTDL_OPTS[@]}" -- "$url" 2>/dev/null | sed 's/\\t/\t/g')
@@ -310,7 +312,7 @@ fetch_missing_background() {
              # Parallel Fetch with a bit of a limit
              (
                  local COOKIES_FILE="$HOME/.config/mpv/cookies.txt"
-                 local YTDL_OPTS=("--print" "%(title)s\t%(uploader)s\t%(duration_string)s" "--no-warnings" "--skip-download")
+                 local YTDL_OPTS=("--js-runtimes" "node" "--extractor-args" "youtube:player_client=android,web" "--print" "%(title)s\t%(uploader)s\t%(duration_string)s" "--no-warnings" "--skip-download")
                  [ -f "$COOKIES_FILE" ] && YTDL_OPTS+=("--cookies" "$COOKIES_FILE")
 
                  local info=$(run_with_timeout 30s yt-dlp "${YTDL_OPTS[@]}" -- "$url" 2>/dev/null | sed 's/\\t/\t/g')

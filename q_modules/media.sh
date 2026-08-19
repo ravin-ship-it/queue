@@ -31,7 +31,7 @@ fetch_and_display_url_info() {
     [ -n "$queue_idx" ] && [ "$queue_idx" != "null" ] && queue_status="Queued at #$queue_idx"
     
     # Fetch Metadata (Robustly)
-    local opts=("--dump-json" "--no-warnings" "--skip-download" "--ignore-errors" "--flat-playlist")
+    local opts=("--js-runtimes" "node" "--extractor-args" "youtube:player_client=android,web" "--dump-json" "--no-warnings" "--skip-download" "--ignore-errors" "--flat-playlist")
     [ -n "$COOKIES_FILE" ] && [ -f "$COOKIES_FILE" ] && opts+=("--cookies" "$COOKIES_FILE")
     local json_dump=$(run_with_timeout 30s yt-dlp "${opts[@]}" -- "$clean_url" 2>/dev/null)
     if [ -z "$json_dump" ]; then
@@ -274,10 +274,10 @@ fetch_and_display_url_info() {
 wait_for_playback_start() {
     # Wait for playback start (Buffering)
     echo -ne "${C_GRAY}⏳ Buffering...${C_RESET}\r"
-    for w in {1..150}; do
-        local raw=$(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","time-pos"]}\n{"command":["get_property","playlist-pos"]}' | nc -N -U -w 0.5 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | .[0].data // 0, .[1].data // "false", .[2].data // "", .[3].data // -1')
-        mapfile -t status <<< "$raw"
-        local count="${status[0]}"; local idle="${status[1]}"; local tpos="${status[2]}"; local pos="${status[3]}"
+    for w in {1..80}; do
+        local raw=$(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","time-pos"]}\n{"command":["get_property","playlist-pos"]}\n{"command":["get_property","pause"]}' | nc -N -U -w 0.5 "$SOCKET" 2>/dev/null | jq -s -j -r 'map(select(.event == null)) | (.[0].data // 0), "\t", (.[1].data // "false"), "\t", (.[2].data // ""), "\t", (if .[3].data == null then -1 else .[3].data end), "\t", (.[4].data // "false")')
+        [ -z "$raw" ] && { sleep 0.1; continue; }
+        IFS=$'\t' read -r count idle tpos pos paused <<< "$raw"
         
         # If queue is empty, exit immediately
         if [[ ! "$count" =~ ^[0-9]+$ ]] || [ "$count" -eq 0 ]; then break; fi
@@ -285,14 +285,11 @@ wait_for_playback_start() {
         # If we have a time position, playback has definitely started
         if [ -n "$tpos" ] && [ "$tpos" != "" ] && [ "$tpos" != "null" ]; then break; fi
         
-        # If it's NOT idle, it's likely loading/playing
-        if [ "$idle" == "false" ]; then break; fi
+        # If paused explicitly with valid track, break
+        if [ "$paused" == "true" ] && [ "$pos" != "-1" ]; then break; fi
 
-        # SPECIAL CASE: If idle and pos is -1 (nothing current) or we are at the end, 
-        # don't wait 15 seconds. Something either needs to be manually played or auto-queue needs to kick in.
-        if [ "$idle" == "true" ] && { [ "$pos" == "-1" ] || [ "$pos" == "null" ]; }; then
-            break
-        fi
+        # If it's NOT idle and position is valid, track is active
+        if [ "$idle" == "false" ] && [ "$pos" != "-1" ]; then break; fi
 
         sleep 0.1
     done
@@ -380,7 +377,6 @@ format_track_log() {
 log_now_playing() {
     local user_prefix="$1"
     
-    # Wait for valid current track data (max 3 seconds) to avoid race conditions
     local curr_idx=""
     local filename=""
     local title=""
@@ -391,7 +387,7 @@ log_now_playing() {
         local raw=$(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","playlist-pos"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","playlist"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","pause"]}\n{"command":["get_property","metadata"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r '
             map(select(.event == null)) |
             (.[0].data // 0), "\t",
-            (.[1].data // -1), "\t",
+            (if .[1].data == null then -1 else .[1].data end), "\t",
             (.[2].data // ""), "\t",
             (if .[1].data != null and .[3].data != null then .[3].data[.[1].data].filename else "" end), "\t",
             (.[4].data // "false"), "\t",
@@ -402,31 +398,21 @@ log_now_playing() {
         [ -z "$raw" ] && { sleep 0.1; continue; }
         IFS=$'\t' read -r count pos title filename idle paused artist_tag <<< "$raw"
         
-        # If queue is empty, it's truly finished
-        if [ "$count" -eq 0 ]; then
-             local final_prefix="${user_prefix:-|> Playing: }"
-             echo -e "${C_PINK}${final_prefix}(Idle - Queue Finished)${C_RESET}"
-             return
-        fi
-
-        # If pos is valid and it's not idle, we found our track
-        if [ "$pos" != "-1" ] && [ "$idle" == "false" ]; then
+        # If pos is valid, we found our track index
+        if [ "$pos" != "-1" ]; then
              curr_idx=$((pos + 1))
-             break
-        fi
-        
-        # If it's idle but we have a position, it might be loading or paused
-        if [ "$idle" == "true" ] && [ "$pos" != "-1" ]; then
-             # We'll allow a bit more time, but if it stays idle, we might be paused
-             sleep 0.1
-        fi
-
-        if [ "$idle" == "true" ] && { [ "$pos" == "-1" ] || [ "$pos" == "null" ]; }; then
              break
         fi
 
         sleep 0.1
     done
+
+    # If queue is genuinely empty after waiting
+    if [[ ! "$count" =~ ^[0-9]+$ ]] || [ "$count" -eq 0 ]; then
+         local final_prefix="${user_prefix:-|> Playing: }"
+         echo -e "${C_PINK}${final_prefix}(Idle - Queue Empty)${C_RESET}"
+         return
+    fi
 
     local prefix="$user_prefix"
     if [ -z "$prefix" ]; then
@@ -437,21 +423,20 @@ log_now_playing() {
         fi
     fi
     
-    # Fallback logic if we timed out or are still idle
-    if [ -z "$curr_idx" ]; then
-        if [ "$count" -gt 0 ]; then
-            # If there are tracks, try to find the one marked 'current'
-            local pl_json=$(echo '{"command":["get_property","playlist"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null)
-            local fallback_idx=$(echo "$pl_json" | jq -s -r 'map(select(.event == null)) | .[0].data | to_entries[] | select(.value.current) | .key + 1' 2>/dev/null)
-            if [ -n "$fallback_idx" ] && [ "$fallback_idx" != "null" ]; then
-                curr_idx="$fallback_idx"
-                local item=$(echo "$pl_json" | jq -s -r 'map(select(.event == null)) | .[0].data['$((curr_idx - 1))']')
-                filename=$(echo "$item" | jq -r '.filename // ""')
-                title=$(echo "$item" | jq -r '.title // ""')
-            elif [ "$idle" == "true" ]; then
-                echo -e "${C_PINK}${prefix}(Idle - No track currently playing)${C_RESET}"
-                return
-            fi
+    # Fallback logic: If pos is not resolved yet, check current playlist item
+    if [ -z "$curr_idx" ] && [ "$count" -gt 0 ]; then
+        local pl_json=$(echo '{"command":["get_property","playlist"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null)
+        local fallback_idx=$(echo "$pl_json" | jq -s -r 'map(select(.event == null)) | .[0].data | to_entries[] | select(.value.current) | .key + 1' 2>/dev/null | head -n 1)
+        if [ -n "$fallback_idx" ] && [ "$fallback_idx" != "null" ]; then
+            curr_idx="$fallback_idx"
+            local item=$(echo "$pl_json" | jq -s -r 'map(select(.event == null)) | .[0].data['$((curr_idx - 1))']')
+            filename=$(echo "$item" | jq -r '.filename // ""')
+            title=$(echo "$item" | jq -r '.title // ""')
+        else
+            curr_idx=1
+            local item=$(echo "$pl_json" | jq -s -r 'map(select(.event == null)) | .[0].data[0]')
+            filename=$(echo "$item" | jq -r '.filename // ""')
+            title=$(echo "$item" | jq -r '.title // ""')
         fi
     fi
 
@@ -505,14 +490,19 @@ cmd_info() {
     local header_title="Track Info"
     
     if [ -z "$index" ]; then
-        index=$(echo '{ "command": ["get_property", "playlist-pos-1"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // empty' | head -n 1)
+        local p_pos=$(echo '{ "command": ["get_property", "playlist-pos"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // "-1"' | head -n 1)
+        if [ "$p_pos" != "-1" ] && [ "$p_pos" != "null" ] && [ -n "$p_pos" ]; then
+            index=$((p_pos + 1))
+        else
+            index=$(echo '{ "command": ["get_property", "playlist"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | .[0].data | to_entries[] | select(.value.current) | .key + 1' 2>/dev/null | head -n 1)
+        fi
         [ -z "$index" ] && { echo -e "${C_PINK}🔇 Nothing is currently playing in your queue list${C_RESET}"; return; }
         header_title="Current Track"
         is_current_target=true
     else
         header_title="Track Info [${index}]"
-        local curr=$(echo '{ "command": ["get_property", "playlist-pos-1"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // "-1"' | head -n 1)
-        if [ "$index" == "$curr" ]; then is_current_target=true; fi
+        local curr_pos=$(echo '{ "command": ["get_property", "playlist-pos"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // "-1"' | head -n 1)
+        if [ -n "$curr_pos" ] && [ "$curr_pos" != "-1" ] && [ "$index" -eq $((curr_pos + 1)) ] 2>/dev/null; then is_current_target=true; fi
     fi
 
     local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null)
@@ -598,20 +588,23 @@ cmd_stop() {
     # Force save state before quitting
     save_current_playlist true
     
-    # 1. Try polite quit first if socket exists
+    # 1. Try polite quit first if socket exists (lets WSL PulseAudio unhook cleanly)
     if [ -S "$SOCKET" ]; then
         echo '{ "command": ["quit"] }' | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
+        sleep 0.3
     fi
     
-    # 2. Aggressive cleanup of any background mpv instances
-    pkill -u "$(whoami)" -f "mpv --idle" >/dev/null 2>&1
-    
-    # 3. Kill any zombie 'q' monitors
+    # 2. Kill monitor and auto-queue worker processes
     if [ -f "$HOME/.cache/mpv/idle_monitor.pid" ]; then
-        local pid=$(cat "$HOME/.cache/mpv/idle_monitor.pid")
+        local pid=$(cat "$HOME/.cache/mpv/idle_monitor.pid" 2>/dev/null)
         [ -n "$pid" ] && kill "$pid" >/dev/null 2>&1
         rm -f "$HOME/.cache/mpv/idle_monitor.pid"
     fi
+    pkill -u "$(whoami)" -f "auto_queue_related" >/dev/null 2>&1
+    rm -f "$HOME/.cache/mpv/auto.lock" "$HOME/.cache/mpv/auto_cooldown"
+
+    # 3. Cleanup any remaining mpv instances
+    pkill -u "$(whoami)" -f "mpv --idle" >/dev/null 2>&1
     
     # 4. Remove socket and reset state
     rm -f "$SOCKET"
@@ -718,13 +711,14 @@ cmd_loop() {
 }
 
 check_auto_trigger() {
-    local idle="$1"; local count="$2"; local idx="$3"; local rem="$4"; local loop="$5"
+    local idle="$1"; local count="$2"; local idx="$3"; local rem="$4"; local loop="$5"; local paused="${6:-false}"
     
     [ ! -f "$HOME/.cache/mpv/auto_enabled" ] && return
+    # Never auto-queue while paused
+    [ "$paused" == "true" ] && return
     
     # Do not trigger if single track loop is active (respect user manual override)
     if [ "$loop" == "inf" ] || [ "$loop" == "yes" ]; then
-        # Check specifically if it's loop-file
         local is_lf=$(echo '{ "command": ["get_property", "loop-file"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // "no"')
         if [ "$is_lf" != "no" ]; then return; fi
     fi
@@ -734,61 +728,50 @@ check_auto_trigger() {
     # 1. Idle Trigger (Silence detected + Empty Queue)
     if [ "$idle" == "true" ] && [ "$count" -eq 0 ]; then
         if [ "$IN_FZF" == "true" ]; then return; fi # Don't interrupt while browsing
+        [ -f "$HOME/.cache/mpv/auto_cooldown" ] && return
         should_trigger=true
     fi
     
     # 2. Ending Soon (Zero Gap) - Trigger with enough time for discovery
-    # Trigger if we are on the last track OR the second to last track
     if [ "$idle" == "false" ] && [ "$count" -gt 0 ] && [ "$idx" -ge $((count - 1)) ]; then
-         # Handle potential null/empty
          [ -z "$rem" ] || [ "$rem" == "null" ] && rem=100
          local t_int=${rem%.*}
-         # If time is known and less than 45s (proactive)
          if [[ "$t_int" =~ ^[0-9]+$ ]]; then
              if [ "$t_int" -lt 45 ]; then should_trigger=true; fi
          else
-             # For streams with unknown duration, trigger when it's the last item
              should_trigger=true
          fi
     fi
     
     # 3. Finished playing (idle is true, pos is null so idx is 0, but queue not empty)
     if [ "$idle" == "true" ] && [ "$count" -gt 0 ]; then
-         # If we finished the queue, discovery should find more, but NOT force-resume
-         # unless discovery actually finds something new.
+         [ -f "$HOME/.cache/mpv/auto_cooldown" ] && return
          should_trigger=true
     fi
     
     if [ "$should_trigger" == "true" ]; then
-        # Check if already triggered recently for this state
         local last_trig=$(cat "$HOME/.cache/mpv/auto_last_trigger" 2>/dev/null)
         local current_state="${idx}-${idle}-${count}"
         
-        # We allow retrying every 20-30 seconds if the state is still the same (to handle failed fetches)
         local now=$(date +%s)
         local last_time=$(get_file_mtime "$HOME/.cache/mpv/auto_last_trigger")
         
-        # Trigger if:
-        # 1. It's a brand new state (different track or count)
-        # 2. It's the SAME state but 30 seconds have passed (fetch might have failed)
-        if [ "$last_trig" != "$current_state" ] || [ $((now - last_time)) -gt 30 ]; then
+        # Trigger only if new state or at least 45 seconds have passed
+        if [ "$last_trig" != "$current_state" ] || [ $((now - last_time)) -gt 45 ]; then
             echo "$current_state" > "$HOME/.cache/mpv/auto_last_trigger"
-            # Background the fetch
             ( auto_queue_related ) >/dev/null 2>&1 &
         fi
     fi
 }
 
 start_idle_monitor() {
-    # Check if already running in this shell instance
     [ "$IDLE_MONITOR_ACTIVE" = true ] && return
-    
     (
         local pid_file="$HOME/.cache/mpv/idle_monitor.pid"
         if [ -f "$pid_file" ]; then
             local old_pid=$(cat "$pid_file" 2>/dev/null)
             if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
-                return # Already running
+                return
             fi
         fi
         echo $BASHPID > "$pid_file"
@@ -800,14 +783,12 @@ start_idle_monitor() {
         local consecutive_socket_failures=0
         while [ -f "$HOME/.cache/mpv/auto_enabled" ]; do
             if [ ! -S "$SOCKET" ]; then
-                # If MPV is gone, the monitor's job is done for now.
-                # It will be restarted the next time a 'q' command is run and MPV is active.
                 echo "[$(date +%T)] [Monitor] MPV socket missing. Exiting monitor." >> "$HOME/.cache/mpv/auto_debug.log"
                 break
             fi
 
-            # Batch get essential properties (increased timeout to 2s for stability)
-            local raw=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","playlist-count"]}\n{"command":["get_property","playlist-pos"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","time-remaining"]}\n{"command":["get_property","eof-reached"]}' | nc -N -U -w 2 "$SOCKET" 2>/dev/null | jq -s -j -r '
+            # Batch get essential properties
+            local raw=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","playlist-count"]}\n{"command":["get_property","playlist-pos"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","time-remaining"]}\n{"command":["get_property","eof-reached"]}\n{"command":["get_property","pause"]}' | nc -N -U -w 2 "$SOCKET" 2>/dev/null | jq -s -j -r '
                 map(select(.event == null)) |
                 (if .[0].data == null then "true" else .[0].data end), "\t",
                 (.[1].data // 0), "\t",
@@ -815,21 +796,19 @@ start_idle_monitor() {
                 (.[3].data // "no"), "\t",
                 (.[4].data // "no"), "\t",
                 (.[5].data // 100), "\t",
-                (.[6].data // "false")
+                (.[6].data // "false"), "\t",
+                (.[7].data // "false")
             ' 2>/dev/null)
 
             if [ -z "$raw" ]; then 
                 ((consecutive_socket_failures++))
-                # If socket is unresponsive for 5 consecutive check cycles (15s) while MPV process exists
-                if [ "$consecutive_socket_failures" -ge 5 ]; then
+                if [ "$consecutive_socket_failures" -ge 8 ]; then
                     if pgrep -u "$(whoami)" -f "mpv --idle" >/dev/null 2>&1; then
-                        echo "[$(date +%T)] [Monitor] MPV IPC socket unresponsive (network stall). Auto-recovering MPV..." >> "$HOME/.cache/mpv/auto_debug.log"
+                        echo "[$(date +%T)] [Monitor] MPV IPC socket unresponsive. Trying graceful recovery..." >> "$HOME/.cache/mpv/auto_debug.log"
+                        echo '{"command":["quit"]}' | nc -N -U -w 1 "$SOCKET" >/dev/null 2>&1
+                        sleep 1
                         pkill -u "$(whoami)" -f "mpv --idle" >/dev/null 2>&1
                         rm -f "$SOCKET"
-                        sleep 1
-                        if is_online; then
-                            cmd_play >/dev/null 2>&1 &
-                        fi
                     fi
                     consecutive_socket_failures=0
                 fi
@@ -839,10 +818,10 @@ start_idle_monitor() {
             
             consecutive_socket_failures=0
             
-            IFS=$'\t' read -r idle count pos loop_p loop_f rem eof <<< "$raw"
+            IFS=$'\t' read -r idle count pos loop_p loop_f rem eof is_paused <<< "$raw"
             local current_idx=$((pos + 1))
             
-            # If EOF is reached on the last file, we should consider it IDLE so Auto Mode triggers correctly
+            # If EOF is reached on the last file, treat as IDLE
             if [ "$eof" == "true" ] && [ "$pos" -eq $((count - 1)) ]; then
                 idle="true"
             fi
@@ -852,22 +831,11 @@ start_idle_monitor() {
             if [ "$loop_p" != "no" ]; then active_loop="$loop_p"; elif [ "$loop_f" != "no" ]; then active_loop="$loop_f"; fi
 
             # --- Auto Mode Check ---
-            check_auto_trigger "$idle" "$count" "$current_idx" "$rem" "$active_loop"
+            check_auto_trigger "$idle" "$count" "$current_idx" "$rem" "$active_loop" "$is_paused"
             
             if [ "$idle" == "false" ]; then
                 was_playing=true
             elif [ "$idle" == "true" ] && [ "$was_playing" == "true" ] && [ "$loop_p" == "no" ] && [ "$loop_f" == "no" ]; then
-                # Give Auto Mode a moment to trigger before reminding
-                sleep 3
-                # Re-check if still idle
-                local still_idle=$(echo '{"command":["get_property","idle-active"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // "true"')
-                if [ "$still_idle" == "true" ]; then
-                    # Check if Auto Mode actually did something (count increased)
-                    local still_count=$(echo '{"command":["get_property","playlist-count"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
-                    if [ "$still_count" -eq 0 ]; then
-                        echo "[$(date +%T)] [Monitor] Auto Mode is active but queue is empty... fetching?" >> "$HOME/.cache/mpv/auto_debug.log"
-                    fi
-                fi
                 was_playing=false
             fi
             sleep 2
@@ -890,20 +858,24 @@ cmd_play() {
 
     if [ "$MPV_RUNNING" = false ]; then
         if [ ! -f "$LAST_PLAYLIST_FILE" ] || [ ! -s "$LAST_PLAYLIST_FILE" ]; then
-            echo -e "${C_ORANGE}⚠️ No previous session found to restore.${C_RESET}"
-            exit 1
+            if [ -f "${LAST_PLAYLIST_FILE}.bak" ] && [ -s "${LAST_PLAYLIST_FILE}.bak" ]; then
+                cp -f "${LAST_PLAYLIST_FILE}.bak" "$LAST_PLAYLIST_FILE"
+            else
+                echo -e "${C_ORANGE}⚠️ No previous session found to restore.${C_RESET}"
+                exit 1
+            fi
         fi
         
         echo -e "${C_PINK}🚀 Restoring last session...${C_RESET}"
-        # Use the reliable mpv wrapper function from .bashrc (android client compatible)
-        # Note: We don't remove the socket here manually as the wrapper does it on exit.
-        if command -v termux-wake-lock >/dev/null 2>&1; then termux-wake-lock; fi
-        ( command mpv --idle --no-terminal \
-            --network-timeout=15 \
+        rm -f "$SOCKET"
+        setsid mpv --idle --keep-open=yes --no-terminal --vo=null \
+            --network-timeout=30 \
             --stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5 \
+            --demuxer-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5 \
             --cache=yes --cache-secs=300 --demuxer-readahead-secs=300 \
             --demuxer-max-bytes=256MiB --demuxer-max-back-bytes=128MiB \
-            --input-ipc-server="$SOCKET" --playlist="$LAST_PLAYLIST_FILE" </dev/null >/dev/null 2>&1 & )
+            --input-ipc-server="$SOCKET" --playlist="$LAST_PLAYLIST_FILE" </dev/null >/dev/null 2>&1 &
+        disown
         
         # Wait for socket
         for i in {1..30}; do
@@ -944,37 +916,60 @@ cmd_play() {
     fi
 
     if [ -z "$index" ]; then
-        # If we just started, force play. Otherwise, toggle or restart if idle.
         if [ "$just_started" = true ]; then
-            echo '{ "command": ["set_property", "pause", false] }' | nc -N -U -w 1 "$SOCKET" > /dev/null
+            echo '{ "command": ["set_property", "pause", false] }' | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
             wait_for_playback_start
             log_now_playing "|> Restored & Playing: "
         else
-            # Check if idle (Queue finished)
-            local raw_state=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","eof-reached"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | (.[0].data // false), (.[1].data // false)')
-            IFS=$'\n' read -r is_idle is_eof <<< "$raw_state"
-            
-            if [ "$is_idle" == "true" ] || [ "$is_eof" == "true" ]; then
-                # Restart from first track if idle
-                echo '{ "command": ["set_property", "playlist-pos", 0] }' | nc -N -U -w 1 "$SOCKET" > /dev/null
-                echo '{ "command": ["set_property", "pause", false] }' | nc -N -U -w 1 "$SOCKET" > /dev/null
+            # Single atomic IPC query to get pause, idle-active, eof-reached, playlist-pos, playlist-count
+            local state_raw=$(echo -e '{"command":["get_property","pause"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","eof-reached"]}\n{"command":["get_property","playlist-pos"]}\n{"command":["get_property","playlist-count"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r 'map(select(.event == null)) | (.[0].data // false), "\t", (.[1].data // false), "\t", (.[2].data // false), "\t", (if .[3].data == null then -1 else .[3].data end), "\t", (.[4].data // 0)')
+            IFS=$'\t' read -r cur_pause is_idle is_eof cur_pos cur_count <<< "$state_raw"
+
+            if [[ ! "$cur_count" =~ ^[0-9]+$ ]] || [ "$cur_count" -le 0 ]; then
+                if [ -f "$LAST_PLAYLIST_FILE" ] && [ -s "$LAST_PLAYLIST_FILE" ]; then
+                    echo -e "${C_PINK}🚀 Loading saved playlist into MPV...${C_RESET}"
+                    echo "{\"command\": [\"loadlist\", \"$LAST_PLAYLIST_FILE\", \"replace\"]}" | nc -N -U -w 2 "$SOCKET" > /dev/null 2>&1
+                    sleep 0.3
+                    restore_state_properties
+                    local start_idx=$(jq -r '.pos // 0' "$HOME/.cache/mpv/state.json" 2>/dev/null)
+                    [[ ! "$start_idx" =~ ^[0-9]+$ ]] && start_idx=0
+                    echo "{\"command\": [\"playlist-play-index\", $start_idx]}" | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
+                    echo '{ "command": ["set_property", "pause", false] }' | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
+                    wait_for_playback_start
+                    log_now_playing "|> Restored & Playing: "
+                    return
+                fi
+                echo -e "${C_ORANGE}⚠️ Queue is empty.${C_RESET}"
+                return
+            fi
+
+            if [ "$cur_pause" == "true" ]; then
+                # Unpause
+                echo '{ "command": ["set_property", "pause", false] }' | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
+                
+                # Check if stream timed out during long pause (e.g. 50 mins idle/EOF)
+                sleep 0.2
+                local check_idle=$(echo '{"command":["get_property","idle-active"]}' | nc -N -U -w 0.5 "$SOCKET" 2>/dev/null | jq -r '.data // false')
+                if [ "$check_idle" == "true" ] && [ "$cur_pos" -ge 0 ] 2>/dev/null; then
+                    # Stream connection dropped/expired! Force reload current track index with fresh token
+                    echo "{\"command\":[\"playlist-play-index\",$cur_pos]}" | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
+                    echo '{ "command": ["set_property", "pause", false] }' | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
+                fi
+                wait_for_playback_start
+                log_now_playing "|> Playing: "
+            elif [ "$is_idle" == "true" ] || [ "$is_eof" == "true" ] || [ "$cur_pos" -lt 0 ]; then
+                # Replay from start/current if idle at queue end
+                local start_idx=0
+                [ "$cur_pos" -ge 0 ] 2>/dev/null && start_idx="$cur_pos"
+                echo "{\"command\": [\"playlist-play-index\", $start_idx]}" | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
+                echo '{ "command": ["set_property", "pause", false] }' | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
                 wait_for_playback_start
                 log_now_playing "|> Playing: "
             else
-                # Toggle pause property directly for atomic sync
-                local current_pause=$(echo '{ "command": ["get_property", "pause"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // "false"')
-                
-                if [ "$current_pause" == "true" ]; then
-                    echo '{ "command": ["set_property", "pause", false] }' | nc -N -U -w 1 "$SOCKET" > /dev/null
-                    # Brief wait for state propagation
-                    sleep 0.1
-                    log_now_playing ""
-                else
-                    echo '{ "command": ["set_property", "pause", true] }' | nc -N -U -w 1 "$SOCKET" > /dev/null
-                    # Brief wait for state propagation
-                    sleep 0.1
-                    log_now_playing ""
-                fi
+                # Pause
+                echo '{ "command": ["set_property", "pause", true] }' | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
+                sleep 0.1
+                log_now_playing "|| Paused: "
             fi
         fi
         return

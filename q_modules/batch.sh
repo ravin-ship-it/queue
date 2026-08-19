@@ -123,8 +123,15 @@ execute_batch() {
                 MPV_RUNNING=true
             else
                 echo -e "${C_PINK}🚀 Starting MPV...${C_RESET}"
-                if command -v termux-wake-lock >/dev/null 2>&1; then termux-wake-lock; fi
-                ( command mpv --idle --no-terminal --input-ipc-server="$SOCKET" </dev/null >/dev/null 2>&1 & )
+                rm -f "$SOCKET"
+                setsid mpv --idle --keep-open=yes --no-terminal --vo=null \
+                    --network-timeout=30 \
+                    --stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5 \
+                    --demuxer-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5 \
+                    --cache=yes --cache-secs=300 --demuxer-readahead-secs=300 \
+                    --demuxer-max-bytes=256MiB --demuxer-max-back-bytes=128MiB \
+                    --input-ipc-server="$SOCKET" </dev/null >/dev/null 2>&1 &
+                disown
                 for i in {1..20}; do
                     [ -S "$SOCKET" ] && break
                     sleep 0.2

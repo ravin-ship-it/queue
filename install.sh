@@ -91,7 +91,9 @@ mkdir -p "$DEST_DIR"
 echo -e "${CYAN}📦 Installing core executables...${NC}"
 cp -r q q_modules "$DEST_DIR/"
 chmod +x "$DEST_DIR/q"
-echo -e "${GREEN}✅ q installed to $DEST_DIR${NC}"
+mkdir -p "$HOME/.local/bin"
+ln -sf "$DEST_DIR/q" "$HOME/.local/bin/q"
+echo -e "${GREEN}✅ q installed to $DEST_DIR (and symlinked to ~/.local/bin/q)${NC}"
 
 # --- Configuration ---
 CONF_DIR="$HOME/.config/mpv"
@@ -106,11 +108,12 @@ echo -e "${GREEN}✅ Installed fresh mpv.conf${NC}"
 # --- YT-DLP Configuration ---
 YTDLP_CONF_DIR="$HOME/.config/yt-dlp"
 mkdir -p "$YTDLP_CONF_DIR"
-if ! grep -q -- "--js-runtimes node" "$YTDLP_CONF_DIR/config" 2>/dev/null; then
-    echo -e "${CYAN}🔧 Configuring yt-dlp to use Node.js for YouTube decryption...${NC}"
-    echo "--js-runtimes node" >> "$YTDLP_CONF_DIR/config"
-    echo -e "${GREEN}✅ yt-dlp configuration updated.${NC}"
-fi
+cat << 'EOF' > "$YTDLP_CONF_DIR/config"
+--js-runtimes node
+--extractor-args "youtube:player_client=android,web"
+--no-warnings
+EOF
+echo -e "${GREEN}✅ yt-dlp configuration updated.${NC}"
 
 # --- Playlists ---
 PLAYLIST_DEST="$HOME/.local/share/mpv/playlists"

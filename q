@@ -9,7 +9,7 @@ touch "$HOME/.cache/mpv/yt_cache.txt" 2>/dev/null
 
 # Clean up dead sockets automatically
 if [ -S "$HOME/.mpv-socket" ]; then
-    if ! (echo '{}' | nc -N -U -w 1 "$HOME/.mpv-socket" >/dev/null 2>&1); then
+    if ! (echo '{"command":["get_property","idle-active"]}' | nc -N -U -w 1 "$HOME/.mpv-socket" >/dev/null 2>&1); then
         rm -f "$HOME/.mpv-socket"
     fi
 fi
@@ -611,7 +611,7 @@ if [ "$IS_BATCH" = true ]; then
             echo -e "${C_CYAN}🔍 Analyzing URL:${C_RESET} $input"
             PL_TMP=$(mktemp)
             # Use strict 4-column format for analysis and caching
-            timeout 45s yt-dlp --flat-playlist --print "%(webpage_url)s\t%(title)s\t%(uploader)s\t%(duration_string)s" --no-warnings --skip-download -- "$input" > "$PL_TMP" 2>/dev/null
+            timeout 45s yt-dlp --js-runtimes node --extractor-args "youtube:player_client=android,web" --flat-playlist --print "%(webpage_url)s\t%(title)s\t%(uploader)s\t%(duration_string)s" --no-warnings --skip-download -- "$input" > "$PL_TMP" 2>/dev/null
             
             # Debug: Store last raw output
             cp "$PL_TMP" "$HOME/.cache/mpv/last_yt_dlp_raw" 2>/dev/null

@@ -16,7 +16,7 @@ perform_search() {
     # Use strict Tab delimiter for reliability
     local TAB=$'\t'
     local COOKIES_FILE="$HOME/.config/mpv/cookies.txt"
-    local YTDL_OPTS=("--default-search" "$PLATFORM" "--print" "%(title)s${TAB}%(webpage_url)s${TAB}%(duration_string)s${TAB}%(uploader)s" "--no-warnings" "--flat-playlist" "--skip-download")
+    local YTDL_OPTS=("--js-runtimes" "node" "--extractor-args" "youtube:player_client=android,web" "--default-search" "$PLATFORM" "--print" "%(title)s${TAB}%(webpage_url)s${TAB}%(duration_string)s${TAB}%(uploader)s" "--no-warnings" "--flat-playlist" "--skip-download")
     
     # Apply cookies if they exist
     [ -f "$COOKIES_FILE" ] && YTDL_OPTS+=("--cookies" "$COOKIES_FILE")

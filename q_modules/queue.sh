@@ -380,7 +380,7 @@ cmd_swap() {
 cmd_clear() {
     echo '{"command": ["playlist-clear"]}' | nc -N -U -w 1 "$SOCKET" > /dev/null
     echo -e "${C_PINK}🧹 Queue cleared.${C_RESET}"
-    save_current_playlist true >/dev/null 2>&1 & disown
+    save_current_playlist true true >/dev/null 2>&1 & disown
 }
 
 cmd_shuffle() {
@@ -633,11 +633,9 @@ queue_item_ipc() {
     local json_cmd=$(jq -nc --arg path "$clean_url" '{"command": ["loadfile", $path, "append-play"]}')
     send_ipc "$json_cmd" > /dev/null
     
-    # Auto-resume if MPV was idle at the end of the queue (Play new index)
+    # Auto-resume only if MPV was idle at the end of the queue (Play new index)
     check_and_resume "$count"
     
-    # Force unpause just in case check_and_resume missed the idle state window
-    echo '{ "command": ["set_property", "pause", false] }' | nc -N -U -w 1 "$SOCKET" > /dev/null
     save_current_playlist true >/dev/null 2>&1 & disown
 }
 
@@ -651,7 +649,7 @@ auto_queue_related() {
     [ ! -f "$auto_file" ] && return
 
     # --- PROTOCOL: Liveness Check ---
-    if [ "$MPV_RUNNING" = false ] && [ "$force_fetch" != "true" ]; then
+    if { [ "$MPV_RUNNING" = false ] || [ ! -S "$SOCKET" ]; } && [ "$force_fetch" != "true" ]; then
         return
     fi
 
@@ -660,14 +658,19 @@ auto_queue_related() {
         return
     fi
 
-    # --- PROTOCOL: Status & Loop Respect ---
-    local raw_status=$(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","playlist-pos"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","loop-file"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r '
+    # --- PROTOCOL: Status, Pause & Loop Respect ---
+    local raw_status=$(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","playlist-pos"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","pause"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r '
         map(select(.event == null)) |
-        (.[0].data // 0), "\t", (if .[1].data == null then -1 else .[1].data end), "\t", (.[2].data // "false"), "\t", (.[3].data // "no"), "\t", (.[4].data // "no")
+        (.[0].data // 0), "\t", (if .[1].data == null then -1 else .[1].data end), "\t", (.[2].data // "false"), "\t", (.[3].data // "no"), "\t", (.[4].data // "no"), "\t", (.[5].data // "false")
     ' 2>/dev/null)
     
     if [ -z "$raw_status" ]; then return; fi
-    IFS=$'\t' read -r count pos idle loop_p loop_f <<< "$raw_status"
+    IFS=$'\t' read -r count pos idle loop_p loop_f is_paused <<< "$raw_status"
+
+    # Never auto-queue while paused
+    if [ "$is_paused" == "true" ]; then
+        return
+    fi
 
     # PROTOCOL 3: Respect Single Track Loop (Abort discovery if looping file)
     if [ "$loop_f" != "no" ]; then
@@ -677,7 +680,6 @@ auto_queue_related() {
 
     if [ "$force_fetch" != "true" ]; then
         # PROTOCOL 2 & 4: Intelligent Discovery Timing
-        # Only fetch if we have < 2 songs remaining in the "Discovery Buffer"
         if [ "$pos" -ne -1 ] && [ "$count" -gt $((pos + 2)) ]; then
             return
         fi
@@ -698,20 +700,13 @@ auto_queue_related() {
     local history_file="$HOME/.cache/mpv/auto_history"
     [ ! -f "$history_file" ] && touch "$history_file"
 
-    # Priority 1: Use Provided Input (Explicit seed from removal or manual trigger)
-    # Priority 2: Random Seed from Queue (Diversity Mode)
     if [ -z "$input_filename" ] && [ "$count" -gt 0 ]; then
-        # Pick a random index from the entire queue
-        # We give a 70% chance to the "recent" half of the queue to maintain some flow
-        # but 30% chance to anything in the queue for true discovery.
         local target_idx=0
         if [ "$count" -gt 1 ]; then
             if [ $((RANDOM % 10)) -lt 7 ]; then
-                # Recent half (roughly)
                 local half=$((count / 2))
                 target_idx=$(( (RANDOM % (count - half)) + half ))
             else
-                # Any track
                 target_idx=$(( RANDOM % count ))
             fi
         fi
@@ -722,7 +717,6 @@ auto_queue_related() {
         echo "[$(date +%T)] [Seed] Diversity Pick: Index $target_idx (${input_title:-Unknown})" >> "$debug_log"
     fi
     
-    # Priority 3: Default Discovery (Empty Queue)
     local is_default_search=false
     if [ -z "$input_filename" ] || [[ "$input_filename" =~ (😴💤|null) ]]; then
         is_default_search=true
@@ -734,24 +728,26 @@ auto_queue_related() {
         seed_id="${BASH_REMATCH[2]}"
     fi
 
-    # --- 2. Candidate Discovery (Protocol 5: Related to Artist/Genre/Popularity) ---
+    # --- 2. Candidate Discovery ---
     local fields="%(webpage_url)s"$'\t'"%(title)s"$'\t'"%(uploader)s"$'\t'"%(duration_string)s"
     local candidates=""
 
     if [ "$is_default_search" = false ] && [ -n "$seed_id" ]; then
         echo "[$(date +%T)] [Discovery] Mix for Seed ID: $seed_id" >> "$debug_log"
-        candidates=$(run_with_timeout 25s yt-dlp --print "$fields" --flat-playlist --no-warnings --skip-download --playlist-end 15 "https://www.youtube.com/watch?v=${seed_id}&list=RDAMVM${seed_id}" 2>/dev/null)
+        candidates=$(run_with_timeout 25s yt-dlp --js-runtimes node --extractor-args "youtube:player_client=android,web" --print "$fields" --flat-playlist --no-warnings --skip-download --playlist-end 15 "https://www.youtube.com/watch?v=${seed_id}&list=RDAMVM${seed_id}" 2>/dev/null)
     fi
 
     if [ -z "$candidates" ]; then
         local query="popular music"
         [ "$is_default_search" = false ] && query="related to ${input_title:-music}"
         echo "[$(date +%T)] [Discovery] Search for: $query" >> "$debug_log"
-        candidates=$(run_with_timeout 25s yt-dlp --print "$fields" --no-warnings --skip-download --playlist-end 15 "ytmsearch15:${query}" 2>/dev/null)
+        candidates=$(run_with_timeout 25s yt-dlp --js-runtimes node --extractor-args "youtube:player_client=android,web" --print "$fields" --no-warnings --skip-download --playlist-end 15 "ytmsearch15:${query}" 2>/dev/null)
     fi
     
     if [ -z "$candidates" ]; then
         touch "$HOME/.cache/mpv/auto_failed"
+        touch "$HOME/.cache/mpv/auto_cooldown"
+        ( sleep 60; rm -f "$HOME/.cache/mpv/auto_cooldown" ) & disown
         return
     fi
 
@@ -772,9 +768,8 @@ auto_queue_related() {
         pool_u+=("$url"); pool_t+=("$t"); pool_a+=("$a"); pool_d+=("$d")
     done <<< "$candidates"
 
-    # --- 4. Queue Selection (Protocol 1 & 6: Respect User Preference) ---
+    # --- 4. Queue Selection ---
     if [ ${#pool_u[@]} -gt 0 ]; then
-        # Double-check socket before final action
         if ! [ -S "$SOCKET" ]; then return; fi
         
         local r=$((RANDOM % ${#pool_u[@]})); [ "$r" -gt 5 ] && r=$((RANDOM % 5))
@@ -786,6 +781,9 @@ auto_queue_related() {
         tail -n 100 "$history_file" > "$history_file.tmp" && mv "$history_file.tmp" "$history_file"
         
         touch "$HOME/.cache/mpv/auto_cooldown"
-        ( sleep 15; rm -f "$HOME/.cache/mpv/auto_cooldown" ) & disown
+        ( sleep 20; rm -f "$HOME/.cache/mpv/auto_cooldown" ) & disown
+    else
+        touch "$HOME/.cache/mpv/auto_cooldown"
+        ( sleep 60; rm -f "$HOME/.cache/mpv/auto_cooldown" ) & disown
     fi
 }
