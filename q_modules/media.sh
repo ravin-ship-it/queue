@@ -432,11 +432,9 @@ log_now_playing() {
             local item=$(echo "$pl_json" | jq -s -r 'map(select(.event == null)) | .[0].data['$((curr_idx - 1))']')
             filename=$(echo "$item" | jq -r '.filename // ""')
             title=$(echo "$item" | jq -r '.title // ""')
-        else
-            curr_idx=1
-            local item=$(echo "$pl_json" | jq -s -r 'map(select(.event == null)) | .[0].data[0]')
-            filename=$(echo "$item" | jq -r '.filename // ""')
-            title=$(echo "$item" | jq -r '.title // ""')
+        elif [ "$idle" == "true" ]; then
+            echo -e "${C_PINK}${prefix}(Idle - Queue Finished)${C_RESET}"
+            return
         fi
     fi
 

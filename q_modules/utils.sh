@@ -40,28 +40,25 @@ check_and_resume() {
     ( sleep 5; rm -f "$resume_cd" ) >/dev/null 2>&1 & disown
 
     if [ "$MPV_RUNNING" = true ]; then
-        local raw_state=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","eof-reached"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | (.[0].data // false), (.[1].data // false)')
-        IFS=$'\n' read -r is_idle is_eof <<< "$raw_state"
+        local raw_state=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","eof-reached"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r 'map(select(.event == null)) | (.[0].data // false), "\t", (.[1].data // false)')
+        IFS=$'\t' read -r is_idle is_eof <<< "$raw_state"
         
         # If idle or paused at EOF, we must intervene
         if [ "$is_idle" == "true" ] || [ "$is_eof" == "true" ]; then
             if [ -n "$force_idx" ]; then
-                 echo -e "${C_PINK}⚡ Auto-Resuming at index ${C_ORANGE}$((force_idx + 1))${C_PINK}...${C_RESET}"
-                 
                  # Wait for playlist to actually have the item (Race condition fix)
-                 for i in {1..10}; do
+                 for i in {1..15}; do
                      local cnt=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
                      if [ "$cnt" -gt "$force_idx" ]; then break; fi
                      sleep 0.1
                  done
                  # Force play specific index
-                 echo "{ \"command\": [\"playlist-play-index\", $force_idx] }" | nc -N -U -w 1 "$SOCKET" > /dev/null
+                 echo "{ \"command\": [\"playlist-play-index\", $force_idx] }" | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
             else
-                 echo -e "${C_PINK}⚡ Auto-Resuming...${C_RESET}"
                  # Fallback to next
-                 echo '{ "command": ["playlist-next"] }' | nc -N -U -w 1 "$SOCKET" > /dev/null
+                 echo '{ "command": ["playlist-next"] }' | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
             fi
-            echo '{ "command": ["set_property", "pause", false] }' | nc -N -U -w 1 "$SOCKET" > /dev/null
+            echo '{ "command": ["set_property", "pause", false] }' | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
             
             # Check success
             sleep 0.2

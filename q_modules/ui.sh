@@ -55,8 +55,19 @@ check_dependencies() {
 }
 
 # Get Terminal Width
-TERM_WIDTH=$(tput cols)
-[ -z "$TERM_WIDTH" ] && TERM_WIDTH=80
+get_terminal_width() {
+    local w=""
+    if [ -e /dev/tty ]; then
+        w=$(stty size </dev/tty 2>/dev/null | awk '{print $2}')
+        [[ ! "$w" =~ ^[0-9]+$ ]] && w=$(tput cols </dev/tty 2>/dev/null)
+    fi
+    [[ ! "$w" =~ ^[0-9]+$ ]] && w=$(tput cols 2>/dev/null)
+    [[ ! "$w" =~ ^[0-9]+$ ]] && w="${COLUMNS:-80}"
+    [ "$w" -lt 20 ] 2>/dev/null && w=80
+    echo "$w"
+}
+
+TERM_WIDTH=$(get_terminal_width)
 [ "$TERM_WIDTH" -lt 40 ] && TERM_WIDTH=40
 BOX_WIDTH=$((TERM_WIDTH - 2))
 INNER_WIDTH=$((BOX_WIDTH - 4)) 

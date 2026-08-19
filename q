@@ -325,8 +325,9 @@ if [ -z "$1" ]; then
     [ "$MPV_RUNNING" = true ] && start_idle_monitor
 
     # Get initial status
-    mapfile -t init < <(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","shuffle"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","af"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | .[0].data // 0, .[1].data // false, .[2].data // "no", .[3].data // "no", (if .[4].data == null or .[4].data == [] then "off" else "on" end)')    
+    mapfile -t init < <(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","shuffle"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","af"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","filename"]}\n{"command":["get_property","playlist-pos-1"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | .[0].data // 0, .[1].data // false, .[2].data // "no", .[3].data // "no", (if .[4].data == null or .[4].data == [] then "off" else "on" end), (if .[5].data == null then true else .[5].data end), ((.[6].data // .[7].data) // "😴💤" | gsub("\n"; " ")), (.[8].data // "?")')    
     init_count="${init[0]}"; init_shuf="${init[1]}"; init_loop_f="${init[2]}"; init_loop_p="${init[3]}"; init_af="${init[4]}"
+    init_idle="${init[5]}"; init_title="${init[6]}"; init_idx="${init[7]}"
 
     STATUS_ICONS=""
     P_DEEP_PINK="\033[38;5;197m"
@@ -346,15 +347,37 @@ if [ -z "$1" ]; then
         PROMPT=$(printf "🎵 ${P_TEAL}Queue List${STATUS_ICONS}${P_RESET} > ")
     fi
 
+    # Build Instant Initial Header (Zero-delay render)
+    ESC=$'\e'; NL=$'\n'
+    C_PURP="${ESC}[1;38;5;171m"; C_PINK="${ESC}[1;38;5;198m"; C_ORNG="${ESC}[38;5;215m"
+    C_WHT="${ESC}[1;37m"; C_GRY="${ESC}[0;90m"; C_RST="${ESC}[0m"; C_BLD="${ESC}[1m"
+    cols=$(get_terminal_width)
+    width=$((cols - 2)); [ "$width" -lt 0 ] && width=0
+    printf -v LINE "%*s" "$width" ""; LINE=${LINE// /─}
+
+    if [ "$init_idle" == "true" ]; then
+        [ "$init_title" == "😴💤" ] && init_msg="$init_title" || init_msg="(Idle - Queue Finished)"
+        INITIAL_HEADER="${C_PURP}🪷 Now Playing: ${C_RST}${C_PINK}${C_BLD}${init_msg}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
+    else
+        init_clean_title=$(echo "$init_title" | sed 's/"/\"/g')
+        INITIAL_HEADER="${C_PURP}🪷 Now Playing ${C_WHT}[${C_ORNG}${init_idx}${C_WHT}] ${C_RST}${C_PINK}${C_BLD}${init_clean_title}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
+    fi
+
     FZF_SOCK="$HOME/.cache/mpv/fzf_$$.sock"
     echo "$FZF_SOCK" > "$HOME/.cache/mpv/fzf_sock"
 
     # Background Monitor
     (
-        last_title=""; last_count="$init_count"; last_shuf="$init_shuf"
-        last_lf="$init_loop_f"; last_lp="$init_loop_p"; last_idle="false"
-        last_radio_state="init"; last_af="$init_af"
+        last_title="$init_title"; last_count="$init_count"; last_shuf="$init_shuf"
+        last_lf="$init_loop_f"; last_lp="$init_loop_p"; last_idle="$init_idle"
+        last_radio_state="init"; last_af="$init_af"; last_cols="$cols"
         socket_failures=0
+
+        # Wait for FZF socket to be active
+        for s in {1..30}; do
+            [ -S "$FZF_SOCK" ] && break
+            sleep 0.1
+        done
 
         while true; do
             raw=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","filename"]}\n{"command":["get_property","playlist-count"]}\n{"command":["get_property","shuffle"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","playlist-pos-1"]}\n{"command":["get_property","af"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r '
@@ -379,13 +402,11 @@ if [ -z "$1" ]; then
 
             curr_radio="off"
             [ -f "$HOME/.cache/mpv/auto_enabled" ] && curr_radio="on"
+            curr_cols=$(get_terminal_width)
 
-            if [ "$curr_title" != "$last_title" ] || [ "$idle" != "$last_idle" ]; then
+            if [ "$curr_title" != "$last_title" ] || [ "$idle" != "$last_idle" ] || [ "$curr_cols" != "$last_cols" ]; then
                 clean_title=$(echo "$curr_title" | sed 's/"/\"/g')
-                ESC=$'\e'; NL=$'\n'
-                C_PURP="${ESC}[1;38;5;171m"; C_PINK="${ESC}[1;38;5;198m"; C_ORNG="${ESC}[38;5;215m"
-                C_WHT="${ESC}[1;37m"; C_GRY="${ESC}[0;90m"; C_RST="${ESC}[0m"; C_BLD="${ESC}[1m"
-                cols=$(tput cols); width=$((cols - 4)); [ "$width" -lt 0 ] && width=0
+                width=$((curr_cols - 2)); [ "$width" -lt 0 ] && width=0
                 printf -v LINE "%*s" "$width" ""; LINE=${LINE// /─}
                 
                 if [ "$idle" == "true" ]; then
@@ -394,11 +415,12 @@ if [ -z "$1" ]; then
                 else
                     header_text="${C_PURP}🪷 Now Playing ${C_WHT}[${C_ORNG}${curr_idx}${C_WHT}] ${C_RST}${C_PINK}${C_BLD}${clean_title}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
                 fi
-                curl -s -X POST --unix-socket "$FZF_SOCK" -d "change-header~${header_text}~" http://localhost/ >/dev/null 2>&1
-                last_title="$curr_title"; last_idle="$idle"
+                if curl -s -X POST --unix-socket "$FZF_SOCK" -d "change-header~${header_text}~" http://localhost/ >/dev/null 2>&1; then
+                    last_title="$curr_title"; last_idle="$idle"; last_cols="$curr_cols"
                 fi
+            fi
 
-                if [ "$curr_count" != "$last_count" ] || [ "$curr_shuf" != "$last_shuf" ] || [ "$curr_lf" != "$last_lf" ] || [ "$curr_lp" != "$last_lp" ] || [ "$curr_radio" != "$last_radio_state" ] || [ "$curr_af" != "$last_af" ]; then
+            if [ "$curr_count" != "$last_count" ] || [ "$curr_shuf" != "$last_shuf" ] || [ "$curr_lf" != "$last_lf" ] || [ "$curr_lp" != "$last_lp" ] || [ "$curr_radio" != "$last_radio_state" ] || [ "$curr_af" != "$last_af" ]; then
                 NEW_ICONS=""
                 [ "$curr_shuf" == "true" ] && NEW_ICONS="${NEW_ICONS}${P_DEEP_PINK} ><${P_RESET}"
                 [ "$curr_lf" == "inf" ] && NEW_ICONS="${NEW_ICONS}${P_DEEP_PINK} ⟳1${P_RESET}"
@@ -411,13 +433,14 @@ if [ -z "$1" ]; then
                 else
                     new_p=$(printf "🎵 ${P_TEAL}Queue List${NEW_ICONS}${P_RESET} > ")
                 fi
-                curl -s -X POST --unix-socket "$FZF_SOCK" -d "change-prompt~${new_p}~" http://localhost/ >/dev/null 2>&1                
-                if [ "$curr_count" != "$last_count" ]; then
-                    sleep 1.2
-                    curl -s -X POST --unix-socket "$FZF_SOCK" -d "reload(bash \"$SCRIPT_PATH\" -raw)" http://localhost/ >/dev/null 2>&1
+                if curl -s -X POST --unix-socket "$FZF_SOCK" -d "change-prompt~${new_p}~" http://localhost/ >/dev/null 2>&1; then
+                    if [ "$curr_count" != "$last_count" ]; then
+                        sleep 1.2
+                        curl -s -X POST --unix-socket "$FZF_SOCK" -d "reload(bash \"$SCRIPT_PATH\" -raw)" http://localhost/ >/dev/null 2>&1
+                    fi
+                    last_count="$curr_count"; last_shuf="$curr_shuf"; last_lf="$curr_lf"; last_lp="$curr_lp"
+                    last_radio_state="$curr_radio"; last_af="$curr_af"
                 fi
-                last_count="$curr_count"; last_shuf="$curr_shuf"; last_lf="$curr_lf"; last_lp="$curr_lp"
-                last_radio_state="$curr_radio"; last_af="$curr_af"
             fi
             sleep 2
         done
@@ -439,7 +462,7 @@ if [ -z "$1" ]; then
         --bind "insert:select-all+execute-silent(touch \"$SELECTION_MODE_FILE\")" \
         --bind "delete:deselect-all+execute-silent(rm -f \"$SELECTION_MODE_FILE\")" \
         --bind "tab:toggle+execute-silent(touch \"$SELECTION_MODE_FILE\")" \
-        --header="Loading..." \
+        --header="$INITIAL_HEADER" \
         --info=inline-right --prompt="$PROMPT" | sed "s/\x1b\[[0-9;]*m//g" | sed -E -n 's/^[[:space:]]*([0-9]+)\..*/\1/p')
     
     kill $MONITOR_PID 2>/dev/null

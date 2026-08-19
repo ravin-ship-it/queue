@@ -269,9 +269,26 @@ cmd_remove() {
         
         # Check playback status if we affected the playing track
         if [ "$was_playing_removed" = true ]; then
-            local is_paused=$(echo '{ "command": ["get_property", "pause"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // "false"')
+            # Query mpv state after removal
+            local cur_status=$(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","playlist-pos"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","pause"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r '
+                map(select(.event == null)) |
+                (.[0].data // 0), "\t", (if .[1].data == null then -1 else .[1].data end), "\t", (.[2].data // "false"), "\t", (.[3].data // "false")
+            ' 2>/dev/null)
+            IFS=$'\t' read -r rem_count rem_pos rem_idle rem_paused <<< "$cur_status"
+            
+            # If removing the track made MPV idle (e.g. removed last song or queue became empty)
+            # AND auto-mode is enabled, discover and queue the next track before logging
+            if { [ "$rem_idle" == "true" ] || [ "$rem_pos" -eq -1 ]; } && [ -f "$HOME/.cache/mpv/auto_enabled" ]; then
+                echo -ne "${C_GRAY}⏳ Discovering related track...${C_RESET}\r"
+                auto_queue_related "$removed_playing_title" "$removed_playing_filename" true
+                echo -ne "\033[2K\r"
+            elif [ -f "$HOME/.cache/mpv/auto_enabled" ]; then
+                # Queue still has tracks and is continuing playback, trigger auto-discovery in background
+                ( auto_queue_related "$removed_playing_title" "$removed_playing_filename" ) >/dev/null 2>&1 & disown
+            fi
+
             wait_for_playback_start
-            if [ "$is_paused" == "true" ]; then
+            if [ "$rem_paused" == "true" ]; then
                 log_now_playing "|| Paused: "
             else
                 log_now_playing
@@ -284,11 +301,10 @@ cmd_remove() {
             else
                 log_now_playing "|> Still Playing: "
             fi
+            
+            # Background auto-queue check
+            ( auto_queue_related "$removed_playing_title" "$removed_playing_filename" ) >/dev/null 2>&1 & disown
         fi
-
-        # Proactive auto-queue check after removal (maybe we removed the last tracks?)
-        # Pass removed playing track meta to maintain discovery vibe
-        ( auto_queue_related "$removed_playing_title" "$removed_playing_filename" ) >/dev/null 2>&1 & disown
         
         # Delay save to avoid racing with mpv during track transition
         ( sleep 2; save_current_playlist true ) >/dev/null 2>&1 & disown
