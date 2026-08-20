@@ -1,6 +1,8 @@
 <div align="center">
 
-# 🎵 `q` — The Ultimate MPV Music Engine
+<img src="./img/queue banner.png" width="auto" height="auto" alt="Queue Background" />
+
+# 🎵 Queue (`q`) — The Ultimate MPV Music Engine
 
 <p align="center">
   <b>Turn lightweight MPV into an intelligent, feature-packed terminal music player.</b><br>
@@ -17,12 +19,12 @@
 </p>
 
 <p align="center">
-  <a href="#-what-is-q"><b>What is q?</b></a> •
+  <a href="#-what-is-queue-q"><b>What is Queue?</b></a> •
   <a href="#-interactive-tui-preview"><b>TUI Showcase</b></a> •
   <a href="#-quick-start"><b>Quick Start</b></a> •
   <a href="#-cheat-sheet"><b>Commands</b></a> •
   <a href="#-smart-auto-mode-q--auto"><b>Auto-Mode</b></a> •
-  <a href="#-why-q-vs-standard-players"><b>Why q?</b></a> •
+  <a href="#-why-queue-vs-standard-players"><b>Why Queue?</b></a> •
   <a href="#-built-with-ai-augmented-development"><b>AI Development</b></a>
 </p>
 
@@ -30,23 +32,38 @@
 
 </div>
 
-## 🌟 What is `q`?
+## 🌟 What is Queue (`q`)?
 
-**`q`** is a unified command center designed for music lovers who live in the terminal. Instead of reinventing media playback, `q` elegantly bridges together the most powerful Unix tools—**MPV**, **yt-dlp**, **fzf**, **jq**, and **netcat**—transforming a barebones CLI player into a rich, reactive, background-resilient music player.
+**Queue** (invoked everywhere via the convenient shorthand command **`q`**) is a unified command center designed for music lovers who live in the terminal. Instead of reinventing media playback, Queue elegantly bridges together the most powerful Unix tools—**MPV**, **yt-dlp**, **fzf**, **jq**, and **netcat**—transforming a barebones CLI player into a rich, reactive, background-resilient music player.
 
-```
-       ┌──────────────┐       ┌──────────────┐       ┌──────────────┐
-       │    yt-dlp    │       │     fzf      │       │  netcat + jq │
-       │ (Stream Ext) │       │ (Active TUI) │       │  (JSON-IPC)  │
-       └──────┬───────┘       └──────┬───────┘       └──────┬───────┘
-              │                      │                      │
-              └───────────────► 🎛️   q   ◄──────────────────┘
-                                     │
-                                     ▼
-                          ┌─────────────────────┐
-                          │   MPV Audio Core    │
-                          │ (Background Daemon) │
-                          └─────────────────────┘
+```mermaid
+flowchart TD
+    subgraph INGESTION ["📥 Ingestion & Discovery"]
+        YTDLP["yt-dlp Engine<br/>(YouTube & SoundCloud Extractor)"]
+        AUTO["Smart Auto-Mode<br/>(24/7 Zero-Gap Discovery)"]
+        CLIP["Clipboard / URLs / Local Files<br/>(Ctrl-V & Shell Ingestion)"]
+    end
+
+    subgraph CORE ["🎛️ Queue Core (q)"]
+        CLI["Command & Flag Chainer<br/>(Smart CLI Parser)"]
+        FZF["FZF Interactive TUI<br/>(Real-Time Search & Batch Actions)"]
+        IPC_CLIENT["JSON-IPC Bridge<br/>(netcat + jq)"]
+    end
+
+    subgraph BACKEND ["🎬 Audio Backend"]
+        DAEMON["MPV Daemon (setsid)<br/>(Independent Background Session)"]
+        AUDIO["PulseAudio / ALSA / PipeWire<br/>(Dolby Spatial FX & Audio Output)"]
+        SESSION["Session & State Store<br/>(Playlists, State, & History)"]
+    end
+
+    YTDLP --> CLI
+    AUTO --> CLI
+    CLIP --> CLI
+    CLI <--> FZF
+    CLI --> IPC_CLIENT
+    IPC_CLIENT <==>|"Unix Socket (~/.mpv-socket)"| DAEMON
+    DAEMON --> AUDIO
+    DAEMON <--> SESSION
 ```
 
 ### 🧩 Under the Hood:
@@ -77,9 +94,9 @@ Launch the full-screen interactive queue simply by typing `q`:
 🎵 Queue List >< ◖∞◗ > search track...
 ```
 
-## ⚡ Why `q` vs Standard Players?
+## ⚡ Why Queue (`q`) vs Standard Players?
 
-| Feature | `q` | Spotify / Desktop Apps | Plain MPV CLI |
+| Feature | Queue (`q`) | Spotify / Desktop Apps | Plain MPV CLI |
 | :--- | :---: | :---: | :---: |
 | **RAM Usage** | **< 15 MB** | 500 MB – 1.2 GB (Electron) | ~15 MB |
 | **24/7 Smart Auto-Discovery** | ✅ (`q -auto`) | ✅ (Algorithm) | ❌ |
@@ -141,6 +158,27 @@ q ~/Music/favorite_song.mp3
 
 # 5. Pipe tracks or text lists directly
 cat playlist_urls.txt | q
+```
+
+### 🔗 Multi-Argument & Command Chaining
+
+`q` features an intelligent command parser that supports **chaining multiple actions, searches, and maintenance flags** in a single execution line:
+
+```bash
+# 🔎 Batch Search & Queue: Search and queue multiple songs sequentially
+q "linkin park numb" "starset my demons" "skillet the resistance"
+
+# 🧹 Multi-Flag Maintenance: Clean dead/deleted videos AND remove duplicates in one go
+q -clean -rmr
+
+# ⚡ Control Chaining: Jump to track 5 and set volume to 85% simultaneously
+q -p 5 -v 85
+
+# 🚚 Batch Queue Editing: Move track 1 to 5 and swap tracks 2 and 8
+q -mv 1 5 -sw 2 8
+
+# ❓ Need Help? Launch the built-in manual & reference guide
+q -h     # or: q help
 ```
 
 ---
