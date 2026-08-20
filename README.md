@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="./img/queue banner.png" width="auto" height="auto" alt="Queue Background" />
+<img src="./assets/queue banner.png" width="auto" height="auto" alt="Queue Background" />
 
 # 🎵 Queue (`q`) — The Ultimate MPV Music Engine
 
@@ -36,6 +36,13 @@
 
 **Queue** (invoked everywhere via the convenient shorthand command **`q`**) is a unified command center designed for music lovers who live in the terminal. Instead of reinventing media playback, Queue elegantly bridges together the most powerful Unix tools—**MPV**, **yt-dlp**, **fzf**, **jq**, and **netcat**—transforming a barebones CLI player into a rich, reactive, background-resilient music player.
 
+<p align="center">
+  <img src="./assets/architecture.svg" width="100%" alt="Queue Architecture Flowchart" />
+</p>
+
+<details>
+<summary><b>🔍 View Raw Mermaid Flowchart Code</b></summary>
+
 ```mermaid
 flowchart TD
     subgraph INGESTION ["📥 Ingestion & Discovery"]
@@ -66,6 +73,8 @@ flowchart TD
     DAEMON <--> SESSION
 ```
 
+</details>
+
 ### 🧩 Under the Hood:
 | Tool | Role in `q` |
 | :--- | :--- |
@@ -80,19 +89,9 @@ flowchart TD
 
 Launch the full-screen interactive queue simply by typing `q`:
 
-```text
-╭──────────────────────────────────────────────────────────────────────────────╮
-│ 🪷 Now Playing [2] Skillet - "The Resistance" [Official Lyric Video]         │
-│ ──────────────────────────────────────────────────────────────────────────── │
-│   1. DJ Slow Remix!!! Hubbuka Fi Qalbi (Aires Remix) by Aires Music [4:01]   │
-│ > 2. Skillet - "The Resistance" [Official Lyric Video] by Skillet [4:01]     │
-│   3. Numb (Official Music Video) [4K UPGRADE] – Linkin Park [3:08]           │
-│   4. The Weeknd - Blinding Lights (Official Video) [4:23]                    │
-│   5. STARSET - My Demons (Official Music Video) [3:43]                       │
-│   6. Thousand Foot Krutch - Courtesy Call [3:52]                             │
-╰──────────────────────────────────────────────────────────────────────────────╯
-🎵 Queue List >< ◖∞◗ > search track...
-```
+<p align="center">
+  <img src="./assets/TUI%20preview.png" width="100%" alt="Queue Interactive TUI Preview" />
+</p>
 
 ## ⚡ Why Queue (`q`) vs Standard Players?
 
@@ -142,6 +141,11 @@ q "blinding lights the weeknd"
 ## 🕹️ Everyday Usage & Examples
 
 ### 🔍 Instant Streaming & Ingestion
+
+<p align="center">
+  <img src="./assets/Everyday%20usage.png" width="100%" alt="Everyday Usage Preview" />
+</p>
+
 ```bash
 # 1. Search YouTube and pick from top results
 q "linkin park in the end"
@@ -163,6 +167,10 @@ cat playlist_urls.txt | q
 ### 🔗 Multi-Argument & Command Chaining
 
 `q` features an intelligent command parser that supports **chaining multiple actions, searches, and maintenance flags** in a single execution line:
+
+<p align="center">
+  <img src="./assets/Command%20Chaining.png" width="100%" alt="Command Chaining Preview" />
+</p>
 
 ```bash
 # 🔎 Batch Search & Queue: Search and queue multiple songs sequentially
