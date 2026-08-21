@@ -112,76 +112,97 @@ execute_batch() {
 
     # 2. Process Queue/Play (If selected or implicit)
     if [ "$DO_QUEUE" = true ] || ([ ${#TARGET_FILES[@]} -eq 0 ] && [ ${#PLAYLIST_URLS[@]} -gt 0 ]); then
+        local SHOULD_START_PLAY=false
+
         if [ "$MPV_RUNNING" = false ]; then
+            SHOULD_START_PLAY=true
+            echo -e "${C_PINK}🚀 Starting MPV...${C_RESET}"
+            rm -f "$SOCKET"
+            local initial_pl_arg=()
             if [ -f "$LAST_PLAYLIST_FILE" ] && [ -s "$LAST_PLAYLIST_FILE" ]; then
-                echo -e "${C_PINK}🚀 Starting MPV and restoring session...${C_RESET}"
-                cmd_play >/dev/null 2>&1
-                for i in {1..20}; do
-                    [ -S "$SOCKET" ] && break
-                    sleep 0.2
-                done
-                MPV_RUNNING=true
-            else
-                echo -e "${C_PINK}🚀 Starting MPV...${C_RESET}"
-                rm -f "$SOCKET"
-                setsid mpv --idle --keep-open=yes --no-terminal --vo=null \
-                    --network-timeout=30 \
-                    --stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5 \
-                    --demuxer-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5 \
-                    --cache=yes --cache-secs=300 --demuxer-readahead-secs=300 \
-                    --demuxer-max-bytes=256MiB --demuxer-max-back-bytes=128MiB \
-                    --input-ipc-server="$SOCKET" </dev/null >/dev/null 2>&1 &
-                disown
-                for i in {1..20}; do
-                    [ -S "$SOCKET" ] && break
-                    sleep 0.2
-                done
-                MPV_RUNNING=true
-                start_idle_monitor
+                initial_pl_arg=("--playlist=$LAST_PLAYLIST_FILE")
+            fi
+
+            setsid mpv --idle --keep-open=yes --no-terminal --vo=null \
+                --network-timeout=30 \
+                --stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5 \
+                --demuxer-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5 \
+                --cache=yes --cache-secs=300 --demuxer-readahead-secs=300 \
+                --demuxer-max-bytes=256MiB --demuxer-max-back-bytes=128MiB \
+                --input-ipc-server="$SOCKET" "${initial_pl_arg[@]}" </dev/null >/dev/null 2>&1 &
+            disown
+
+            for i in {1..30}; do
+                [ -S "$SOCKET" ] && break
+                sleep 0.1
+            done
+
+            MPV_RUNNING=true
+            start_idle_monitor
+            restore_state_properties
+        else
+            # Check if MPV is running but idle, paused at EOF, or has no active track
+            local raw_mpv_state=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","playlist-count"]}\n{"command":["get_property","playlist-pos"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r 'map(select(.event == null)) | (if .[0].data == null then true else .[0].data end), "\t", (if .[1].data == null then 0 else .[1].data end), "\t", (if .[2].data == null then -1 else .[2].data end)')
+            IFS=$'\t' read -r m_idle m_count m_pos <<< "$raw_mpv_state"
+            if [ "$m_idle" == "true" ] || [ "$m_count" -le 0 ] || [ "$m_pos" -eq -1 ]; then
+                SHOULD_START_PLAY=true
             fi
         fi
 
         if [ "$MPV_RUNNING" = true ]; then
-            if [ ${#PLAYLIST_URLS[@]} -gt 1 ]; then
-                # Fetch count before adding to know where to resume
-                local init_count=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
-                
-                echo -e "${C_PINK}🚀 Queuing ${C_ORANGE}${#PLAYLIST_URLS[@]}${C_PINK} tracks...${C_RESET}"
-                local batch_cmds=""
-                for i in "${!PLAYLIST_URLS[@]}"; do 
-                    local q_url="${PLAYLIST_URLS[$i]}"
-                    local q_title="${PLAYLIST_TITLES[$i]}"
-                    local q_artist="${PLAYLIST_ARTISTS[$i]}"
-                    local q_dur="${PLAYLIST_DURATIONS[$i]}"
-                    
-                    # Robust URL cleaning
-                    local q_clean_url="${q_url%%\\t*}"
-                    q_clean_url="${q_clean_url%%[[:space:]]*}"
-                    q_clean_url=$(echo "$q_clean_url" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+            # Current count before appending new items
+            local init_count=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
+            [[ ! "$init_count" =~ ^[0-9]+$ ]] && init_count=0
 
-                    if [ -n "$q_title" ] && [ "$q_title" != "$q_url" ]; then
-                        printf "%s\t%s\t%s\t%s\n" "$q_clean_url" "$q_title" "$q_artist" "$q_dur" >> "$CACHE_FILE"
-                        CACHE_MEM["$q_clean_url"]="${q_title}"$'\t'"${q_artist}"$'\t'"${q_dur}"
-                    fi
+            local batch_cmds=""
+            for i in "${!PLAYLIST_URLS[@]}"; do
+                local q_url="${PLAYLIST_URLS[$i]}"
+                local q_title="${PLAYLIST_TITLES[$i]}"
+                local q_artist="${PLAYLIST_ARTISTS[$i]}"
+                local q_dur="${PLAYLIST_DURATIONS[$i]}"
 
-                    local q_json_cmd=$(jq -nc --arg path "$q_clean_url" '{"command": ["loadfile", $path, "append-play"]}')
-                    batch_cmds+="${q_json_cmd}\n"
-                done
-                echo -e "$batch_cmds" | nc -N -U -w 1 "$SOCKET" > /dev/null
-                echo -e "${C_GREEN}✅ All tracks added to queue.${C_RESET}"
-                
-                # Auto-resume if MPV was idle (start at the first new track)
-                check_and_resume "$init_count"
-                save_current_playlist >/dev/null 2>&1 & 
+                # Robust URL cleaning
+                local q_clean_url="${q_url%%\\t*}"
+                q_clean_url="${q_clean_url%%[[:space:]]*}"
+                q_clean_url=$(echo "$q_clean_url" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+
+                if [ -n "$q_title" ] && [ "$q_title" != "$q_url" ]; then
+                    printf "%s\t%s\t%s\t%s\n" "$q_clean_url" "$q_title" "$q_artist" "$q_dur" >> "$CACHE_FILE"
+                    CACHE_MEM["$q_clean_url"]="${q_title}"$'\t'"${q_artist}"$'\t'"${q_dur}"
+                fi
+
+                local q_json_cmd=$(jq -nc --arg path "$q_clean_url" '{"command": ["loadfile", $path, "append-play"]}')
+                batch_cmds+="${q_json_cmd}\n"
+            done
+
+            echo -e "$batch_cmds" | nc -N -U -w 1 "$SOCKET" > /dev/null
+
+            # Stabilization: wait for playlist count to increase
+            for i in {1..15}; do
+                local cur_cnt=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
+                if [ "$cur_cnt" -gt "$init_count" ]; then break; fi
+                sleep 0.1
+            done
+
+            if [ "$SHOULD_START_PLAY" = true ]; then
+                # Directly play the newly added track immediately
+                echo "{\"command\": [\"playlist-play-index\", $init_count]}" | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
+                echo '{"command": ["set_property", "pause", false]}' | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
+                wait_for_playback_start
+                log_now_playing "|> Playing: "
             else
-                # Single item - Manual Cache Update to ensure Artist/Duration presence
-                local q_url="${PLAYLIST_URLS[0]}"
-                local q_title="${PLAYLIST_TITLES[0]}"
-                local q_artist="${PLAYLIST_ARTISTS[0]}"
-                local q_dur="${PLAYLIST_DURATIONS[0]}"
-                
-                queue_item_ipc "${q_url}" "${q_title}" "${q_artist}" "${q_dur}"
+                # MPV is already playing: queue without interrupting
+                if [ ${#PLAYLIST_URLS[@]} -gt 1 ]; then
+                    echo -e "${C_GREEN}✅ Added ${#PLAYLIST_URLS[@]} tracks to queue.${C_RESET}"
+                else
+                    local display_title="${PLAYLIST_TITLES[0]}"
+                    [ -z "$display_title" ] && display_title=$(basename "${PLAYLIST_URLS[0]}")
+                    local formatted_track=$(format_track_log "$((init_count + 1))" "${PLAYLIST_URLS[0]}" "$display_title")
+                    echo -e "${C_PINK}✅ Queued ${formatted_track}${C_RESET}"
+                fi
             fi
+
+            save_current_playlist true >/dev/null 2>&1 & disown
         fi
     fi
     
