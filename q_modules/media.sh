@@ -301,6 +301,7 @@ format_track_log() {
     local filename="$2"
     local mpv_title="$3"
     local force_artist="$4"
+    local force_dur="$5"
     
     # 1. Clean Filename (Only for remote URLs)
     local clean_fname="$filename"
@@ -313,7 +314,7 @@ format_track_log() {
     # 3. Robust Cache & Metadata Lookup
     local cached_title=""
     local cached_artist=""
-    local cached_duration=""
+    local cached_duration="$force_dur"
     
     if [[ "$clean_fname" =~ ^http ]] || [[ "$clean_fname" == watch\?v=* ]]; then
         [ ${#CACHE_MEM[@]} -eq 0 ] && load_cache_to_memory
@@ -338,7 +339,7 @@ format_track_log() {
         if [ -n "$row" ]; then
             cached_title=$(echo -e "$row" | cut -f1)
             cached_artist=$(echo -e "$row" | cut -f2)
-            cached_duration=$(echo -e "$row" | cut -f3)
+            [ -z "$cached_duration" ] && cached_duration=$(echo -e "$row" | cut -f3)
         fi
     fi
 
@@ -365,9 +366,18 @@ format_track_log() {
     final_artist="${final_artist//\//, }"
     
     [ -n "$final_artist" ] && [ "$final_artist" != "null" ] && [ "$final_artist" != "$clean_fname" ] && [ "$final_artist" != "N/A" ] && [ "$final_artist" != "Unknown" ] && artist_part=" ${C_GRAY}by${C_RESET} ${C_LIGHT_PINK}$final_artist${C_RESET}"
+    
     # Fallback: fetch live duration from mpv if cache miss
     if { [ -z "$cached_duration" ] || [ "$cached_duration" == "null" ] || [ "$cached_duration" == "0:00" ]; } && [ -S "$SOCKET" ]; then
-        cached_duration=$(echo '{"command":["get_property","duration-string"]}' | nc -U -w 0.5 "$SOCKET" 2>/dev/null | jq -r '.data // ""')
+        local raw_mpv_dur=$(echo '{"command":["get_property","duration"]}' | nc -N -U -w 0.5 "$SOCKET" 2>/dev/null | jq -r '.data // empty')
+        if [ -n "$raw_mpv_dur" ] && [[ "$raw_mpv_dur" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+            local dur_secs=${raw_mpv_dur%.*}
+            if [ "$dur_secs" -ge 3600 ]; then
+                cached_duration=$(printf "%d:%02d:%02d" "$((dur_secs / 3600))" "$(((dur_secs % 3600) / 60))" "$((dur_secs % 60))")
+            else
+                cached_duration=$(printf "%d:%02d" "$((dur_secs / 60))" "$((dur_secs % 60))")
+            fi
+        fi
     fi
     [ -n "$cached_duration" ] && [ "$cached_duration" != "null" ] && [ "$cached_duration" != "0:00" ] && dur_part=" ${C_ORANGE}[$cached_duration]${C_RESET}"
     
@@ -383,8 +393,9 @@ log_now_playing() {
     local idle="false"
     local paused="false"
     local artist_tag=""
+    local raw_live_dur=""
     for i in {1..30}; do
-        local raw=$(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","playlist-pos"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","playlist"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","pause"]}\n{"command":["get_property","metadata"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r '
+        local raw=$(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","playlist-pos"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","playlist"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","pause"]}\n{"command":["get_property","metadata"]}\n{"command":["get_property","duration"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r '
             map(select(.event == null)) |
             (.[0].data // 0), "\t",
             (if .[1].data == null then -1 else .[1].data end), "\t",
@@ -392,16 +403,21 @@ log_now_playing() {
             (if .[1].data != null and .[3].data != null then .[3].data[.[1].data].filename else "" end), "\t",
             (.[4].data // "false"), "\t",
             (.[5].data // "false"), "\t",
-            (.[6].data | if type == "object" then .artist // .ARTIST // .uploader // "" else "" end)
+            (.[6].data | if type == "object" then .artist // .ARTIST // .uploader // "" else "" end), "\t",
+            (.[7].data // "")
         ' 2>/dev/null)
         
         [ -z "$raw" ] && { sleep 0.1; continue; }
-        IFS=$'\t' read -r count pos title filename idle paused artist_tag <<< "$raw"
+        IFS=$'\t' read -r count pos title filename idle paused artist_tag raw_live_dur <<< "$raw"
         
         # If pos is valid, we found our track index
         if [ "$pos" != "-1" ]; then
              curr_idx=$((pos + 1))
-             break
+             if [ -n "$raw_live_dur" ] && [ "$raw_live_dur" != "null" ]; then
+                 break
+             elif [ "$i" -ge 4 ]; then
+                 break
+             fi
         fi
 
         sleep 0.1
@@ -452,7 +468,17 @@ log_now_playing() {
     # Sanitize artist tag from MPV (replace / with , )
     [ -n "$artist_tag" ] && artist_tag="${artist_tag//\//, }"
 
-    local formatted_track=$(format_track_log "$curr_idx" "$filename" "$title" "$artist_tag")
+    local live_dur_formatted=""
+    if [ -n "$raw_live_dur" ] && [[ "$raw_live_dur" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+        local dur_secs=${raw_live_dur%.*}
+        if [ "$dur_secs" -ge 3600 ]; then
+            live_dur_formatted=$(printf "%d:%02d:%02d" "$((dur_secs / 3600))" "$(((dur_secs % 3600) / 60))" "$((dur_secs % 60))")
+        else
+            live_dur_formatted=$(printf "%d:%02d" "$((dur_secs / 60))" "$((dur_secs % 60))")
+        fi
+    fi
+
+    local formatted_track=$(format_track_log "$curr_idx" "$filename" "$title" "$artist_tag" "$live_dur_formatted")
     echo -e "${C_PINK}${prefix}${formatted_track}"
 
     # Cache update for local or remote files if metadata was found but missing from cache
@@ -461,10 +487,7 @@ log_now_playing() {
         [[ "$filename" =~ ^http ]] && clean_url=$(echo "$filename" | sed -e 's/^[[:space:]]*//; s/\\t.*//')
         
         if [ -z "${CACHE_MEM[$clean_url]}" ]; then
-             # Simple duration fetch if possible
-             local live_dur=$(echo '{"command":["get_property","duration-string"]}' | nc -N -U -w 0.5 "$SOCKET" 2>/dev/null | jq -r '.data // "0:00"')
-             [ "$live_dur" == "null" ] && live_dur="0:00"
-             
+             local live_dur="${live_dur_formatted:-0:00}"
              # Save to cache file
              printf "%s\t%s\t%s\t%s\n" "$clean_url" "$title" "$artist_tag" "$live_dur" >> "$CACHE_FILE"
              # Update memory for current session

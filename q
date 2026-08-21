@@ -84,7 +84,7 @@ fi
 # --- Command Parsing ---
 
 PROCESSED_ANY_FLAG=false
-SMART_CMDS="^(play|stop|next|prev|vol|info|list|clear|shuffle|remove|move|swap|help|save|load|auto|fx)$"
+SMART_CMDS="^(play|pause|stop|next|prev|vol|info|list|clear|shuffle|remove|move|swap|help|save|load|auto|fx)$"
 
 while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
     PROCESSED_ANY_FLAG=true
@@ -93,7 +93,7 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
     CMD="$1"
     if [[ ! "$CMD" =~ ^- ]]; then
         case "$CMD" in
-            play) CMD="-p" ;;
+            play|pause) CMD="-p" ;;
             stop) CMD="-stop" ;;
             next) CMD="-next" ;;
             prev) CMD="-prev" ;;
@@ -215,7 +215,7 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
                 cmd_shuffle ""
             fi
             ;; 
-        -p|-play) 
+        -p|-play|-pause) 
             shift
             found=false
             while [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]] && [[ ! "$1" =~ $SMART_CMDS ]]; do
