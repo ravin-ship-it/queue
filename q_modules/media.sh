@@ -641,13 +641,15 @@ cmd_audio_fx() {
         is_on=$(echo "$af_json" | jq -r 'if type == "array" and (map(.name // "") | join(",") | test("firequalizer|acompressor|alimiter")) then "true" else "false" end' 2>/dev/null)
     fi
 
+    local dolby_filter="lavfi=[firequalizer=zero_phase=on:gain_entry='entry(40,4);entry(80,3);entry(160,1.5);entry(320,0.2);entry(1000,0);entry(2800,1.2);entry(6000,2);entry(12000,1.4)'],acompressor=threshold=-18dB:ratio=2.2:attack=20:release=250:makeup=3,alimiter=limit=0.97"
+
     case "$mode" in
         on)
-            echo '{ "command": ["apply-profile", "dolby-like"] }' | nc -N -U -w 1 "$SOCKET" > /dev/null
+            echo "{\"command\": [\"set_property_string\", \"af\", \"$dolby_filter\"]}" | nc -N -U -w 1 "$SOCKET" > /dev/null
             echo -e "🎛️ ${C_PINK}Audio FX:${C_RESET} ${C_GREEN}ON${C_RESET} ${C_GRAY}(dolby-like)${C_RESET}"
             ;;
         off)
-            echo '{ "command": ["apply-profile", "flat-audio"] }' | nc -N -U -w 1 "$SOCKET" > /dev/null
+            echo '{"command": ["set_property_string", "af", ""]}' | nc -N -U -w 1 "$SOCKET" > /dev/null
             echo -e "🎛️ ${C_PINK}Audio FX:${C_RESET} ${C_ORANGE}OFF${C_RESET} ${C_GRAY}(flat-audio)${C_RESET}"
             ;;
         status)
@@ -659,10 +661,10 @@ cmd_audio_fx() {
             ;;
         toggle|*)
             if [ "$is_on" = "true" ]; then
-                echo '{ "command": ["apply-profile", "flat-audio"] }' | nc -N -U -w 1 "$SOCKET" > /dev/null
+                echo '{"command": ["set_property_string", "af", ""]}' | nc -N -U -w 1 "$SOCKET" > /dev/null
                 echo -e "🎛️ ${C_PINK}Audio FX:${C_RESET} ${C_ORANGE}OFF${C_RESET} ${C_GRAY}(flat-audio)${C_RESET}"
             else
-                echo '{ "command": ["apply-profile", "dolby-like"] }' | nc -N -U -w 1 "$SOCKET" > /dev/null
+                echo "{\"command\": [\"set_property_string\", \"af\", \"$dolby_filter\"]}" | nc -N -U -w 1 "$SOCKET" > /dev/null
                 echo -e "🎛️ ${C_PINK}Audio FX:${C_RESET} ${C_GREEN}ON${C_RESET} ${C_GRAY}(dolby-like)${C_RESET}"
             fi
             ;;

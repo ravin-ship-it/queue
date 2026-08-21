@@ -113,6 +113,9 @@ cat << 'EOF' > "$YTDLP_CONF_DIR/config"
 --extractor-args "youtube:player_client=android,web"
 --no-warnings
 EOF
+if [ -f "$YTDLP_CONF_DIR/cookies.txt" ]; then
+    echo "--cookies ~/.config/yt-dlp/cookies.txt" >> "$YTDLP_CONF_DIR/config"
+fi
 echo -e "${GREEN}✅ yt-dlp configuration updated.${NC}"
 
 # --- Playlists ---
