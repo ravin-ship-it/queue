@@ -58,6 +58,7 @@ check_and_resume() {
                  # Fallback to next
                  echo '{ "command": ["playlist-next"] }' | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
             fi
+            echo '{ "command": ["seek", 0, "absolute"] }' | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
             echo '{ "command": ["set_property", "pause", false] }' | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
             
             # Check success

@@ -677,16 +677,16 @@ auto_queue_related() {
     fi
 
     # --- PROTOCOL: Status, Pause & Loop Respect ---
-    local raw_status=$(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","playlist-pos"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","pause"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r '
+    local raw_status=$(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","playlist-pos"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","pause"]}\n{"command":["get_property","eof-reached"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r '
         map(select(.event == null)) |
-        (.[0].data // 0), "\t", (if .[1].data == null then -1 else .[1].data end), "\t", (.[2].data // "false"), "\t", (.[3].data // "no"), "\t", (.[4].data // "no"), "\t", (.[5].data // "false")
+        (.[0].data // 0), "\t", (if .[1].data == null then -1 else .[1].data end), "\t", (.[2].data // "false"), "\t", (.[3].data // "no"), "\t", (.[4].data // "no"), "\t", (.[5].data // "false"), "\t", (.[6].data // "false")
     ' 2>/dev/null)
     
     if [ -z "$raw_status" ]; then return; fi
-    IFS=$'\t' read -r count pos idle loop_p loop_f is_paused <<< "$raw_status"
+    IFS=$'\t' read -r count pos idle loop_p loop_f is_paused is_eof <<< "$raw_status"
 
-    # Never auto-queue while paused
-    if [ "$is_paused" == "true" ]; then
+    # Never auto-queue while user manually paused (unless at EOF or idle!)
+    if [ "$is_paused" == "true" ] && [ "$is_eof" != "true" ] && [ "$idle" != "true" ]; then
         return
     fi
 

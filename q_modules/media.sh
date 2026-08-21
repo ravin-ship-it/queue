@@ -734,11 +734,13 @@ cmd_loop() {
 }
 
 check_auto_trigger() {
-    local idle="$1"; local count="$2"; local idx="$3"; local rem="$4"; local loop="$5"; local paused="${6:-false}"
+    local idle="$1"; local count="$2"; local idx="$3"; local rem="$4"; local loop="$5"; local paused="${6:-false}"; local eof="${7:-false}"
     
     [ ! -f "$HOME/.cache/mpv/auto_enabled" ] && return
-    # Never auto-queue while paused
-    [ "$paused" == "true" ] && return
+    # Never auto-queue while user manually paused (unless at EOF / idle)
+    if [ "$paused" == "true" ] && [ "$eof" != "true" ] && [ "$idle" != "true" ]; then
+        return
+    fi
     
     # Do not trigger if single track loop is active (respect user manual override)
     if [ "$loop" == "inf" ] || [ "$loop" == "yes" ]; then
@@ -766,15 +768,15 @@ check_auto_trigger() {
          fi
     fi
     
-    # 3. Finished playing (idle is true, pos is null so idx is 0, but queue not empty)
-    if [ "$idle" == "true" ] && [ "$count" -gt 0 ]; then
+    # 3. Finished playing / EOF Reached (idle is true, or eof is true on the last track)
+    if { [ "$idle" == "true" ] || [ "$eof" == "true" ]; } && [ "$count" -gt 0 ]; then
          [ -f "$HOME/.cache/mpv/auto_cooldown" ] && return
          should_trigger=true
     fi
     
     if [ "$should_trigger" == "true" ]; then
         local last_trig=$(cat "$HOME/.cache/mpv/auto_last_trigger" 2>/dev/null)
-        local current_state="${idx}-${idle}-${count}"
+        local current_state="${idx}-${idle}-${count}-${eof}"
         
         local now=$(date +%s)
         local last_time=$(get_file_mtime "$HOME/.cache/mpv/auto_last_trigger")
@@ -854,7 +856,7 @@ start_idle_monitor() {
             if [ "$loop_p" != "no" ]; then active_loop="$loop_p"; elif [ "$loop_f" != "no" ]; then active_loop="$loop_f"; fi
 
             # --- Auto Mode Check ---
-            check_auto_trigger "$idle" "$count" "$current_idx" "$rem" "$active_loop" "$is_paused"
+            check_auto_trigger "$idle" "$count" "$current_idx" "$rem" "$active_loop" "$is_paused" "$eof"
             
             local sleep_time=2
             if [ "$idle" == "false" ]; then
@@ -954,7 +956,16 @@ cmd_play() {
                 return
             fi
 
-            if [ "$cur_pause" == "true" ]; then
+            if [ "$is_eof" == "true" ] || [ "$is_idle" == "true" ] || [ "$cur_pos" -lt 0 ]; then
+                # Replay current track or start if at EOF / idle
+                local start_idx=0
+                [ "$cur_pos" -ge 0 ] 2>/dev/null && start_idx="$cur_pos"
+                echo "{\"command\": [\"playlist-play-index\", $start_idx]}" | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
+                echo '{ "command": ["seek", 0, "absolute"] }' | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
+                echo '{ "command": ["set_property", "pause", false] }' | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
+                wait_for_playback_start
+                log_now_playing "|> Playing: "
+            elif [ "$cur_pause" == "true" ]; then
                 # Unpause
                 echo '{ "command": ["set_property", "pause", false] }' | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
                 
@@ -964,16 +975,9 @@ cmd_play() {
                 if [ "$check_idle" == "true" ] && [ "$cur_pos" -ge 0 ] 2>/dev/null; then
                     # Stream connection dropped/expired! Force reload current track index with fresh token
                     echo "{\"command\":[\"playlist-play-index\",$cur_pos]}" | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
+                    echo '{ "command": ["seek", 0, "absolute"] }' | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
                     echo '{ "command": ["set_property", "pause", false] }' | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
                 fi
-                wait_for_playback_start
-                log_now_playing "|> Playing: "
-            elif [ "$is_idle" == "true" ] || [ "$is_eof" == "true" ] || [ "$cur_pos" -lt 0 ]; then
-                # Replay from start/current if idle at queue end
-                local start_idx=0
-                [ "$cur_pos" -ge 0 ] 2>/dev/null && start_idx="$cur_pos"
-                echo "{\"command\": [\"playlist-play-index\", $start_idx]}" | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
-                echo '{ "command": ["set_property", "pause", false] }' | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
                 wait_for_playback_start
                 log_now_playing "|> Playing: "
             else
@@ -1008,10 +1012,8 @@ cmd_play() {
         return
     fi
 
-
-
-    # Set pos AND force unpause (Separate commands for maximum compatibility)
-    echo "{\"command\":[\"set_property\",\"playlist-pos\",$((index - 1))]}" | nc -N -U -w 1 "$SOCKET" > /dev/null
+    # Set pos AND force unpause and reset seek to 0 (Separate commands for maximum compatibility)
+    echo "{\"command\":[\"playlist-play-index\",$((index - 1))]}" | nc -N -U -w 1 "$SOCKET" > /dev/null
     echo "{\"command\":[\"seek\",0,\"absolute\"]}" | nc -N -U -w 1 "$SOCKET" > /dev/null
     echo "{\"command\":[\"set_property\",\"pause\",false]}" | nc -N -U -w 1 "$SOCKET" > /dev/null
     
