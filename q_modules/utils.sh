@@ -356,7 +356,7 @@ fetch_missing_background() {
                  local YTDL_OPTS=("--js-runtimes" "node" "--extractor-args" "youtube:player_client=android,web" "--print" "%(title)s\t%(uploader)s\t%(duration_string)s" "--no-warnings" "--skip-download")
                  [ -f "$COOKIES_FILE" ] && YTDL_OPTS+=("--cookies" "$COOKIES_FILE")
 
-                 local info=$(nice -n 19 run_with_timeout 30s yt-dlp "${YTDL_OPTS[@]}" -- "$url" 2>/dev/null | sed 's/\\t/\t/g')
+                 local info=$(run_with_timeout 30s nice -n 19 yt-dlp "${YTDL_OPTS[@]}" -- "$url" 2>/dev/null | sed 's/\\t/\t/g')
                  if [ -n "$info" ]; then
                      { printf "%s\t%s\n" "$url" "$info"; } >> "$CACHE_FILE"
                  else

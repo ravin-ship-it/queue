@@ -752,14 +752,14 @@ auto_queue_related() {
 
     if [ "$is_default_search" = false ] && [ -n "$seed_id" ]; then
         echo "[$(date +%T)] [Discovery] Mix for Seed ID: $seed_id" >> "$debug_log"
-        candidates=$(nice -n 19 run_with_timeout 25s yt-dlp --js-runtimes node --extractor-args "youtube:player_client=android,web" --print "$fields" --flat-playlist --no-warnings --skip-download --playlist-end 15 "https://www.youtube.com/watch?v=${seed_id}&list=RDAMVM${seed_id}" 2>/dev/null)
+        candidates=$(run_with_timeout 25s nice -n 19 yt-dlp --js-runtimes node --extractor-args "youtube:player_client=android,web" --print "$fields" --flat-playlist --no-warnings --skip-download --playlist-end 15 "https://www.youtube.com/watch?v=${seed_id}&list=RDAMVM${seed_id}" 2>/dev/null)
     fi
 
     if [ -z "$candidates" ]; then
         local query="popular music"
         [ "$is_default_search" = false ] && query="related to ${input_title:-music}"
         echo "[$(date +%T)] [Discovery] Search for: $query" >> "$debug_log"
-        candidates=$(nice -n 19 run_with_timeout 25s yt-dlp --js-runtimes node --extractor-args "youtube:player_client=android,web" --print "$fields" --no-warnings --skip-download --playlist-end 15 "ytmsearch15:${query}" 2>/dev/null)
+        candidates=$(run_with_timeout 25s nice -n 19 yt-dlp --js-runtimes node --extractor-args "youtube:player_client=android,web" --print "$fields" --no-warnings --skip-download --playlist-end 15 "ytmsearch15:${query}" 2>/dev/null)
     fi
     
     if [ -z "$candidates" ]; then
