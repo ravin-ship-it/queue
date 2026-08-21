@@ -82,6 +82,8 @@ ensure_mpv_running() {
         fi
 
         setsid mpv --idle --keep-open=yes --no-terminal --vo=null \
+            --ao=pipewire,pulse,alsa --audio-buffer=0.5 \
+            --demuxer-thread=yes \
             --network-timeout=30 \
             --stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5 \
             --demuxer-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5 \
@@ -319,7 +321,7 @@ fetch_missing_background() {
     local playlist_json=$(echo '{ "command": ["get_property", "playlist"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null)
     
     # Extract HTTP URLs that are NOT in cache or have old format
-    local parallel_limit=5
+    local parallel_limit=2
     local current_jobs=0
 
     echo "$playlist_json" | jq -s -r 'map(select(.event == null)) | .[0].data | select(type == "array") | .[].filename' 2>/dev/null | grep '^http' | while IFS= read -r raw_url; do
@@ -335,13 +337,13 @@ fetch_missing_background() {
         local col_count=$(echo -e "$cached_row" | awk -F'\t' '{print NF}')
         
         if [ -z "$cached_row" ] || [ "$col_count" -lt 3 ]; then
-             # Parallel Fetch with a bit of a limit
+             # Background fetch with lowest scheduling priority (nice 19) to never interrupt audio playback
              (
                  local COOKIES_FILE="$HOME/.config/mpv/cookies.txt"
                  local YTDL_OPTS=("--js-runtimes" "node" "--extractor-args" "youtube:player_client=android,web" "--print" "%(title)s\t%(uploader)s\t%(duration_string)s" "--no-warnings" "--skip-download")
                  [ -f "$COOKIES_FILE" ] && YTDL_OPTS+=("--cookies" "$COOKIES_FILE")
 
-                 local info=$(run_with_timeout 30s yt-dlp "${YTDL_OPTS[@]}" -- "$url" 2>/dev/null | sed 's/\\t/\t/g')
+                 local info=$(nice -n 19 run_with_timeout 30s yt-dlp "${YTDL_OPTS[@]}" -- "$url" 2>/dev/null | sed 's/\\t/\t/g')
                  if [ -n "$info" ]; then
                      { printf "%s\t%s\n" "$url" "$info"; } >> "$CACHE_FILE"
                  else
@@ -355,6 +357,7 @@ fetch_missing_background() {
                  wait -n 2>/dev/null || wait
                  ((current_jobs--))
              fi
+             sleep 0.1
         fi
     done
     wait

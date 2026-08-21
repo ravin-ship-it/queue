@@ -890,21 +890,7 @@ cmd_play() {
         fi
         
         echo -e "${C_PINK}🚀 Restoring last session...${C_RESET}"
-        rm -f "$SOCKET"
-        setsid mpv --idle --keep-open=yes --no-terminal --vo=null \
-            --network-timeout=30 \
-            --stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5 \
-            --demuxer-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5 \
-            --cache=yes --cache-secs=300 --demuxer-readahead-secs=300 \
-            --demuxer-max-bytes=256MiB --demuxer-max-back-bytes=128MiB \
-            --input-ipc-server="$SOCKET" --playlist="$LAST_PLAYLIST_FILE" </dev/null >/dev/null 2>&1 &
-        disown
-        
-        # Wait for socket
-        for i in {1..30}; do
-            [ -S "$SOCKET" ] && break
-            sleep 0.1
-        done
+        ensure_mpv_running "$LAST_PLAYLIST_FILE"
         
         # Stabilization: Wait for playlist to populate (max 3s)
         for i in {1..15}; do
