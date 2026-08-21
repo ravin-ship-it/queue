@@ -54,14 +54,13 @@ check_dependencies() {
     return 0
 }
 
-# Get Terminal Width
 get_terminal_width() {
-    local w=""
-    if [ -e /dev/tty ]; then
-        w=$(stty size </dev/tty 2>/dev/null | awk '{print $2}')
-        [[ ! "$w" =~ ^[0-9]+$ ]] && w=$(tput cols </dev/tty 2>/dev/null)
+    local w="${COLUMNS:-}"
+    if [[ "$w" =~ ^[0-9]+$ ]] && [ "$w" -ge 20 ]; then
+        echo "$w"
+        return
     fi
-    [[ ! "$w" =~ ^[0-9]+$ ]] && w=$(tput cols 2>/dev/null)
+    w=$(tput cols 2>/dev/null)
     [[ ! "$w" =~ ^[0-9]+$ ]] && w="${COLUMNS:-80}"
     [ "$w" -lt 20 ] 2>/dev/null && w=80
     echo "$w"

@@ -24,6 +24,31 @@ cmd_playlist_save() {
     echo -e "${C_GRAY}${B_LINE}${C_RESET}"
 }
 
+cmd_playlist_opts_fzf() {
+    [ ! -d "$PLAYLIST_DIR" ] && return
+    local idx=1
+    while IFS= read -r f; do
+        [ -z "$f" ] && continue
+        local count=$(grep -cve '^\s*$' "${PLAYLIST_DIR}/${f}.txt" 2>/dev/null || echo "0")
+        echo -e "${C_ORANGE}${idx}.${C_RESET} 📂 ${C_CYAN}${f}${C_RESET} ${C_GRAY}(${count})${C_RESET}"
+        ((idx++))
+    done < <(find "$PLAYLIST_DIR" -maxdepth 1 -name "*.txt" -exec basename {} .txt \; 2>/dev/null | sort)
+}
+
+cmd_playlist_items_fzf() {
+    local selected_pl="$1"
+    local file="${PLAYLIST_DIR}/${selected_pl}.txt"
+    [ ! -f "$file" ] && return
+    local i=1
+    while IFS= read -r url; do
+        [ -z "$url" ] && continue
+        local title=$(get_cached_title "$url")
+        local log_line=$(format_track_log "$i" "$url" "$title")
+        echo -e "${log_line}::${url}"
+        ((i++))
+    done < "$file"
+}
+
 cmd_playlist_load() {
     local input="$1"
     
@@ -34,16 +59,7 @@ cmd_playlist_load() {
             return
         fi
         
-        # Build list with counts
-        pl_opts=""
-        local i=1
-        while IFS= read -r f; do
-            [ -z "$f" ] && continue
-            local count=$(grep -cve '^\s*$' "${PLAYLIST_DIR}/${f}.txt")
-            pl_opts+="${C_ORANGE}${i}.${C_RESET} 📂 ${C_CYAN}${f}${C_RESET} ${C_GRAY}(${count})${C_RESET}\n"
-            ((i++))
-        done < <(find "$PLAYLIST_DIR" -maxdepth 1 -name "*.txt" -exec basename {} .txt \; | sort)
-        
+        local pl_opts=$(cmd_playlist_opts_fzf)
         local pl_header=$(printf "${C_GRAY}${H_LINE}${C_RESET}\n  ${C_PURPLE}🪷 Select Playlists to Load${C_RESET}")
 
         input=$(echo -ne "$pl_opts" | \
@@ -59,15 +75,18 @@ cmd_playlist_load() {
     
     # Action Selection for loading multiple
     local load_mode="Append"
-    if [ "$MPV_RUNNING" = true ]; then
-        load_mode=$(echo -e "  ✚  Append to Queue\n  ▶  Replace Queue & Play\n  🔀 Shuffle & Append" | \
-            fzf --height=100% --layout=reverse --border --info=inline-right \
-            $FZF_COLOR_OPTS \
-            --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \
-            --header="How would you like to load these tracks?" \
-            --prompt="Action > ")
-        [ -z "$load_mode" ] && return
-    fi
+    load_mode=$(echo -e "  🎧  Append to Active Queue\n  ✨  Replace with New Queue & Play\n  🔀  Shuffle & Append to Active Queue" | \
+        fzf --height=100% --layout=reverse --border --info=inline-right \
+        $FZF_COLOR_OPTS \
+        --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \
+        --header="How would you like to load these tracks?" \
+        --prompt="Action > ")
+    [ -z "$load_mode" ] && return
+
+    ensure_mpv_running
+
+    local is_first_replace=true
+    local total_loaded=0
 
     # Iterate over newline-separated inputs
     while IFS= read -r item; do
@@ -87,42 +106,46 @@ cmd_playlist_load() {
         
         local name=$(basename "$file" .txt)
         local count=$(wc -l < "$file")
-        
-        if [ "$MPV_RUNNING" = false ]; then
-            # Stage to Last Session
-            [ ! -f "$LAST_PLAYLIST_FILE" ] && touch "$LAST_PLAYLIST_FILE"
-            grep -vE '^\s*$' "$file" >> "$LAST_PLAYLIST_FILE"
-            echo -e "${C_PINK}📂 Staged ${C_ORANGE}${count}${C_PINK} tracks from ${C_CYAN}${name}${C_PINK} to session.${C_RESET}"
-        else
-            if [[ "$load_mode" == *"Replace"* ]]; then
-                echo '{"command": ["playlist-clear"]}' | nc -N -U -w 1 "$SOCKET" > /dev/null
-                load_mode="Append" # Switch to append for remaining files in loop
-            fi
+        ((total_loaded += count))
 
-            local temp_list="$file"
-            if [[ "$load_mode" == *"Shuffle"* ]]; then
-                temp_list=$(mktemp)
-                shuf "$file" > "$temp_list"
-            fi
-
-            while IFS= read -r url; do
-                [ -z "$url" ] && continue
-                # Robust URL cleaning
-                local clean_url="${url%%\\t*}"
-                clean_url="${clean_url%%[[:space:]]*}"
-                clean_url=$(echo "$clean_url" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
-                
-                local json_cmd=$(jq -nc --arg path "$clean_url" '{"command": ["loadfile", $path, "append-play"]}')
-                send_ipc "$json_cmd" > /dev/null
-            done < "$temp_list"
-            
-            [ "$temp_list" != "$file" ] && rm "$temp_list"
-            echo -e "${C_GREEN}✅ Loaded ${C_ORANGE}${count}${C_GREEN} tracks from ${C_CYAN}${name}${C_RESET}"
+        local temp_list="$file"
+        if [[ "$load_mode" == *"Shuffle"* ]]; then
+            temp_list=$(mktemp)
+            shuf "$file" > "$temp_list"
         fi
+
+        while IFS= read -r url; do
+            [ -z "$url" ] && continue
+            # Robust URL cleaning
+            local clean_url="${url%%\\t*}"
+            clean_url="${clean_url%%[[:space:]]*}"
+            clean_url=$(echo "$clean_url" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+            
+            local m="append-play"
+            if { [[ "$load_mode" == *"Replace"* ]] || [[ "$load_mode" == *"New Queue"* ]]; } && [ "$is_first_replace" = true ]; then
+                m="replace"
+                is_first_replace=false
+            fi
+
+            local json_cmd=$(jq -nc --arg path "$clean_url" --arg m "$m" '{"command": ["loadfile", $path, $m]}')
+            send_ipc "$json_cmd" > /dev/null
+        done < "$temp_list"
+        
+        [ "$temp_list" != "$file" ] && rm "$temp_list"
+        echo -e "${C_GREEN}✅ Loaded ${C_ORANGE}${count}${C_GREEN} tracks from ${C_CYAN}${name}${C_RESET}"
     done <<< "$input"
-    
-    [ "$MPV_RUNNING" = true ] && save_current_playlist true >/dev/null 2>&1 & disown
-    [ "$MPV_RUNNING" = false ] && echo -e "${C_GRAY}   (Run 'q -play' to start listening)${C_RESET}"
+
+    if [[ "$load_mode" == *"Replace"* ]] || [[ "$load_mode" == *"New Queue"* ]]; then
+        for i in {1..15}; do
+            local cur_cnt=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
+            if [ "$cur_cnt" -gt 0 ]; then break; fi
+            sleep 0.1
+        done
+        echo '{"command": ["set_property", "pause", false]}' | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
+        wait_for_playback_start
+        log_now_playing "|> Playing (New Queue): "
+    fi
+    save_current_playlist true >/dev/null 2>&1 & disown
 }
 
 cmd_playlist_list() {
@@ -132,15 +155,7 @@ cmd_playlist_list() {
     fi
 
     # 1. Select Playlist
-    local pl_opts=""
-    local idx=1
-    while IFS= read -r f; do
-        [ -z "$f" ] && continue
-        local count=$(grep -cve '^\s*$' "${PLAYLIST_DIR}/${f}.txt")
-        pl_opts+="${C_ORANGE}${idx}.${C_RESET} 📂 ${C_CYAN}${f}${C_RESET} ${C_GRAY}(${count})${C_RESET}\n"
-        ((idx++))
-    done < <(find "$PLAYLIST_DIR" -maxdepth 1 -name "*.txt" -exec basename {} .txt \; | sort)
-
+    local pl_opts=$(cmd_playlist_opts_fzf)
     local pl_header=$(printf "${C_GRAY}${H_LINE}${C_RESET}\n  ${C_PURPLE}🪷 Explore Your Collections${C_RESET}")
 
     local selected_line=$(echo -ne "$pl_opts" | \
@@ -156,20 +171,9 @@ cmd_playlist_list() {
     local file="${PLAYLIST_DIR}/${selected_pl}.txt"
 
     # 2. Explore Playlist Contents
-    local items=$(mktemp)
-    local i=1
-    while IFS= read -r url; do
-        [ -z "$url" ] && continue
-        # Use format_track_log for each item
-        local title=$(get_cached_title "$url")
-        local log_line=$(format_track_log "$i" "$url" "$title")
-        echo -e "${log_line}::${url}" >> "$items"
-        ((i++))
-    done < "$file"
+    local ex_header=$(printf "${C_GRAY}${H_LINE}${C_RESET}\n  ${C_PURPLE}🪷 Playlist: ${C_CYAN}${selected_pl}${C_RESET} ${C_GRAY}(ENTER action, TAB select)${C_RESET}")
 
-    local ex_header=$(printf "${C_GRAY}${H_LINE}${C_RESET}\n  ${C_PURPLE}🪷 Playlist: ${C_CYAN}${selected_pl}${C_RESET} ${C_GRAY}(ENTER to load, TAB to select, ALT-A invert, ALT-D none)${C_RESET}")
-
-    local selection=$(cat "$items" | fzf --multi --exact --cycle --tiebreak=index --bind "tab:toggle,alt-a:toggle-all,insert:select-all,delete:deselect-all" \
+    local selection=$(cmd_playlist_items_fzf "$selected_pl" | fzf --multi --exact --cycle --tiebreak=index --bind "tab:toggle,alt-a:toggle-all,insert:select-all,delete:deselect-all" \
         --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \
         --height=100% --layout=reverse --border --ansi \
         --header="$ex_header" \
@@ -182,7 +186,7 @@ cmd_playlist_list() {
 
     # 3. Choose Action
     local sel_count=$(echo "$selection" | wc -l)
-    local action=$(echo -e "  ▶  Play Selected\n  ✚  Append to Queue\n  🔀 Shuffle & Append\n  ✖  Remove from Playlist" | \
+    local action=$(echo -e "  🎧  Append to Active Queue\n  ✨  New Queue from Selected & Play\n  🔀  Shuffle & Append to Active Queue\n  ✖  Remove from Playlist" | \
         fzf --height=100% --layout=reverse --border --info=inline-right \
         $FZF_COLOR_OPTS \
         --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \
@@ -201,45 +205,54 @@ cmd_playlist_list() {
         return
     fi
 
-    if [[ "$action" == *"Play"* ]]; then
-        # Play First immediately, append rest
-        local first_url=$(echo "$selection" | head -n1 | awk -F'::' '{print $2}')
-        if [ "$MPV_RUNNING" = true ]; then
-            local count=$(echo '{"command": ["get_property", "playlist-count"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
-            local json_cmd=$(jq -nc --arg path "$first_url" '{"command": ["loadfile", $path, "append-play"]}')
-            send_ipc "$json_cmd" > /dev/null
-            
-            local play_cmd=$(jq -nc --argjson idx "$count" '{"command": ["playlist-play-index", $idx]}')
-            send_ipc "$play_cmd" > /dev/null
-            # Append others
-            echo "$selection" | tail -n +2 | awk -F'::' '{print $2}' | while IFS= read -r url; do
-                local json_cmd=$(jq -nc --arg path "$url" '{"command": ["loadfile", $path, "append-play"]}')
-                send_ipc "$json_cmd" > /dev/null
-            done
-        fi
-    else
-        # Append or Shuffle-Append
-        local urls=$(echo "$selection" | awk -F'::' '{print $2}')
-        if [[ "$action" == *"Shuffle"* ]]; then
-            urls=$(echo "$urls" | shuf)
-        fi
+    if [[ "$action" == *"New Queue"* ]]; then
+        echo -e "${C_PINK}✨ Initializing Fresh New Queue from ${C_ORANGE}$sel_count${C_PINK} tracks...${C_RESET}"
+        ensure_mpv_running
 
-        echo "$urls" | while IFS= read -r url; do
+        local is_first=true
+        while IFS= read -r url; do
             [ -z "$url" ] && continue
-            if [ "$MPV_RUNNING" = true ]; then
-                local json_cmd=$(jq -nc --arg path "$url" '{"command": ["loadfile", $path, "append-play"]}')
-                send_ipc "$json_cmd" > /dev/null
-            else
-                echo "$url" >> "$LAST_PLAYLIST_FILE"
-            fi
+            local clean_url="${url%%\\t*}"
+            clean_url="${clean_url%%[[:space:]]*}"
+            clean_url=$(echo "$clean_url" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+            
+            local m="append-play"
+            [ "$is_first" = true ] && { m="replace"; is_first=false; }
+            local json_cmd=$(jq -nc --arg path "$clean_url" --arg m "$m" '{"command": ["loadfile", $path, $m]}')
+            send_ipc "$json_cmd" > /dev/null
+        done < <(echo "$selection" | awk -F'::' '{print $2}')
+
+        for i in {1..15}; do
+            local cur_cnt=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
+            if [ "$cur_cnt" -gt 0 ]; then break; fi
+            sleep 0.1
         done
-        
-        if [ "$MPV_RUNNING" = false ]; then
-            echo -e "${C_PINK}📂 Staged ${C_ORANGE}${sel_count}${C_PINK} tracks from ${C_CYAN}${selected_pl}${C_PINK} to session.${C_RESET}"
-        else
-            echo -e "${C_GREEN}✅ Loaded ${C_ORANGE}${sel_count}${C_GREEN} tracks from ${C_CYAN}${selected_pl}${C_RESET}"
-        fi
+
+        echo '{"command": ["set_property", "pause", false]}' | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
+        wait_for_playback_start
+        log_now_playing "|> Playing (New Queue): "
+        save_current_playlist true >/dev/null 2>&1 & disown
+        return
     fi
+
+    # Append or Shuffle-Append
+    ensure_mpv_running
+    local urls=$(echo "$selection" | awk -F'::' '{print $2}')
+    if [[ "$action" == *"Shuffle"* ]]; then
+        urls=$(echo "$urls" | shuf)
+    fi
+
+    while IFS= read -r url; do
+        [ -z "$url" ] && continue
+        local clean_url="${url%%\\t*}"
+        clean_url="${clean_url%%[[:space:]]*}"
+        clean_url=$(echo "$clean_url" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+        local json_cmd=$(jq -nc --arg path "$clean_url" '{"command": ["loadfile", $path, "append-play"]}')
+        send_ipc "$json_cmd" > /dev/null
+    done < <(echo "$urls")
+    
+    echo -e "${C_GREEN}✅ Loaded ${C_ORANGE}${sel_count}${C_GREEN} tracks from ${C_CYAN}${selected_pl}${C_RESET}"
+    save_current_playlist true >/dev/null 2>&1 & disown
     
     [ "$MPV_RUNNING" = true ] && save_current_playlist true >/dev/null 2>&1 & disown
 }

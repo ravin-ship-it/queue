@@ -72,6 +72,35 @@ check_and_resume() {
     fi
 }
 
+ensure_mpv_running() {
+    local pl_arg="$1"
+    if [ "$MPV_RUNNING" = false ] || [ ! -S "$SOCKET" ]; then
+        rm -f "$SOCKET"
+        local initial_pl=()
+        if [ -n "$pl_arg" ] && [ -f "$pl_arg" ] && [ -s "$pl_arg" ]; then
+            initial_pl=("--playlist=$pl_arg")
+        fi
+
+        setsid mpv --idle --keep-open=yes --no-terminal --vo=null \
+            --network-timeout=30 \
+            --stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5 \
+            --demuxer-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5 \
+            --cache=yes --cache-secs=300 --demuxer-readahead-secs=300 \
+            --demuxer-max-bytes=256MiB --demuxer-max-back-bytes=128MiB \
+            --input-ipc-server="$SOCKET" "${initial_pl[@]}" </dev/null >/dev/null 2>&1 &
+        disown
+
+        for i in {1..30}; do
+            [ -S "$SOCKET" ] && break
+            sleep 0.1
+        done
+
+        MPV_RUNNING=true
+        start_idle_monitor
+        restore_state_properties
+    fi
+}
+
 send_ipc() {
     echo "$1" | nc -N -U -w 1 "$SOCKET"
 }

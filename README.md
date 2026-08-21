@@ -247,8 +247,9 @@ When navigating the interactive queue (`q`):
 | <kbd>Alt</kbd> + <kbd>A</kbd> | **Invert selection** (toggle all tracks) |
 | <kbd>Insert</kbd> / <kbd>Delete</kbd> | Select All / Deselect All |
 | <kbd>Ctrl</kbd> + <kbd>V</kbd> | **Paste URL from clipboard** directly into the queue |
-| <kbd>Ctrl</kbd> + <kbd>R</kbd> | Synchronize and reload queue from MPV |
 | <kbd>Esc</kbd> / <kbd>Ctrl</kbd> + <kbd>C</kbd> | Exit TUI *(music continues playing uninterrupted)* |
+
+> ⚡ **Live Auto-Sync**: The interactive queue automatically updates and reflects new tracks in real-time whenever songs are added or radio auto-discovers tracks.
 
 ---
 

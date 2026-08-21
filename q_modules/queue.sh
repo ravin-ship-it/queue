@@ -11,7 +11,7 @@ show_queue() {
     fi
 
     if [ "$MPV_RUNNING" = false ]; then
-        if [ -t 1 ]; then
+        if [ -t 1 ] && [ "$IN_FZF" != "true" ] && [ "$IS_RAW" != "true" ]; then
             print_header_box "😴💤 MPV isn't running... it must be taking a nap"
         else
             echo "😴💤 MPV isn't running"
@@ -19,8 +19,8 @@ show_queue() {
         return 0
     fi
 
-    # Only show the outer box if output is a TTY (direct terminal)
-    if [ -t 1 ]; then
+    # Only show the outer box if output is a direct terminal, not FZF and not raw
+    if [ -t 1 ] && [ "$IN_FZF" != "true" ] && [ "$IS_RAW" != "true" ]; then
         print_header_box "${C_CYAN}🎵 Current Queue${C_RESET}"
     fi
 
@@ -157,7 +157,7 @@ show_queue() {
         local prefix="${C_ORANGE}${i}.${C_RESET} "
         [ "$state" == "|>" ] && prefix="${C_PINK}${i}. ${C_RESET}"
 
-        if [ -t 1 ]; then
+        if [ -t 1 ] && [ "$IN_FZF" != "true" ] && [ "$IS_RAW" != "true" ]; then
             # Truncate title to fit terminal while keeping artist/duration
             local index_w=${#i}
             local meta_w=$(get_visual_width "$(strip_colors "$artist_part$dur_part")")
@@ -181,10 +181,12 @@ show_queue() {
     done
 
     # Trigger background fetcher (safe, single instance)
-    fetch_missing_background >/dev/null 2>&1 & disown
-    save_current_playlist true >/dev/null 2>&1 & disown
+    if [ "$IS_RAW" != "true" ]; then
+        fetch_missing_background >/dev/null 2>&1 & disown
+        save_current_playlist true >/dev/null 2>&1 & disown
+    fi
 
-    if [ -t 1 ]; then
+    if [ -t 1 ] && [ "$IN_FZF" != "true" ] && [ "$IS_RAW" != "true" ]; then
         printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
         B_LINE=${B_LINE// /─}
         echo -e "${C_GRAY}${B_LINE}${C_RESET}"

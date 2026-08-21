@@ -258,9 +258,7 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
             [ "$found" = false ] && cmd_info ""
             ;; 
         -raw) 
-            if [ "$IN_FZF" != "true" ]; then
-                export SHOW_INDICATOR=true
-            fi
+            export IS_RAW=true
             show_queue
             shift
             ;; 
@@ -291,6 +289,15 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
                 shift
             done
             [ "$found" = false ] && cmd_playlist_raw ""
+            ;; 
+        -pl-opts)
+            shift
+            cmd_playlist_opts_fzf
+            ;;
+        -pl-items)
+            shift
+            cmd_playlist_items_fzf "$1"
+            shift
             ;; 
         -pl-rm) 
             shift
@@ -370,7 +377,7 @@ if [ -z "$1" ]; then
     (
         last_title="$init_title"; last_count="$init_count"; last_shuf="$init_shuf"
         last_lf="$init_loop_f"; last_lp="$init_loop_p"; last_idle="$init_idle"
-        last_radio_state="init"; last_af="$init_af"; last_cols="$cols"
+        last_radio_state="init"; last_af="$init_af"; last_cols="$cols"; last_idx="$init_idx"
         socket_failures=0
 
         # Wait for FZF socket to be active
@@ -395,7 +402,7 @@ if [ -z "$1" ]; then
             if [ -z "$raw" ]; then
                 ((socket_failures++))
                 if [ "$socket_failures" -ge 15 ]; then break; fi
-                sleep 2; continue
+                sleep 1; continue
             fi
             socket_failures=0
             IFS=$'\t' read -r idle curr_title curr_count curr_shuf curr_lf curr_lp curr_idx curr_af <<< "$raw"
@@ -420,7 +427,7 @@ if [ -z "$1" ]; then
                 fi
             fi
 
-            if [ "$curr_count" != "$last_count" ] || [ "$curr_shuf" != "$last_shuf" ] || [ "$curr_lf" != "$last_lf" ] || [ "$curr_lp" != "$last_lp" ] || [ "$curr_radio" != "$last_radio_state" ] || [ "$curr_af" != "$last_af" ]; then
+            if [ "$curr_count" != "$last_count" ] || [ "$curr_idx" != "$last_idx" ] || [ "$curr_shuf" != "$last_shuf" ] || [ "$curr_lf" != "$last_lf" ] || [ "$curr_lp" != "$last_lp" ] || [ "$curr_radio" != "$last_radio_state" ] || [ "$curr_af" != "$last_af" ]; then
                 NEW_ICONS=""
                 [ "$curr_shuf" == "true" ] && NEW_ICONS="${NEW_ICONS}${P_DEEP_PINK} ><${P_RESET}"
                 [ "$curr_lf" == "inf" ] && NEW_ICONS="${NEW_ICONS}${P_DEEP_PINK} ⟳1${P_RESET}"
@@ -434,15 +441,14 @@ if [ -z "$1" ]; then
                     new_p=$(printf "🎵 ${P_TEAL}Queue List${NEW_ICONS}${P_RESET} > ")
                 fi
                 if curl -s -X POST --unix-socket "$FZF_SOCK" -d "change-prompt~${new_p}~" http://localhost/ >/dev/null 2>&1; then
-                    if [ "$curr_count" != "$last_count" ]; then
-                        sleep 1.2
+                    if [ "$curr_count" != "$last_count" ] || [ "$curr_idx" != "$last_idx" ]; then
                         curl -s -X POST --unix-socket "$FZF_SOCK" -d "reload(bash \"$SCRIPT_PATH\" -raw)" http://localhost/ >/dev/null 2>&1
                     fi
                     last_count="$curr_count"; last_shuf="$curr_shuf"; last_lf="$curr_lf"; last_lp="$curr_lp"
-                    last_radio_state="$curr_radio"; last_af="$curr_af"
+                    last_radio_state="$curr_radio"; last_af="$curr_af"; last_idx="$curr_idx"
                 fi
             fi
-            sleep 2
+            sleep 1
         done
     ) &
     MONITOR_PID=$!
@@ -457,7 +463,6 @@ if [ -z "$1" ]; then
         --listen="$FZF_SOCK" \
         $FZF_COLOR_OPTS \
         --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \
-        --bind "ctrl-r:reload(bash \"$SCRIPT_PATH\" -raw)" \
         --bind "alt-a:toggle-all+execute-silent(touch \"$SELECTION_MODE_FILE\")" \
         --bind "insert:select-all+execute-silent(touch \"$SELECTION_MODE_FILE\")" \
         --bind "delete:deselect-all+execute-silent(rm -f \"$SELECTION_MODE_FILE\")" \
@@ -481,7 +486,7 @@ if [ -z "$1" ]; then
         track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null)
         
         if [ "$count" -gt 1 ] || [ -f "$SELECTION_MODE_FILE" ]; then
-             action=$(echo -e "  |>  Play Selected\n  ✖  Remove from Queue\n  ✚  Save to Playlist" | \
+             action=$(echo -e "  |>  Play Selected\n  ✨  New Queue from Selected & Play\n  ✖  Remove from Queue\n  ✚  Save to Playlist" | \
                  fzf --height=100% --layout=reverse --border --info=inline-right \
                  $FZF_COLOR_OPTS \
                  --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \
@@ -541,17 +546,37 @@ if [ -z "$1" ]; then
                              [ -n "$url" ] && echo "$url" >> "$target_file"
                          done <<< "$selection"
                      done
-                     echo -e "${C_GREEN}✅ Saved successfully.${C_RESET}"
+                     echo -e "${C_GREEN}✅ Playlist(s) updated successfully.${C_RESET}"
                  fi
              fi
 
-             # 2. Play Selected
+             # 2. New Queue from Selected & Play
+             if echo "$action" | grep -q "New Queue"; then
+                 echo -e "${C_PINK}✨ Creating Fresh New Queue from ${C_ORANGE}$count${C_PINK} selected items...${C_RESET}"
+                 is_first=true
+                 while IFS= read -r idx; do
+                     item_json=$(echo "$track_info" | jq -s -c "map(select(.event == null)) | .[0].data[$((idx - 1))] // empty")
+                     url=$(echo "$item_json" | jq -r '.filename // ""')
+                     [ -z "$url" ] && continue
+                     m="append-play"
+                     [ "$is_first" = true ] && { m="replace"; is_first=false; }
+                     json_cmd=$(jq -nc --arg path "$url" --arg m "$m" '{"command": ["loadfile", $path, $m]}')
+                     echo "$json_cmd" | nc -N -U -w 1 "$SOCKET" > /dev/null
+                 done <<< "$(echo "$selection" | sort -n)"
+                 echo '{"command": ["set_property", "pause", false]}' | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
+                 wait_for_playback_start
+                 log_now_playing "|> Playing (New Queue): "
+                 ( sleep 0.3; save_current_playlist true ) >/dev/null 2>&1 & disown
+                 exit 0
+             fi
+
+             # 3. Play Selected
              if echo "$action" | grep -q "Play Selected"; then
                  first=$(echo "$selection" | head -n1)
                  cmd_play "$first"
              fi
 
-             # 3. Remove from Queue
+             # 4. Remove from Queue
              if echo "$action" | grep -q "Remove"; then
                  track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null)
                  current_idx=$(echo "$track_info" | jq -s -r 'map(select(.event == null)) | .[0].data | to_entries[] | select(.value.current) | .key + 1' 2>/dev/null)
