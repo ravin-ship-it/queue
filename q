@@ -332,9 +332,9 @@ if [ -z "$1" ]; then
     [ "$MPV_RUNNING" = true ] && start_idle_monitor
 
     # Get initial status
-    mapfile -t init < <(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","shuffle"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","af"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","filename"]}\n{"command":["get_property","playlist-pos-1"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | .[0].data // 0, .[1].data // false, .[2].data // "no", .[3].data // "no", (if .[4].data == null or .[4].data == [] then "off" else "on" end), (if .[5].data == null then true else .[5].data end), ((.[6].data // .[7].data) // "😴💤" | gsub("\n"; " ")), (.[8].data // "?")')    
+    mapfile -t init < <(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","shuffle"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","af"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","filename"]}\n{"command":["get_property","playlist-pos-1"]}\n{"command":["get_property","playlist"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | .[0].data // 0, .[1].data // false, .[2].data // "no", .[3].data // "no", (if .[4].data == null or .[4].data == [] then "off" else "on" end), (if .[5].data == null then true else .[5].data end), ((.[6].data // .[7].data) // "😴💤" | gsub("\n"; " ")), (.[8].data // "?"), (.[9].data // [] | map(.filename) | join(";"))')    
     init_count="${init[0]}"; init_shuf="${init[1]}"; init_loop_f="${init[2]}"; init_loop_p="${init[3]}"; init_af="${init[4]}"
-    init_idle="${init[5]}"; init_title="${init[6]}"; init_idx="${init[7]}"
+    init_idle="${init[5]}"; init_title="${init[6]}"; init_idx="${init[7]}"; init_fingerprint="${init[8]}"
 
     STATUS_ICONS=""
     P_DEEP_PINK="\033[38;5;197m"
@@ -378,6 +378,7 @@ if [ -z "$1" ]; then
         last_title="$init_title"; last_count="$init_count"; last_shuf="$init_shuf"
         last_lf="$init_loop_f"; last_lp="$init_loop_p"; last_idle="$init_idle"
         last_radio_state="init"; last_af="$init_af"; last_cols="$cols"; last_idx="$init_idx"
+        last_fingerprint="$init_fingerprint"
         socket_failures=0
 
         # Wait for FZF socket to be active
@@ -387,7 +388,7 @@ if [ -z "$1" ]; then
         done
 
         while true; do
-            raw=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","filename"]}\n{"command":["get_property","playlist-count"]}\n{"command":["get_property","shuffle"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","playlist-pos-1"]}\n{"command":["get_property","af"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r '
+            raw=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","filename"]}\n{"command":["get_property","playlist-count"]}\n{"command":["get_property","shuffle"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","playlist-pos-1"]}\n{"command":["get_property","af"]}\n{"command":["get_property","playlist"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r '
                 map(select(.event == null)) |
                 (if .[0].data == null then true else .[0].data end), "\t",
                 ((.[1].data // .[2].data) // "😴💤" | gsub("\n"; " ")), "\t",
@@ -396,7 +397,8 @@ if [ -z "$1" ]; then
                 (.[5].data // "no"), "\t",
                 (if .[6].data == null then "no" else .[6].data end), "\t",
                 (.[7].data // "?"), "\t",
-                (if .[8].data == null or .[8].data == [] then "off" else "on" end)
+                (if .[8].data == null or .[8].data == [] then "off" else "on" end), "\t",
+                (.[9].data // [] | map(.filename) | join(";"))
             ' 2>/dev/null)
             
             if [ -z "$raw" ]; then
@@ -405,7 +407,7 @@ if [ -z "$1" ]; then
                 sleep 1; continue
             fi
             socket_failures=0
-            IFS=$'\t' read -r idle curr_title curr_count curr_shuf curr_lf curr_lp curr_idx curr_af <<< "$raw"
+            IFS=$'\t' read -r idle curr_title curr_count curr_shuf curr_lf curr_lp curr_idx curr_af curr_fingerprint <<< "$raw"
 
             curr_radio="off"
             [ -f "$HOME/.cache/mpv/auto_enabled" ] && curr_radio="on"
@@ -427,7 +429,7 @@ if [ -z "$1" ]; then
                 fi
             fi
 
-            if [ "$curr_count" != "$last_count" ] || [ "$curr_idx" != "$last_idx" ] || [ "$curr_shuf" != "$last_shuf" ] || [ "$curr_lf" != "$last_lf" ] || [ "$curr_lp" != "$last_lp" ] || [ "$curr_radio" != "$last_radio_state" ] || [ "$curr_af" != "$last_af" ]; then
+            if [ "$curr_fingerprint" != "$last_fingerprint" ] || [ "$curr_count" != "$last_count" ] || [ "$curr_idx" != "$last_idx" ] || [ "$curr_shuf" != "$last_shuf" ] || [ "$curr_lf" != "$last_lf" ] || [ "$curr_lp" != "$last_lp" ] || [ "$curr_radio" != "$last_radio_state" ] || [ "$curr_af" != "$last_af" ]; then
                 NEW_ICONS=""
                 [ "$curr_shuf" == "true" ] && NEW_ICONS="${NEW_ICONS}${P_DEEP_PINK} ><${P_RESET}"
                 [ "$curr_lf" == "inf" ] && NEW_ICONS="${NEW_ICONS}${P_DEEP_PINK} ⟳1${P_RESET}"
@@ -441,11 +443,12 @@ if [ -z "$1" ]; then
                     new_p=$(printf "🎵 ${P_TEAL}Queue List${NEW_ICONS}${P_RESET} > ")
                 fi
                 if curl -s -X POST --unix-socket "$FZF_SOCK" -d "change-prompt~${new_p}~" http://localhost/ >/dev/null 2>&1; then
-                    if [ "$curr_count" != "$last_count" ] || [ "$curr_idx" != "$last_idx" ]; then
+                    if [ "$curr_fingerprint" != "$last_fingerprint" ] || [ "$curr_count" != "$last_count" ] || [ "$curr_idx" != "$last_idx" ]; then
                         curl -s -X POST --unix-socket "$FZF_SOCK" -d "reload(bash \"$SCRIPT_PATH\" -raw)" http://localhost/ >/dev/null 2>&1
                     fi
                     last_count="$curr_count"; last_shuf="$curr_shuf"; last_lf="$curr_lf"; last_lp="$curr_lp"
                     last_radio_state="$curr_radio"; last_af="$curr_af"; last_idx="$curr_idx"
+                    last_fingerprint="$curr_fingerprint"
                 fi
             fi
             sleep 1

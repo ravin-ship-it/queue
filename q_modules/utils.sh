@@ -107,6 +107,17 @@ send_ipc() {
     echo "$1" | nc -N -U -w 1 "$SOCKET"
 }
 
+notify_fzf_reload() {
+    if [ -f "$HOME/.cache/mpv/fzf_sock" ]; then
+        local fzf_sock=$(cat "$HOME/.cache/mpv/fzf_sock" 2>/dev/null)
+        if [ -n "$fzf_sock" ] && [ -S "$fzf_sock" ]; then
+            local script_path="${0:-q}"
+            [[ ! "$script_path" =~ ^/ ]] && script_path=$(command -v "$script_path" || echo "/home/xen/.local/bin/mpv/q")
+            curl -s -X POST --unix-socket "$fzf_sock" -d "reload(bash \"$script_path\" -raw)" http://localhost/ >/dev/null 2>&1 &
+        fi
+    fi
+}
+
 save_current_playlist() {
     local force="${1:-false}"
     local allow_empty="${2:-false}"
@@ -147,6 +158,7 @@ save_current_playlist() {
             # Save state properties to state.json
             echo "$raw" | jq -c 'map(select(.data != null and (.data | type != "array"))) | {shuffle: .[0].data, loop_file: .[1].data, loop_playlist: .[2].data, pos: .[3].data}' 2>/dev/null > "$HOME/.cache/mpv/state.json.tmp"
             [ -s "$HOME/.cache/mpv/state.json.tmp" ] && mv "$HOME/.cache/mpv/state.json.tmp" "$HOME/.cache/mpv/state.json"
+            notify_fzf_reload
         fi
     fi
 }
