@@ -26,7 +26,7 @@ demuxer-max-bytes=256MiB
 demuxer-max-back-bytes=128MiB
 demuxer-readahead-secs=300
 ytdl=yes
-ytdl-format=bestaudio/best
+ytdl-format=bestaudio[protocol^=http]/best[protocol^=http]/bestaudio/best
 script-opts=ytdl_hook-ytdl_path=yt-dlp
 stream-buffer-size=16MiB
 tls-verify=no
