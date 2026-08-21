@@ -4,10 +4,13 @@ keep-open=yes
 save-position-on-quit=no
 resume-playback=no
 
-# 🎧 High-Fidelity Audio Driver & Deep Jitter Buffer
-ao=pipewire,pulse,alsa
-audio-buffer=0.5
-pulse-buffer=250
+# 🎧 High-Fidelity Audio Driver & Deep Jitter Buffer (WSL2/Linux Resilient)
+ao=pulse,pipewire,alsa
+audio-buffer=1.0
+pulse-buffer=300
+pulse-latency-hacks=yes
+audio-samplerate=48000
+audio-format=s16
 audio-stream-silence=yes
 audio-channels=stereo
 volume=100

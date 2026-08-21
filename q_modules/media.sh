@@ -856,12 +856,14 @@ start_idle_monitor() {
             # --- Auto Mode Check ---
             check_auto_trigger "$idle" "$count" "$current_idx" "$rem" "$active_loop" "$is_paused"
             
+            local sleep_time=2
             if [ "$idle" == "false" ]; then
-                was_playing=true
-            elif [ "$idle" == "true" ] && [ "$was_playing" == "true" ] && [ "$loop_p" == "no" ] && [ "$loop_f" == "no" ]; then
-                was_playing=false
+                local rem_int=${rem%.*}
+                if [[ "$rem_int" =~ ^[0-9]+$ ]] && [ "$rem_int" -gt 35 ]; then
+                    sleep_time=4
+                fi
             fi
-            sleep 2
+            sleep "$sleep_time"
         done
     ) & disown
     export IDLE_MONITOR_ACTIVE=true
