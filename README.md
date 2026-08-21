@@ -23,6 +23,7 @@
   <a href="#-interactive-tui-preview"><b>TUI Showcase</b></a> •
   <a href="#-quick-start"><b>Quick Start</b></a> •
   <a href="#-cheat-sheet"><b>Commands</b></a> •
+  <a href="#-unlocking-studio-audio-quality-youtube-cookies-setup"><b>Audio Quality & Cookies</b></a> •
   <a href="#-smart-auto-mode-q--auto"><b>Auto-Mode</b></a> •
   <a href="#-why-queue-vs-standard-players"><b>Why Queue?</b></a> •
   <a href="#-built-with-ai-augmented-development"><b>AI Development</b></a>
@@ -248,6 +249,61 @@ When navigating the interactive queue (`q`):
 | <kbd>Ctrl</kbd> + <kbd>V</kbd> | **Paste URL from clipboard** directly into the queue |
 | <kbd>Ctrl</kbd> + <kbd>R</kbd> | Synchronize and reload queue from MPV |
 | <kbd>Esc</kbd> / <kbd>Ctrl</kbd> + <kbd>C</kbd> | Exit TUI *(music continues playing uninterrupted)* |
+
+---
+
+## 🍪 Unlocking Studio Audio Quality (YouTube Cookies Setup)
+
+By default, YouTube throttles guest/unauthenticated streams to lower-bitrate formats. By connecting your YouTube cookies to `yt-dlp`, you unlock **128–160+ kbps Studio-Quality Audio (Opus/AAC)**, as well as full access to your **Liked Songs (`list=LL`)**, **Private Playlists**, and **Age-Restricted Tracks**.
+
+### 📊 Quality Difference at a Glance:
+| Streaming Mode | Codec | Bitrate | Sample Rate | Fidelity Level |
+| :--- | :---: | :---: | :---: | :---: |
+| **Guest / Unauthenticated** | AAC / Opus | 48 – 96 kbps | 22.05 – 44.1 kHz | Low / Compressed |
+| **With YouTube Cookies** | **Opus (Format 251)** / AAC | **128 – 160 kbps** | **48.0 kHz** | **Studio Quality** *(Matches/beats 320k MP3)* |
+| **YouTube Premium (with Cookies)** | AAC (Format 141) / Opus | **256 kbps AAC** | **48.0 kHz** | **Maximum Audiophile Hi-Fi** |
+
+---
+
+### 🚀 3-Step Setup Guide:
+
+#### Step 1: Export Cookies from your Browser
+1. In Chrome, Edge, Brave, or Firefox, install the open-source extension: **[Get cookies.txt locally](https://chromewebstore.google.com/detail/get-cookiestxt-locally/cclelndahbckbenkjhflpdbgdldlbecc)** (free, safe, no tracking).
+2. Go to **[youtube.com](https://youtube.com)** (make sure you are signed into your account).
+3. Click the extension icon in your browser toolbar $\to$ click **Export**.
+
+#### Step 2: Copy Cookies into WSL / Linux
+In your terminal, copy the downloaded file to `~/.config/yt-dlp/cookies.txt`:
+```bash
+mkdir -p ~/.config/yt-dlp
+
+# If using WSL2 (copies from your Windows Downloads):
+cp /mnt/c/Users/$USER/Downloads/*cookie*.txt ~/.config/yt-dlp/cookies.txt
+
+# Or if running native Linux / macOS:
+cp ~/Downloads/*cookie*.txt ~/.config/yt-dlp/cookies.txt
+```
+
+#### Step 3: Link in `yt-dlp` Config
+Add the cookie flag to your config *(the `./install.sh` installer also preserves this automatically!)*:
+```bash
+if ! grep -q "cookies.txt" ~/.config/yt-dlp/config; then
+    echo "--cookies ~/.config/yt-dlp/cookies.txt" >> ~/.config/yt-dlp/config
+fi
+```
+
+#### 🧪 Verify with `q -i`:
+Start playing any song with `q` and check live decoder stats:
+```bash
+q -i
+```
+```text
+🎵 Current Playback Quality
+   Format:  multi/mov,mp4,m4a,3gp,3g2,mj2
+   Codec:   aac / opus
+   Bitrate: 131 kbps – 160 kbps
+   Rate:    44100 Hz – 48000 Hz
+```
 
 ---
 
