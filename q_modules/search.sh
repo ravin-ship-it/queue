@@ -11,7 +11,13 @@ perform_search() {
 
     echo -e "${C_GRAY}${H_LINE}${C_RESET}"
     echo -e "${C_CYAN}🔍 Searching for \"$QUERY\" (Deep Search)...${C_RESET}"
-    local TMP_RESULTS=$(mktemp) 
+    
+    # Ensure TMPDIR fallback for Android / Termux
+    [ -z "$TMPDIR" ] && [ -d "/data/data/com.termux/files/usr/tmp" ] && export TMPDIR="/data/data/com.termux/files/usr/tmp"
+    local TMP_RESULTS
+    TMP_RESULTS=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/q_search_$$.tmp")
+    local ERR_LOG="$HOME/.cache/mpv/last_search_err.log"
+    mkdir -p "$(dirname "$ERR_LOG")"
     
     # Use strict Tab delimiter for reliability
     local TAB=$'\t'
@@ -21,11 +27,25 @@ perform_search() {
     # Apply cookies if they exist
     [ -f "$COOKIES_FILE" ] && YTDL_OPTS+=("--cookies" "$COOKIES_FILE")
 
-    run_with_timeout 30s yt-dlp "${YTDL_OPTS[@]}" -- "$QUERY" > "$TMP_RESULTS" 2>/dev/null
+    run_with_timeout 30 yt-dlp "${YTDL_OPTS[@]}" -- "$QUERY" > "$TMP_RESULTS" 2> "$ERR_LOG"
+    
+    # Fallback: If search yielded empty results, retry with default web player client
+    if [ ! -s "$TMP_RESULTS" ]; then
+        local YTDL_FALLBACK_OPTS=("--js-runtimes" "node" "--default-search" "$PLATFORM" "--print" "%(title)s${TAB}%(webpage_url)s${TAB}%(duration_string)s${TAB}%(uploader)s" "--no-warnings" "--flat-playlist" "--skip-download")
+        [ -f "$COOKIES_FILE" ] && YTDL_FALLBACK_OPTS+=("--cookies" "$COOKIES_FILE")
+        run_with_timeout 30 yt-dlp "${YTDL_FALLBACK_OPTS[@]}" -- "$QUERY" > "$TMP_RESULTS" 2>> "$ERR_LOG"
+    fi
     
     if [ ! -s "$TMP_RESULTS" ]; then 
         echo -e "${C_PINK}🔍🤷 No results found for \"$QUERY\"... try another magic word?${C_RESET}"
-        rm "$TMP_RESULTS"
+        if [ -s "$ERR_LOG" ]; then
+            if grep -qi "Sign in to confirm you’re not a bot\|bot\|captcha" "$ERR_LOG"; then
+                echo -e "${C_ORANGE}💡 Tip: YouTube is requesting bot verification. Run 'q' with YouTube cookies or update yt-dlp.${C_RESET}"
+            elif grep -qi "ExtractorError\|Unsupported URL" "$ERR_LOG"; then
+                echo -e "${C_ORANGE}💡 Tip: Try updating yt-dlp: run 'yt-dlp -U' or 'pip install -U yt-dlp'${C_RESET}"
+            fi
+        fi
+        rm -f "$TMP_RESULTS"
         return 1 # Skip to next query
     fi
     echo -e "${C_GRAY}${H_LINE}${C_RESET}"

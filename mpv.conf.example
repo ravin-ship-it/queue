@@ -4,8 +4,8 @@ keep-open=yes
 save-position-on-quit=no
 resume-playback=no
 
-# 🎧 High-Fidelity Audio Driver & Deep Jitter Buffer (WSL2/Linux Resilient)
-ao=pulse,pipewire,alsa
+# 🎧 High-Fidelity Audio Driver & Deep Jitter Buffer (Android / WSL2 / Linux Resilient)
+ao=opensles,audiotrack,pulse,pipewire,alsa
 audio-buffer=1.0
 pulse-buffer=300
 pulse-latency-hacks=yes

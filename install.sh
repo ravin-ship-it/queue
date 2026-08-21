@@ -49,10 +49,15 @@ install_deps() {
     
     if command -v pkg >/dev/null 2>&1; then # Termux
         pkg update
+        pkg install -y coreutils
         for pkg in "${missing[@]}"; do
             [ "$pkg" == "netcat" ] && pkg="netcat-openbsd"
             pkg install -y "$pkg"
         done
+        # Ensure latest yt-dlp extraction engine on Termux
+        if command -v yt-dlp >/dev/null 2>&1; then
+            yt-dlp -U >/dev/null 2>&1 || true
+        fi
     elif command -v apt-get >/dev/null 2>&1; then # Debian/Ubuntu/Kali
         sudo apt-get update
         for pkg in "${missing[@]}"; do

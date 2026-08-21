@@ -207,11 +207,11 @@ get_file_mtime() {
 }
 
 run_with_timeout() {
-    local secs="$1"
+    local secs="${1%s}"
     shift
-    if command -v timeout >/dev/null; then
+    if command -v timeout >/dev/null 2>&1; then
         timeout "$secs" "$@"
-    elif command -v gtimeout >/dev/null; then
+    elif command -v gtimeout >/dev/null 2>&1; then
         gtimeout "$secs" "$@"
     else
         # Fallback without timeout if neither exists
