@@ -99,12 +99,14 @@ Launch the full-screen interactive queue simply by typing `q`:
 | Feature | Queue (`q`) | Spotify / Desktop Apps | Plain MPV CLI |
 | :--- | :---: | :---: | :---: |
 | **RAM Usage** | **< 15 MB** | 500 MB – 1.2 GB (Electron) | ~15 MB |
-| **24/7 Smart Auto-Discovery** | ✅ (`q -auto`) | ✅ (Algorithm) | ❌ |
+| **24/7 Smart Auto-Discovery** | ✅ (`q -auto` Zero-Gap) | ✅ (Algorithm) | ❌ |
 | **YouTube & SoundCloud Streaming** | ✅ Zero local storage | ❌ Spotify catalog only | ⚠️ Single URLs only |
 | **Headless Background Daemon** | ✅ Continuous (`setsid`) | ❌ Window required | ❌ Blocks terminal |
 | **Interactive Fuzzy Search (FZF)** | ✅ Instant (0ms) | ⚠️ Slower GUI search | ❌ None |
+| **Real-Time Live TUI Auto-Sync** | ✅ Instant Fingerprint Sync | ⚠️ Cloud polling delay | ❌ None |
+| **Zero-Stutter Audio Architecture** | ✅ 48kHz Resampler & 1s Buffer | ⚠️ High CPU usage | ⚠️ Sinks drop on load |
+| **WSL2 / Linux Virtualization Hardened**| ✅ Native Pulse/SHM Bypass | ⚠️ Audio desync / crackle | ⚠️ Buffer underruns on VM |
 | **Dead Link Auto-Cleaner** | ✅ `q -clean` | ❌ None | ❌ None |
-| **WSL2 / Linux Audio Resilience** | ✅ PulseAudio hardened | ⚠️ Often desyncs on WSL | ⚠️ Sinks wedge on pause |
 
 ---
 
@@ -165,6 +167,15 @@ q ~/Music/favorite_song.mp3
 cat playlist_urls.txt | q
 ```
 
+### ✨ Smart Destination Selection (`New Queue`, `Active Queue`, `Playlists`)
+
+Whenever you search for songs or load playlists, `q` presents an interactive destination selector:
+- **`✨ New Queue`**: Clears the current session and starts a fresh queue with the selected tracks, beginning playback immediately.
+- **`🎧 Active Queue`**: Appends the tracks seamlessly to your current playing session without interrupting playback.
+- **`📂 Playlists`**: Directly routes the selected tracks to a newly created or existing saved playlist.
+
+> 💡 **Auto-Play on Ingestion**: If MPV is idle or stopped, adding tracks or running a search automatically starts playback right away! If music is already playing, tracks are queued smoothly in the background.
+
 ### 🔗 Multi-Argument & Command Chaining
 
 `q` features an intelligent command parser that supports **chaining multiple actions, searches, and maintenance flags** in a single execution line:
@@ -199,7 +210,8 @@ You can use standard short flags (`q -p`) or clean smart commands (`q play`).
 ### 🎵 Playback & Audio
 | Command | Flag | Action |
 | :--- | :--- | :--- |
-| `q play [N]` | `q -p [N]` | **Play / Pause** toggle, or jump to track `N` *(supports math: `10+5`)* |
+| `q play [N]` | `q -p [N]` | **Play / Pause** toggle, or jump to track `N` *(restarts from start if stuck/EOF)* |
+| `q pause` | `q -pause` | Pause active playback |
 | `q next` | `q -next` | Skip to next track |
 | `q prev` | `q -prev` | Return to previous track |
 | `q stop` | `q -stop` | Gracefully quit MPV and unhook audio |
@@ -207,6 +219,7 @@ You can use standard short flags (`q -p`) or clean smart commands (`q play`).
 | `q fx [on\|off]`| `q -fx` | Toggle spatial Dolby-like audio profile |
 | `q shuffle` | `q -shuf [list]` | Toggle shuffle mode *(or randomize queue entries)* |
 | `q auto` | `q -auto` | **Toggle 24/7 Auto-Discovery Radio Mode** |
+| `q info` | `q -i` | Display live playback quality, audio bitrate, and sample rate |
 | — | `q -l` / `q -lp` | Toggle Track Loop / Playlist Loop |
 
 ---
@@ -242,14 +255,14 @@ When navigating the interactive queue (`q`):
 
 | Key | Function |
 | :--- | :--- |
-| <kbd>Enter</kbd> | **Play focused track** immediately *(or open Batch Actions menu)* |
-| <kbd>Tab</kbd> | **Select / Mark track** for multi-item actions |
+| <kbd>Enter</kbd> | **Play focused track** immediately *(or open Batch Actions menu if tracks selected)* |
+| <kbd>Tab</kbd> | **Select / Mark track** for multi-item actions *(Move, Remove, Export, New Queue)* |
 | <kbd>Alt</kbd> + <kbd>A</kbd> | **Invert selection** (toggle all tracks) |
 | <kbd>Insert</kbd> / <kbd>Delete</kbd> | Select All / Deselect All |
 | <kbd>Ctrl</kbd> + <kbd>V</kbd> | **Paste URL from clipboard** directly into the queue |
 | <kbd>Esc</kbd> / <kbd>Ctrl</kbd> + <kbd>C</kbd> | Exit TUI *(music continues playing uninterrupted)* |
 
-> ⚡ **Live Auto-Sync**: The interactive queue automatically updates and reflects new tracks in real-time whenever songs are added or radio auto-discovers tracks.
+> ⚡ **Futuristic Live Auto-Sync**: The interactive queue uses full queue fingerprinting to update in real-time (~0ms) whenever songs are added, moved (`q -mv`), swapped (`q -sw`), removed (`q -rm`), shuffled (`q -shuf`), or auto-appended by Radio from any terminal session.
 
 ---
 
@@ -311,9 +324,11 @@ q -i
 ## 🤖 Smart Auto-Mode (`q -auto`)
 
 When Auto-Mode is enabled:
-1. **Intelligent Seed Analysis**: When your queue approaches the end, `q` inspects your existing track history and genres.
-2. **Zero-Gap Discovery**: Automatically discovers related high-quality hits from YouTube.
-3. **Continuous Streaming**: Seamlessly queues and buffers the new tracks in the background, giving you a 24/7 personal radio station that never runs out of music.
+1. **Intelligent Seed Analysis**: When your queue approaches the end, `q` dynamically analyzes recent tracks and seeds diverse discovery queries across YouTube Mixes (`RDAMVM`) and YouTube Music catalogs.
+2. **24/7 Zero-Gap Discovery**: Fetches and prepares candidate tracks in the background before the current song finishes playing.
+3. **End-of-Queue (EOF) Awareness**: If playback reaches the end of the queue, Auto-Mode seamlessly discovers, queues, and starts playback of new tracks so silence never interrupts your flow.
+4. **Smart User Override Respect**: Automatically pauses auto-discovery if you manually pause playback or activate single-track looping (`q -l`).
+5. **Anti-Repetition History Engine**: Maintains an intelligent ring buffer of played track IDs to prevent duplicate plays.
 
 ---
 
