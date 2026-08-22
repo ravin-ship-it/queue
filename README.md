@@ -119,7 +119,9 @@ cd queue
 ./install.sh
 ```
 
-> **Automated Package Detection**: `install.sh` automatically installs missing dependencies on **Ubuntu/Debian/WSL**, **Arch Linux**, **Fedora**, **macOS (Homebrew)**, and **Termux**.
+> **⚡ Live Symlink Architecture**: `install.sh` links `~/.local/bin/q` directly to your cloned repository. When you run `git pull` in the future, all updates and bug fixes apply **instantly in real time without ever needing to run `install.sh` again!**
+>
+> **🌍 Cross-Platform Compatibility**: Automatically configures dependencies across **Ubuntu/Debian/WSL**, **Arch Linux**, **Fedora**, **macOS (Homebrew)**, and **Termux (Android)** with universal Netcat (`nc`/`ncat`) detection.
 
 ### 2. Apply Shell Integration
 ```bash
@@ -237,15 +239,27 @@ You can use standard short flags (`q -p`) or clean smart commands (`q play`).
 
 ---
 
-### 📁 Custom Playlists
+### 📁 Custom Playlists & Organization
 | Command | Flag | Action |
 | :--- | :--- | :--- |
 | `q save <name>` | `q -pl-save <name>` | Save active queue as a named playlist |
 | `q load [name]` | `q -pl-load [name]` | Load playlist *(opens FZF picker if name omitted)* |
 | `q list` | `q -pl-list` | Interactive playlist explorer and manager |
+| — | `q -pl-raw [name]` | Print raw playlist names or contents |
 | — | `q -pl-rm <name>` | Delete a saved playlist |
-| — | `q -pl-clean <name>` | Clean dead tracks from a saved playlist |
+| — | `q -pl-clean <name>`| Clean dead/deleted tracks from a saved playlist |
+| — | `q -pl-rmr <name>` | Remove duplicate tracks from a saved playlist |
+| — | `q -rname <O> <N>` | Rename a playlist or local file |
 | — | `q -to <name>` | Route search results directly into a playlist |
+
+---
+
+### 🛠️ System & Maintenance
+| Command | Flag | Action |
+| :--- | :--- | :--- |
+| `q deps` | `q -deps` | Verify core system dependencies (`mpv`, `yt-dlp`, `fzf`, `jq`, `nc`) |
+| `q up` | `q -up` | Automatically update `yt-dlp` to the latest release *(no root/sudo needed)* |
+| `q help` | `q -h` | Display the interactive boxed help manual |
 
 ---
 

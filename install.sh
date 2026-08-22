@@ -103,9 +103,9 @@ chmod +x "$REPO_DIR/q"
 [ ! -L "$DEST_DIR/q_modules" ] && rm -rf "$DEST_DIR/q_modules"
 
 # Create live symlinks
-ln -sf "$REPO_DIR/q" "$HOME/.local/bin/q"
-ln -sf "$REPO_DIR/q" "$DEST_DIR/q"
-ln -sf "$REPO_DIR/q_modules" "$DEST_DIR/q_modules"
+ln -sfn "$REPO_DIR/q" "$HOME/.local/bin/q"
+ln -sfn "$REPO_DIR/q" "$DEST_DIR/q"
+ln -sfn "$REPO_DIR/q_modules" "$DEST_DIR/q_modules"
 
 echo -e "${GREEN}✅ Live symlink installed: ~/.local/bin/q -> $REPO_DIR/q${NC}"
 echo -e "${GRAY}   👉 Updates via 'git pull' will now apply instantly without reinstalling!${NC}"
