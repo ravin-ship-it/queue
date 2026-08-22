@@ -84,7 +84,7 @@ fi
 # --- Command Parsing ---
 
 PROCESSED_ANY_FLAG=false
-SMART_CMDS="^(play|pause|stop|next|prev|vol|info|list|clear|shuffle|remove|move|swap|help|save|load|auto|fx)$"
+SMART_CMDS="^(play|pause|stop|next|prev|vol|info|list|clear|shuffle|remove|move|swap|help|save|load|auto|fx|deps|up)$"
 
 while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
     PROCESSED_ANY_FLAG=true
@@ -110,6 +110,8 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
             load) CMD="-pl-load" ;;
             auto) CMD="-auto" ;;
             fx) CMD="-fx" ;;
+            deps) CMD="-deps" ;;
+            up) CMD="-up" ;;
         esac
     fi
 
@@ -313,6 +315,8 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
             export TARGET_PLAYLIST="$1"
             shift 
             ;; 
+        -deps) check_dependencies; shift ;;
+        -up) cmd_update_ytdlp; shift ;;
         -h|--help) show_help; shift ;; 
         *) 
             echo -e "${C_PINK}🧐 I don't know what \"$1\" is 🔫... is it your distant cousin 👀❔${C_RESET}"

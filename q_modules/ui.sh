@@ -51,7 +51,38 @@ check_dependencies() {
         fi
         return 1
     fi
+    echo -e "${C_GREEN}✅ All core dependencies are installed:${C_RESET} ${C_CYAN}mpv, yt-dlp, fzf, jq, netcat${C_RESET}"
     return 0
+}
+
+cmd_update_ytdlp() {
+    echo -e "${C_PINK}🚀 Updating yt-dlp...${C_RESET}"
+    
+    # Method 1: Try built-in self-update if user binary
+    if yt-dlp -U 2>/dev/null; then
+        echo -e "${C_GREEN}✅ yt-dlp updated successfully!${C_RESET}"
+        return 0
+    fi
+    
+    # Method 2: Download latest official release directly into ~/.local/bin/yt-dlp (No root/sudo required!)
+    echo -e "${C_CYAN}📥 Fetching latest official release from GitHub into ~/.local/bin/yt-dlp...${C_RESET}"
+    mkdir -p "$HOME/.local/bin"
+    if curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o "$HOME/.local/bin/yt-dlp" 2>/dev/null || \
+       wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O "$HOME/.local/bin/yt-dlp" 2>/dev/null; then
+        chmod +x "$HOME/.local/bin/yt-dlp"
+        local new_ver=$("$HOME/.local/bin/yt-dlp" --version 2>/dev/null)
+        echo -e "${C_GREEN}✅ yt-dlp successfully updated to latest version: ${C_YELLOW}${new_ver}${C_RESET}"
+        return 0
+    fi
+    
+    # Method 3: Try pip fallback
+    if pip install -U yt-dlp --user 2>/dev/null || pip3 install -U yt-dlp --user 2>/dev/null; then
+        echo -e "${C_GREEN}✅ yt-dlp updated via pip!${C_RESET}"
+        return 0
+    fi
+    
+    echo -e "${C_ORANGE}⚠️ Failed to auto-update. Please check your internet connection.${C_RESET}"
+    return 1
 }
 
 get_terminal_width() {
