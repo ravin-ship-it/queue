@@ -56,33 +56,55 @@ check_dependencies() {
 }
 
 cmd_update_ytdlp() {
-    echo -e "${C_PINK}🚀 Updating yt-dlp...${C_RESET}"
+    echo -e "${C_CYAN}──────────────────────────────────────────────────────────────────────────────${C_RESET}"
+    echo -e "${C_PINK}🚀 Updating yt-dlp & Queue Engine...${C_RESET}"
+    echo -e "${C_CYAN}──────────────────────────────────────────────────────────────────────────────${C_RESET}"
     
-    # Method 1: Try built-in self-update if user binary
+    # 1. Update yt-dlp
+    echo -e "${C_CYAN}📦 [1/2] Updating yt-dlp...${C_RESET}"
+    local ytdl_updated=false
     if yt-dlp -U 2>/dev/null; then
-        echo -e "${C_GREEN}✅ yt-dlp updated successfully!${C_RESET}"
-        return 0
-    fi
-    
-    # Method 2: Download latest official release directly into ~/.local/bin/yt-dlp (No root/sudo required!)
-    echo -e "${C_CYAN}📥 Fetching latest official release from GitHub into ~/.local/bin/yt-dlp...${C_RESET}"
-    mkdir -p "$HOME/.local/bin"
-    if curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o "$HOME/.local/bin/yt-dlp" 2>/dev/null || \
-       wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O "$HOME/.local/bin/yt-dlp" 2>/dev/null; then
+        local new_ver=$(yt-dlp --version 2>/dev/null)
+        echo -e "${C_GREEN}✅ yt-dlp is up to date: ${C_YELLOW}${new_ver}${C_RESET}"
+        ytdl_updated=true
+    elif mkdir -p "$HOME/.local/bin" && { curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o "$HOME/.local/bin/yt-dlp" 2>/dev/null || wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O "$HOME/.local/bin/yt-dlp" 2>/dev/null; }; then
         chmod +x "$HOME/.local/bin/yt-dlp"
         local new_ver=$("$HOME/.local/bin/yt-dlp" --version 2>/dev/null)
-        echo -e "${C_GREEN}✅ yt-dlp successfully updated to latest version: ${C_YELLOW}${new_ver}${C_RESET}"
-        return 0
-    fi
-    
-    # Method 3: Try pip fallback
-    if pip install -U yt-dlp --user 2>/dev/null || pip3 install -U yt-dlp --user 2>/dev/null; then
+        echo -e "${C_GREEN}✅ yt-dlp updated to latest official version: ${C_YELLOW}${new_ver}${C_RESET}"
+        ytdl_updated=true
+    elif pip install -U yt-dlp --user 2>/dev/null || pip3 install -U yt-dlp --user 2>/dev/null; then
         echo -e "${C_GREEN}✅ yt-dlp updated via pip!${C_RESET}"
-        return 0
+        ytdl_updated=true
     fi
+    [ "$ytdl_updated" = false ] && echo -e "${C_ORANGE}⚠️ Could not auto-update yt-dlp.${C_RESET}"
+
+    # 2. Update Queue Engine directly into ~/.local/bin/mpv/
+    echo -e "${C_CYAN}📦 [2/2] Updating Queue Engine from GitHub...${C_RESET}"
+    local dest_dir="$HOME/.local/bin/mpv"
+    mkdir -p "$dest_dir/q_modules"
     
-    echo -e "${C_ORANGE}⚠️ Failed to auto-update. Please check your internet connection.${C_RESET}"
-    return 1
+    local files=("q" "q_modules/ui.sh" "q_modules/utils.sh" "q_modules/media.sh" "q_modules/queue.sh" "q_modules/search.sh" "q_modules/batch.sh" "q_modules/playlist.sh")
+    local success=true
+    local base_url="https://raw.githubusercontent.com/ravin-ship-it/queue/main"
+    
+    for f in "${files[@]}"; do
+        if curl -sSL -f "${base_url}/${f}" -o "${dest_dir}/${f}.tmp" 2>/dev/null; then
+            mv "${dest_dir}/${f}.tmp" "${dest_dir}/${f}"
+        else
+            success=false
+            rm -f "${dest_dir}/${f}.tmp"
+        fi
+    done
+    
+    if [ "$success" = true ]; then
+        chmod +x "$dest_dir/q"
+        mkdir -p "$HOME/.local/bin"
+        ln -sf "$dest_dir/q" "$HOME/.local/bin/q"
+        echo -e "${C_GREEN}✅ Queue Engine successfully updated to latest version!${C_RESET}"
+    else
+        echo -e "${C_ORANGE}⚠️ Failed to fetch Queue updates from GitHub. Check your connection.${C_RESET}"
+    fi
+    echo -e "${C_CYAN}──────────────────────────────────────────────────────────────────────────────${C_RESET}"
 }
 
 get_terminal_width() {

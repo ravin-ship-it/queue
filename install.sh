@@ -89,26 +89,24 @@ install_deps() {
 
 install_deps
 
-# --- Core Files Installation (Live Symlink Architecture) ---
+# --- Core Files Installation ---
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEST_DIR="$HOME/.local/bin/mpv"
 mkdir -p "$DEST_DIR"
 mkdir -p "$HOME/.local/bin"
 
-echo -e "${CYAN}📦 Linking live executables...${NC}"
-chmod +x "$REPO_DIR/q"
+echo -e "${CYAN}📦 Installing Queue engine into $DEST_DIR...${NC}"
+# Clean existing symlinks/files in destination before copying permanent files
+rm -rf "$DEST_DIR/q" "$DEST_DIR/q_modules"
+cp -r "$REPO_DIR/q" "$REPO_DIR/q_modules" "$DEST_DIR/"
+chmod +x "$DEST_DIR/q"
 
-# Clean old static copies if they were regular files/directories
-[ ! -L "$DEST_DIR/q" ] && rm -rf "$DEST_DIR/q"
-[ ! -L "$DEST_DIR/q_modules" ] && rm -rf "$DEST_DIR/q_modules"
+# Link ~/.local/bin/q to the permanent destination
+ln -sf "$DEST_DIR/q" "$HOME/.local/bin/q"
 
-# Create live symlinks
-ln -sfn "$REPO_DIR/q" "$HOME/.local/bin/q"
-ln -sfn "$REPO_DIR/q" "$DEST_DIR/q"
-ln -sfn "$REPO_DIR/q_modules" "$DEST_DIR/q_modules"
-
-echo -e "${GREEN}✅ Live symlink installed: ~/.local/bin/q -> $REPO_DIR/q${NC}"
-echo -e "${GRAY}   👉 Updates via 'git pull' will now apply instantly without reinstalling!${NC}"
+echo -e "${GREEN}✅ Queue installed permanently to $DEST_DIR (symlinked to ~/.local/bin/q)${NC}"
+echo -e "${GRAY}   👉 Self-Contained: You can delete the cloned folder anytime without breaking q!${NC}"
+echo -e "${GRAY}   👉 Auto-Updates: Run 'q -up' anytime from any directory to update Queue & yt-dlp.${NC}"
 
 # --- Configuration ---
 CONF_DIR="$HOME/.config/mpv"

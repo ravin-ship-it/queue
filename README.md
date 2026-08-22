@@ -119,7 +119,9 @@ cd queue
 ./install.sh
 ```
 
-> **⚡ Live Symlink Architecture**: `install.sh` links `~/.local/bin/q` directly to your cloned repository. When you run `git pull` in the future, all updates and bug fixes apply **instantly in real time without ever needing to run `install.sh` again!**
+> **🛡️ Permanent & Self-Contained**: `install.sh` installs `q` permanently into `~/.local/bin/mpv/` so you can safely delete the cloned repository directory anytime without breaking `q`.
+>
+> **🚀 Universal Auto-Updates**: Run **`q -up`** (or `q up`) anytime from any directory to update both `yt-dlp` and the Queue engine directly from GitHub in 1 second!
 >
 > **🌍 Cross-Platform Compatibility**: Automatically configures dependencies across **Ubuntu/Debian/WSL**, **Arch Linux**, **Fedora**, **macOS (Homebrew)**, and **Termux (Android)** with universal Netcat (`nc`/`ncat`) detection.
 
