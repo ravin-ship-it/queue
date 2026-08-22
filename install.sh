@@ -89,16 +89,26 @@ install_deps() {
 
 install_deps
 
-# --- Core Files Installation ---
+# --- Core Files Installation (Live Symlink Architecture) ---
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEST_DIR="$HOME/.local/bin/mpv"
 mkdir -p "$DEST_DIR"
-
-echo -e "${CYAN}📦 Installing core executables...${NC}"
-cp -r q q_modules "$DEST_DIR/"
-chmod +x "$DEST_DIR/q"
 mkdir -p "$HOME/.local/bin"
-ln -sf "$DEST_DIR/q" "$HOME/.local/bin/q"
-echo -e "${GREEN}✅ q installed to $DEST_DIR (and symlinked to ~/.local/bin/q)${NC}"
+
+echo -e "${CYAN}📦 Linking live executables...${NC}"
+chmod +x "$REPO_DIR/q"
+
+# Clean old static copies if they were regular files/directories
+[ ! -L "$DEST_DIR/q" ] && rm -rf "$DEST_DIR/q"
+[ ! -L "$DEST_DIR/q_modules" ] && rm -rf "$DEST_DIR/q_modules"
+
+# Create live symlinks
+ln -sf "$REPO_DIR/q" "$HOME/.local/bin/q"
+ln -sf "$REPO_DIR/q" "$DEST_DIR/q"
+ln -sf "$REPO_DIR/q_modules" "$DEST_DIR/q_modules"
+
+echo -e "${GREEN}✅ Live symlink installed: ~/.local/bin/q -> $REPO_DIR/q${NC}"
+echo -e "${GRAY}   👉 Updates via 'git pull' will now apply instantly without reinstalling!${NC}"
 
 # --- Configuration ---
 CONF_DIR="$HOME/.config/mpv"

@@ -36,7 +36,7 @@ if ! command -v nc >/dev/null 2>&1; then
 fi
 
 # --- MODULES ---
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" && pwd)"
 if [ -d "$SCRIPT_DIR/q_modules" ]; then
     MODULE_DIR="$SCRIPT_DIR/q_modules"
 else
