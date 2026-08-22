@@ -2,7 +2,7 @@ show_queue() {
     # Wait for socket to be responsive (up to 2 seconds)
     if [ "$MPV_RUNNING" = false ]; then
         for i in {1..10}; do
-            if [ -S "$SOCKET" ] && echo '{ "command": ["get_property", "playlist-count"] }' | nc -N -U -w 1 "$SOCKET" &>/dev/null; then
+            if [ -S "$SOCKET" ] && echo '{ "command": ["get_property", "playlist-count"] }' | nc $NC_OPTS -w 1 "$SOCKET" &>/dev/null; then
                 MPV_RUNNING=true
                 break
             fi
@@ -27,7 +27,7 @@ show_queue() {
     # Load cache into memory ONCE at the start
     load_cache_to_memory
 
-    PLAYLIST_JSON=$(echo "{ \"command\": [\"get_property\", \"playlist\"] }" | nc -N -U -w 1 "$SOCKET" 2>/dev/null)
+    PLAYLIST_JSON=$(echo "{ \"command\": [\"get_property\", \"playlist\"] }" | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
     local NEEDS_FETCH=false
 
     # Pre-fetch uploader/duration if possible (optional enhancement)
@@ -194,7 +194,7 @@ show_queue() {
 }
 
 cmd_remove() {
-    local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc -N -U -w 1 "$SOCKET")
+    local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET")
     declare -a INDICES_TO_REMOVE
 
     if [ "$#" -eq 0 ] || [ -z "$1" ]; then
@@ -261,7 +261,7 @@ cmd_remove() {
             
             local formatted_track=$(format_track_log "$idx" "$filename" "$mpv_title")
 
-            echo "{ \"command\": [\"playlist-remove\", $((idx - 1))] }" | nc -N -U -w 1 "$SOCKET" > /dev/null
+            echo "{ \"command\": [\"playlist-remove\", $((idx - 1))] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
             echo -e "${C_PINK}✖  Removed ${formatted_track}"
         done
         
@@ -272,7 +272,7 @@ cmd_remove() {
         # Check playback status if we affected the playing track
         if [ "$was_playing_removed" = true ]; then
             # Query mpv state after removal
-            local cur_status=$(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","playlist-pos"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","pause"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r '
+            local cur_status=$(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","playlist-pos"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","pause"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r '
                 map(select(.event == null)) |
                 (.[0].data // 0), "\t", (if .[1].data == null then -1 else .[1].data end), "\t", (.[2].data // "false"), "\t", (.[3].data // "false")
             ' 2>/dev/null)
@@ -297,7 +297,7 @@ cmd_remove() {
             fi
         else
             # Just show what is playing now (no wait needed usually, but safe to check)
-            local is_paused=$(echo '{ "command": ["get_property", "pause"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // "false"')
+            local is_paused=$(echo '{ "command": ["get_property", "pause"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // "false"')
             if [ "$is_paused" == "true" ]; then
                 log_now_playing "|| Still Paused: "
             else
@@ -318,7 +318,7 @@ cmd_move() {
     [ -z "$from" ] || [ -z "$to" ] && return
 
     # Fetch track info for pretty logging
-    local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc -N -U -w 1 "$SOCKET")
+    local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET")
     local count=$(echo "$track_info" | jq -s -r 'map(select(.event == null)) | .[0].data | length // 0' 2>/dev/null); : "${count:=0}"
 
     if [ "$from" -gt "$count" ] || [ "$from" -lt 1 ]; then
@@ -342,7 +342,7 @@ cmd_move() {
     # Extract only the content after the index for the move log to keep "From -> To" style clean
     local track_details=$(echo -e "$formatted_track" | sed 's/^[^]]*]//')
 
-    echo "{ \"command\": [\"playlist-move\", $((from - 1)), $target_idx] }" | nc -N -U -w 1 "$SOCKET" > /dev/null
+    echo "{ \"command\": [\"playlist-move\", $((from - 1)), $target_idx] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
     echo -e "${C_CYAN}🚚 Moved ${C_WHITE}[${C_ORANGE}$from${C_WHITE}] ${C_CYAN}-> ${C_WHITE}[${C_ORANGE}$to${C_WHITE}]${C_RESET}${track_details}"
     save_current_playlist true >/dev/null 2>&1 & disown
 }
@@ -354,7 +354,7 @@ cmd_swap() {
     [ "$p1" -eq "$p2" ] && return
 
     # Validate bounds
-    local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc -N -U -w 1 "$SOCKET")
+    local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET")
     local count=$(echo "$track_info" | jq -s -r 'map(select(.event == null)) | .[0].data | length // 0' 2>/dev/null); : "${count:=0}"
 
     if [ "$p1" -gt "$count" ] || [ "$p1" -lt 1 ] || [ "$p2" -gt "$count" ] || [ "$p2" -lt 1 ]; then
@@ -396,7 +396,7 @@ cmd_swap() {
 }
 
 cmd_clear() {
-    echo '{"command": ["playlist-clear"]}' | nc -N -U -w 1 "$SOCKET" > /dev/null
+    echo '{"command": ["playlist-clear"]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
     echo -e "${C_PINK}🧹 Queue cleared.${C_RESET}"
     save_current_playlist true true >/dev/null 2>&1 & disown
 }
@@ -404,17 +404,17 @@ cmd_clear() {
 cmd_shuffle() {
     local mode="$1"
     if [ "$mode" == "list" ] || [ "$mode" == "all" ]; then
-        echo '{"command": ["playlist-shuffle"]}' | nc -N -U -w 1 "$SOCKET" > /dev/null
+        echo '{"command": ["playlist-shuffle"]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
         echo -e "${C_PINK}🔀 Playlist entries shuffled.${C_RESET}"
         save_current_playlist true >/dev/null 2>&1 & disown
     else
         # Toggle shuffle property
-        local current=$(echo '{ "command": ["get_property", "shuffle"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // "false"')
+        local current=$(echo '{ "command": ["get_property", "shuffle"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // "false"')
         if [ "$current" == "true" ]; then
-            echo '{ "command": ["set_property", "shuffle", false] }' | nc -N -U -w 1 "$SOCKET" > /dev/null
+            echo '{ "command": ["set_property", "shuffle", false] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
             echo -e "${C_ORANGE}🔀 Shuffle Mode: ${C_WHITE}OFF${C_RESET}"
         else
-            echo '{ "command": ["set_property", "shuffle", true] }' | nc -N -U -w 1 "$SOCKET" > /dev/null
+            echo '{ "command": ["set_property", "shuffle", true] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
             echo -e "${C_PINK}🔀 Shuffle Mode: ${C_WHITE}ON ${C_RESET}${C_GRAY}(Randomized Playback)${C_RESET}"
         fi
     fi
@@ -449,7 +449,7 @@ cmd_remove_redundant() {
         fi
     else
         # --- Socket Mode ---
-        local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc -N -U -w 1 "$SOCKET")
+        local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET")
         local indices_to_remove=$(echo "$track_info" | jq -r \
             'select(.data != null and (.data | type == "array")) | [ .data | to_entries[] | {idx: .key, file: .value.filename} ] 
             | group_by(.file) 
@@ -471,7 +471,7 @@ cmd_remove_redundant() {
 
         for idx in $indices_to_remove;
          do
-            echo "{ \"command\": [\"playlist-remove\", $idx] }" | nc -N -U -w 1 "$SOCKET" > /dev/null
+            echo "{ \"command\": [\"playlist-remove\", $idx] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
         done
         
         echo -e "${C_GREEN}✨ Cleaned up $count duplicates.${C_RESET}"
@@ -533,7 +533,7 @@ cmd_clean() {
         echo -e "${C_TEAL}📊 Status: ${C_CYAN}${alive_count}${C_RESET} Alive | ${C_PINK}${removed_count}${C_RESET} Removed"
     else
         # --- Socket Mode ---
-        local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc -N -U -w 1 "$SOCKET")
+        local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET")
         local total_count=$(echo "$track_info" | jq -r '.data | length // 0' 2>/dev/null); : "${total_count:=0}"
         
         if [ "$total_count" -eq 0 ]; then
@@ -600,7 +600,7 @@ cmd_clean() {
         
         for idx in $sorted_dead;
          do
-            echo "{ \"command\": [\"playlist-remove\", $idx] }" | nc -N -U -w 1 "$SOCKET" > /dev/null
+            echo "{ \"command\": [\"playlist-remove\", $idx] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
             ((removed_count++))
         done
         
@@ -629,7 +629,7 @@ queue_item_ipc() {
     fi
     
     # Get current playlist size to determine new index efficiently
-    local count=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
+    local count=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
     local next_index=$((count + 1))
 
     if [ -n "$title" ] && [ "$title" != "$url" ]; then
@@ -677,7 +677,7 @@ auto_queue_related() {
     fi
 
     # --- PROTOCOL: Status, Pause & Loop Respect ---
-    local raw_status=$(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","playlist-pos"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","pause"]}\n{"command":["get_property","eof-reached"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r '
+    local raw_status=$(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","playlist-pos"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","pause"]}\n{"command":["get_property","eof-reached"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r '
         map(select(.event == null)) |
         (.[0].data // 0), "\t", (if .[1].data == null then -1 else .[1].data end), "\t", (.[2].data // "false"), "\t", (.[3].data // "no"), "\t", (.[4].data // "no"), "\t", (.[5].data // "false"), "\t", (.[6].data // "false")
     ' 2>/dev/null)
@@ -729,7 +729,7 @@ auto_queue_related() {
             fi
         fi
         
-        local seed_json=$(echo "{\"command\":[\"get_property\", \"playlist/$target_idx\"]}" | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // empty')
+        local seed_json=$(echo "{\"command\":[\"get_property\", \"playlist/$target_idx\"]}" | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // empty')
         input_filename=$(echo "$seed_json" | jq -r '.filename // ""')
         input_title=$(echo "$seed_json" | jq -r '.title // ""')
         echo "[$(date +%T)] [Seed] Diversity Pick: Index $target_idx (${input_title:-Unknown})" >> "$debug_log"
@@ -770,7 +770,7 @@ auto_queue_related() {
     fi
 
     # --- 3. Deduplication ---
-    local pl_json=$(echo '{"command":["get_property","playlist"]}' | nc -N -U -w 2 "$SOCKET" 2>/dev/null)
+    local pl_json=$(echo '{"command":["get_property","playlist"]}' | nc $NC_OPTS -w 2 "$SOCKET" 2>/dev/null)
     local cur_ids=$(echo "$pl_json" | jq -r '.data[].filename' | grep -oP '(?<=[v=be/])[a-zA-Z0-9_-]{11}' | sort -u)
 
     declare -a pool_u; declare -a pool_t; declare -a pool_a; declare -a pool_d

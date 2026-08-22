@@ -142,15 +142,15 @@ execute_batch() {
                 batch_cmds+="${q_json_cmd}\n"
             done
 
-            echo -e "$batch_cmds" | nc -N -U -w 1 "$SOCKET" > /dev/null
+            echo -e "$batch_cmds" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
 
             for i in {1..15}; do
-                local cur_cnt=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
+                local cur_cnt=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
                 if [ "$cur_cnt" -gt 0 ]; then break; fi
                 sleep 0.1
             done
 
-            echo '{"command": ["set_property", "pause", false]}' | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
+            echo '{"command": ["set_property", "pause", false]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
             wait_for_playback_start
             log_now_playing "|> Playing (New Queue): "
             save_current_playlist true >/dev/null 2>&1 & disown
@@ -166,7 +166,7 @@ execute_batch() {
             ensure_mpv_running "$last_pl"
         else
             # Check if MPV is running but idle, paused at EOF, or has no active track
-            local raw_mpv_state=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","playlist-count"]}\n{"command":["get_property","playlist-pos"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r 'map(select(.event == null)) | (if .[0].data == null then true else .[0].data end), "\t", (if .[1].data == null then 0 else .[1].data end), "\t", (if .[2].data == null then -1 else .[2].data end)')
+            local raw_mpv_state=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","playlist-count"]}\n{"command":["get_property","playlist-pos"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r 'map(select(.event == null)) | (if .[0].data == null then true else .[0].data end), "\t", (if .[1].data == null then 0 else .[1].data end), "\t", (if .[2].data == null then -1 else .[2].data end)')
             IFS=$'\t' read -r m_idle m_count m_pos <<< "$raw_mpv_state"
             if [ "$m_idle" == "true" ] || [ "$m_count" -le 0 ] || [ "$m_pos" -eq -1 ]; then
                 SHOULD_START_PLAY=true
@@ -175,7 +175,7 @@ execute_batch() {
 
         if [ "$MPV_RUNNING" = true ]; then
             # Current count before appending new items
-            local init_count=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
+            local init_count=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
             [[ ! "$init_count" =~ ^[0-9]+$ ]] && init_count=0
 
             local batch_cmds=""
@@ -199,19 +199,19 @@ execute_batch() {
                 batch_cmds+="${q_json_cmd}\n"
             done
 
-            echo -e "$batch_cmds" | nc -N -U -w 1 "$SOCKET" > /dev/null
+            echo -e "$batch_cmds" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
 
             # Stabilization: wait for playlist count to increase
             for i in {1..15}; do
-                local cur_cnt=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
+                local cur_cnt=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
                 if [ "$cur_cnt" -gt "$init_count" ]; then break; fi
                 sleep 0.1
             done
 
             if [ "$SHOULD_START_PLAY" = true ]; then
                 # Directly play the newly added track immediately
-                echo "{\"command\": [\"playlist-play-index\", $init_count]}" | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
-                echo '{"command": ["set_property", "pause", false]}' | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
+                echo "{\"command\": [\"playlist-play-index\", $init_count]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                echo '{"command": ["set_property", "pause", false]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
                 wait_for_playback_start
                 log_now_playing "|> Playing: "
             else

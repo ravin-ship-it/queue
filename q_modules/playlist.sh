@@ -137,11 +137,11 @@ cmd_playlist_load() {
 
     if [[ "$load_mode" == *"Replace"* ]] || [[ "$load_mode" == *"New Queue"* ]]; then
         for i in {1..15}; do
-            local cur_cnt=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
+            local cur_cnt=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
             if [ "$cur_cnt" -gt 0 ]; then break; fi
             sleep 0.1
         done
-        echo '{"command": ["set_property", "pause", false]}' | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
+        echo '{"command": ["set_property", "pause", false]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
         wait_for_playback_start
         log_now_playing "|> Playing (New Queue): "
     fi
@@ -223,12 +223,12 @@ cmd_playlist_list() {
         done < <(echo "$selection" | awk -F'::' '{print $2}')
 
         for i in {1..15}; do
-            local cur_cnt=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
+            local cur_cnt=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
             if [ "$cur_cnt" -gt 0 ]; then break; fi
             sleep 0.1
         done
 
-        echo '{"command": ["set_property", "pause", false]}' | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
+        echo '{"command": ["set_property", "pause", false]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
         wait_for_playback_start
         log_now_playing "|> Playing (New Queue): "
         save_current_playlist true >/dev/null 2>&1 & disown

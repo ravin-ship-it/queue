@@ -10,11 +10,20 @@ rm -f "$HOME/.cache/mpv/radio_lock.lock"
 rm -f "$HOME/.cache/mpv/radio_failed"
 rm -f "$HOME/.cache/mpv/radio_cooldown"
 
+# Detect Netcat UNIX socket flags (Universal for OpenBSD netcat, Ncat, Termux, Linux, macOS)
+if [ -z "$NC_OPTS" ]; then
+    NC_OPTS="-U"
+    if nc -h 2>&1 | grep -q -- "-N"; then
+        NC_OPTS="-N -U"
+    fi
+    export NC_OPTS
+fi
+
 SOCKET="$HOME/.mpv-socket"
 MPV_RUNNING=false
 if [ -S "$SOCKET" ]; then
     # Verify if socket is actually responsive (1s timeout)
-    if echo '{ "command": ["get_property", "idle-active"] }' | nc -N -U -w 1 "$SOCKET" &>/dev/null; then
+    if echo '{ "command": ["get_property", "idle-active"] }' | nc $NC_OPTS -w 1 "$SOCKET" &>/dev/null; then
         MPV_RUNNING=true
     else
         # Stale socket detected
@@ -23,7 +32,7 @@ if [ -S "$SOCKET" ]; then
 fi
 
 check_socket() {
-    [ -S "$SOCKET" ] && echo '{ "command": ["get_property", "idle-active"] }' | nc -N -U -w 1 "$SOCKET" &>/dev/null
+    [ -S "$SOCKET" ] && echo '{ "command": ["get_property", "idle-active"] }' | nc $NC_OPTS -w 1 "$SOCKET" &>/dev/null
 }
 
 is_online() {
@@ -40,7 +49,7 @@ check_and_resume() {
     ( sleep 5; rm -f "$resume_cd" ) >/dev/null 2>&1 & disown
 
     if [ "$MPV_RUNNING" = true ]; then
-        local raw_state=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","eof-reached"]}' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r 'map(select(.event == null)) | (.[0].data // false), "\t", (.[1].data // false)')
+        local raw_state=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","eof-reached"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r 'map(select(.event == null)) | (.[0].data // false), "\t", (.[1].data // false)')
         IFS=$'\t' read -r is_idle is_eof <<< "$raw_state"
         
         # If idle or paused at EOF, we must intervene
@@ -48,22 +57,22 @@ check_and_resume() {
             if [ -n "$force_idx" ]; then
                  # Wait for playlist to actually have the item (Race condition fix)
                  for i in {1..15}; do
-                     local cnt=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
+                     local cnt=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
                      if [ "$cnt" -gt "$force_idx" ]; then break; fi
                      sleep 0.1
                  done
                  # Force play specific index
-                 echo "{ \"command\": [\"playlist-play-index\", $force_idx] }" | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
+                 echo "{ \"command\": [\"playlist-play-index\", $force_idx] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
             else
                  # Fallback to next
-                 echo '{ "command": ["playlist-next"] }' | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
+                 echo '{ "command": ["playlist-next"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
             fi
-            echo '{ "command": ["seek", 0, "absolute"] }' | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
-            echo '{ "command": ["set_property", "pause", false] }' | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
+            echo '{ "command": ["seek", 0, "absolute"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+            echo '{ "command": ["set_property", "pause", false] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
             
             # Check success
             sleep 0.2
-            local new_idle=$(echo '{ "command": ["get_property", "idle-active"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // "false"')
+            local new_idle=$(echo '{ "command": ["get_property", "idle-active"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // "false"')
             if [ "$new_idle" == "false" ]; then
                 log_now_playing "|> Playing (Auto): "
             else
@@ -98,7 +107,7 @@ ensure_mpv_running() {
 }
 
 send_ipc() {
-    echo "$1" | nc -N -U -w 1 "$SOCKET"
+    echo "$1" | nc $NC_OPTS -w 1 "$SOCKET"
 }
 
 notify_fzf_reload() {
@@ -128,7 +137,7 @@ save_current_playlist() {
     # Small delay when forced to allow MPV state to settle after IPC edits
     [ "$force" == "true" ] && sleep 0.2
 
-    local raw=$(echo -e '{"command":["get_property","playlist"]}\n{"command":["get_property","shuffle"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","playlist-pos"]}' | nc -N -U -w 2 "$SOCKET" 2>/dev/null | jq -s -c -r 'map(select(.event == null))')
+    local raw=$(echo -e '{"command":["get_property","playlist"]}\n{"command":["get_property","shuffle"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","playlist-pos"]}' | nc $NC_OPTS -w 2 "$SOCKET" 2>/dev/null | jq -s -c -r 'map(select(.event == null))')
     
     if [ -n "$raw" ] && [ "$raw" != "null" ]; then
         # Dynamically locate the response element containing the playlist array
@@ -166,13 +175,13 @@ restore_state_properties() {
     local lp=$(jq -r '.loop_playlist // "no"' "$state_file")
     local pos=$(jq -r '.pos // 0' "$state_file")
     
-    echo "{ \"command\": [\"set_property\", \"shuffle\", $shuf] }" | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
-    echo "{ \"command\": [\"set_property\", \"loop-file\", \"$lf\"] }" | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
-    echo "{ \"command\": [\"set_property\", \"loop-playlist\", \"$lp\"] }" | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
+    echo "{ \"command\": [\"set_property\", \"shuffle\", $shuf] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+    echo "{ \"command\": [\"set_property\", \"loop-file\", \"$lf\"] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+    echo "{ \"command\": [\"set_property\", \"loop-playlist\", \"$lp\"] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
     
     # Only restore position if it's valid
     if [ "$pos" != "null" ] && [ "$pos" -ge 0 ]; then
-        echo "{ \"command\": [\"set_property\", \"playlist-pos\", $pos] }" | nc -N -U -w 1 "$SOCKET" > /dev/null 2>&1
+        echo "{ \"command\": [\"set_property\", \"playlist-pos\", $pos] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
     fi
 }
 
@@ -324,7 +333,7 @@ fetch_missing_background() {
     load_cache_to_memory
 
     # Get current playlist from MPV
-    local playlist_json=$(echo '{ "command": ["get_property", "playlist"] }' | nc -N -U -w 1 "$SOCKET" 2>/dev/null)
+    local playlist_json=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
     
     # Extract HTTP URLs that are NOT in cache or have old format
     local parallel_limit=2
