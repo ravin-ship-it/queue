@@ -22,38 +22,27 @@ perform_search() {
     # Use strict Tab delimiter for reliability
     local TAB=$'\t'
     local COOKIES_FILE="$HOME/.config/mpv/cookies.txt"
-
-    # Dynamically detect JS runtime (node)
-    local js_runtime_opts=()
-    if command -v node >/dev/null 2>&1; then
-        js_runtime_opts=("--js-runtimes" "node")
-    fi
+    local YTDL_OPTS=("--js-runtimes" "node" "--extractor-args" "youtube:player_client=android,web" "--default-search" "$PLATFORM" "--print" "%(title)s${TAB}%(webpage_url)s${TAB}%(duration_string)s${TAB}%(uploader)s" "--no-warnings" "--flat-playlist" "--skip-download")
     
-    local COMMON_OPTS=("${js_runtime_opts[@]}" "--default-search" "$PLATFORM" "--print" "%(title)s${TAB}%(webpage_url)s${TAB}%(duration_string)s${TAB}%(uploader)s" "--no-warnings" "--flat-playlist" "--skip-download")
-    [ -f "$COOKIES_FILE" ] && COMMON_OPTS+=("--cookies" "$COOKIES_FILE")
+    # Apply cookies if they exist
+    [ -f "$COOKIES_FILE" ] && YTDL_OPTS+=("--cookies" "$COOKIES_FILE")
 
-    # Tier 1: Search using android,web player clients
-    run_with_timeout 30 yt-dlp "${COMMON_OPTS[@]}" --extractor-args "youtube:player_client=android,web" -- "$QUERY" > "$TMP_RESULTS" 2> "$ERR_LOG"
+    run_with_timeout 30 yt-dlp "${YTDL_OPTS[@]}" -- "$QUERY" > "$TMP_RESULTS" 2> "$ERR_LOG"
     
-    # Tier 2: Search using web player client fallback
+    # Fallback: If search yielded empty results, retry with default web player client
     if [ ! -s "$TMP_RESULTS" ]; then
-        run_with_timeout 30 yt-dlp "${COMMON_OPTS[@]}" --extractor-args "youtube:player_client=web" -- "$QUERY" > "$TMP_RESULTS" 2>> "$ERR_LOG"
-    fi
-
-    # Tier 3: Search using vanilla default client (maximum compatibility for emulators/Termux)
-    if [ ! -s "$TMP_RESULTS" ]; then
-        run_with_timeout 30 yt-dlp "${COMMON_OPTS[@]}" -- "$QUERY" > "$TMP_RESULTS" 2>> "$ERR_LOG"
+        local YTDL_FALLBACK_OPTS=("--js-runtimes" "node" "--default-search" "$PLATFORM" "--print" "%(title)s${TAB}%(webpage_url)s${TAB}%(duration_string)s${TAB}%(uploader)s" "--no-warnings" "--flat-playlist" "--skip-download")
+        [ -f "$COOKIES_FILE" ] && YTDL_FALLBACK_OPTS+=("--cookies" "$COOKIES_FILE")
+        run_with_timeout 30 yt-dlp "${YTDL_FALLBACK_OPTS[@]}" -- "$QUERY" > "$TMP_RESULTS" 2>> "$ERR_LOG"
     fi
     
     if [ ! -s "$TMP_RESULTS" ]; then 
         echo -e "${C_PINK}🔍🤷 No results found for \"$QUERY\"... try another magic word?${C_RESET}"
         if [ -s "$ERR_LOG" ]; then
             if grep -qi "Sign in to confirm you’re not a bot\|bot\|captcha" "$ERR_LOG"; then
-                echo -e "${C_ORANGE}💡 Tip: YouTube is requesting bot verification. Run 'q -up' to update yt-dlp or provide cookies.${C_RESET}"
+                echo -e "${C_ORANGE}💡 Tip: YouTube is requesting bot verification. Run 'q' with YouTube cookies or update yt-dlp.${C_RESET}"
             elif grep -qi "ExtractorError\|Unsupported URL" "$ERR_LOG"; then
-                echo -e "${C_ORANGE}💡 Tip: Try updating yt-dlp: run 'q -up' or 'pip install -U yt-dlp'${C_RESET}"
-            elif grep -qi "nodename nor servname provided\|Name or service not known\|Connection refused" "$ERR_LOG"; then
-                echo -e "${C_ORANGE}💡 Tip: Network / DNS connection failed. Please check internet access.${C_RESET}"
+                echo -e "${C_ORANGE}💡 Tip: Try updating yt-dlp: run 'yt-dlp -U' or 'pip install -U yt-dlp'${C_RESET}"
             fi
         fi
         rm -f "$TMP_RESULTS"
