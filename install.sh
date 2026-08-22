@@ -110,19 +110,6 @@ fi
 cp mpv.conf.example "$CONF_DIR/mpv.conf"
 echo -e "${GREEN}✅ Installed fresh mpv.conf${NC}"
 
-# --- WSL2 / Linux PulseAudio Optimization ---
-if [ -n "$WSL_DISTRO_NAME" ] || [ -e "/mnt/wslg/PulseServer" ]; then
-    mkdir -p "$HOME/.config/pulse"
-    cat << 'EOF' > "$HOME/.config/pulse/client.conf"
-# PulseAudio client configuration for WSL2 / WSLg
-default-server = unix:/mnt/wslg/PulseServer
-enable-shm = no
-auto-connect-localhost = no
-auto-connect-display = no
-EOF
-    echo -e "${GREEN}✅ Configured zero-stutter WSL2 PulseAudio client settings.${NC}"
-fi
-
 # --- YT-DLP Configuration ---
 YTDLP_CONF_DIR="$HOME/.config/yt-dlp"
 mkdir -p "$YTDLP_CONF_DIR"

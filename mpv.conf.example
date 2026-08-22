@@ -1,41 +1,37 @@
-# 🎵 MPV Configuration - Studio Quality & Zero-Stutter Streaming
+# 🎵 MPV Configuration
 input-ipc-server=~/.mpv-socket
 keep-open=yes
 save-position-on-quit=no
 resume-playback=no
 
-# 🎧 High-Fidelity Audio Driver & Deep Jitter Buffer (Android / WSL2 / Linux Resilient)
-ao=pulse,pipewire,alsa,opensles,audiotrack
-audio-buffer=1.0
-pulse-buffer=300
-pulse-latency-hacks=no
-audio-samplerate=48000
-audio-format=s16
+# Terminal / Audio (WSL PulseAudio Resilient)
+ao=pulse,alsa
+pulse-latency-hacks=yes
+pulse-buffer=100
+audio-stream-silence=yes
+audio-wait-open=0.2
 audio-channels=stereo
 volume=100
 volume-max=200
 gapless-audio=yes
 audio-pitch-correction=yes
 
-# 🚀 Dedicated Demuxer Thread & Heavy Readahead Cache
-demuxer-thread=yes
+# Network & Streaming Reconnect Resilience
+network-timeout=30
+stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5
+demuxer-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5
 cache=yes
 cache-secs=300
 demuxer-max-bytes=256MiB
 demuxer-max-back-bytes=128MiB
 demuxer-readahead-secs=300
-demuxer-hysteresis-secs=5
-
-# 🌐 Stream & Network Resilience
-network-timeout=30
-stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5
-demuxer-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5
 ytdl=yes
 ytdl-format=bestaudio[protocol^=http]/best[protocol^=http]/bestaudio/best
 script-opts=ytdl_hook-ytdl_path=yt-dlp
+stream-buffer-size=16MiB
 tls-verify=no
 
-# 🔇 Headless Audio Performance
+# Headless Audio
 vo=null
 video=no
 
