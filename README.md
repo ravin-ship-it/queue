@@ -103,9 +103,11 @@ Launch the full-screen interactive queue simply by typing `q`:
 | **YouTube & SoundCloud Streaming** | ✅ Zero local storage | ❌ Spotify catalog only | ⚠️ Single URLs only |
 | **Headless Background Daemon** | ✅ Continuous (`setsid`) | ❌ Window required | ❌ Blocks terminal |
 | **Interactive Fuzzy Search (FZF)** | ✅ Instant (0ms) | ⚠️ Slower GUI search | ❌ None |
-| **Real-Time Live TUI Auto-Sync** | ✅ Instant Fingerprint Sync | ⚠️ Cloud polling delay | ❌ None |
+| **Zero-Flicker Live Auto-Sync** | ✅ Atomic `reload-sync` (Virtual DOM)| ⚠️ Cloud polling delay | ❌ None |
+| **Dynamic Live Player Indicators** | ✅ Left-aligned `\|>` / `\|\|` + Highlight | ⚠️ Basic GUI icon | ❌ None |
 | **Zero-Stutter Audio Architecture** | ✅ 48kHz Resampler & 1s Buffer | ⚠️ High CPU usage | ⚠️ Sinks drop on load |
 | **WSL2 / Linux Virtualization Hardened**| ✅ Native Pulse/SHM Bypass | ⚠️ Audio desync / crackle | ⚠️ Buffer underruns on VM |
+| **Android / Termux 1-Click Support**| ✅ Autonomous package & driver setup | ⚠️ App crashes / battery drain | ⚠️ Manual driver config |
 | **Dead Link Auto-Cleaner** | ✅ `q -clean` | ❌ None | ❌ None |
 
 ---
@@ -278,7 +280,9 @@ When navigating the interactive queue (`q`):
 | <kbd>Ctrl</kbd> + <kbd>V</kbd> | **Paste URL from clipboard** directly into the queue |
 | <kbd>Esc</kbd> / <kbd>Ctrl</kbd> + <kbd>C</kbd> | Exit TUI *(music continues playing uninterrupted)* |
 
-> ⚡ **Futuristic Live Auto-Sync**: The interactive queue uses full queue fingerprinting to update in real-time (~0ms) whenever songs are added, moved (`q -mv`), swapped (`q -sw`), removed (`q -rm`), shuffled (`q -shuf`), or auto-appended by Radio from any terminal session.
+> ⚡ **Zero-Flicker Virtual DOM Live Auto-Sync (`reload-sync`)**: The interactive queue uses full queue fingerprinting and modern atomic frame swapping (`reload-sync`). When songs change, pause, or are modified from any terminal (`q -mv`, `q -sw`, `q -rm`, `q -shuf`), the list updates seamlessly with **zero screen-clearing flicker**, even across 1,000+ tracks.
+>
+> 🪷 **Live Dynamic Player Indicators**: Active tracks feature left-aligned **`|>`** (Playing) or **`||`** (Paused) indicators in **Deep Pink**, with the **playing song title highlighted in Deep Pink** alongside Orange track numbers, Light Pink artists, and Orange duration badges.
 
 ---
 
