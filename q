@@ -391,9 +391,11 @@ if [ -z "$1" ]; then
     (
         last_title="$init_title"; last_count="$init_count"; last_shuf="$init_shuf"
         last_lf="$init_loop_f"; last_lp="$init_loop_p"; last_idle="$init_idle"; last_paused="$init_paused"
-        last_radio_state="init"; last_af="$init_af"; last_cols="$cols"; last_idx="$init_idx"
+        last_radio_state="off"; [ -f "$HOME/.cache/mpv/auto_enabled" ] && last_radio_state="on"
+        last_af="$init_af"; last_cols="$cols"; last_idx="$init_idx"
         last_fingerprint="$init_fingerprint"
         socket_failures=0
+        first_tick=true
 
         # Wait for FZF socket to be active
         for s in {1..30}; do
@@ -404,15 +406,15 @@ if [ -z "$1" ]; then
         while true; do
             raw=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","filename"]}\n{"command":["get_property","playlist-count"]}\n{"command":["get_property","shuffle"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","playlist-pos-1"]}\n{"command":["get_property","af"]}\n{"command":["get_property","playlist"]}\n{"command":["get_property","pause"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r '
                 map(select(.event == null)) |
-                (if .[0].data == null then true else .[0].data end), "\t",
-                ((.[1].data // .[2].data) // "😴💤" | gsub("\n"; " ")), "\t",
-                (.[3].data // 0), "\t",
-                (if .[4].data == null then false else .[4].data end), "\t",
-                (.[5].data // "no"), "\t",
-                (if .[6].data == null then "no" else .[6].data end), "\t",
-                (.[7].data // "?"), "\t",
-                (if .[8].data == null or .[8].data == [] then "off" else "on" end), "\t",
-                (.[9].data // [] | map(.filename) | join(";")), "\t",
+                (if .[0].data == null then true else .[0].data end), "\u001f",
+                ((.[1].data // .[2].data) // "😴💤" | gsub("\n"; " ")), "\u001f",
+                (.[3].data // 0), "\u001f",
+                (if .[4].data == null then false else .[4].data end), "\u001f",
+                (.[5].data // "no"), "\u001f",
+                (if .[6].data == null then "no" else .[6].data end), "\u001f",
+                (.[7].data // "?"), "\u001f",
+                (if .[8].data == null or .[8].data == [] then "off" else "on" end), "\u001f",
+                (.[9].data // [] | map(.filename) | join(";")), "\u001f",
                 (if .[10].data == true then "true" else "false" end)
             ' 2>/dev/null)
             
@@ -422,7 +424,18 @@ if [ -z "$1" ]; then
                 sleep 1; continue
             fi
             socket_failures=0
-            IFS=$'\t' read -r idle curr_title curr_count curr_shuf curr_lf curr_lp curr_idx curr_af curr_fingerprint curr_paused <<< "$raw"
+            IFS=$'\x1f' read -r idle curr_title curr_count curr_shuf curr_lf curr_lp curr_idx curr_af curr_fingerprint curr_paused <<< "$raw"
+
+            # First tick: sync baseline from monitor's own output, skip all actions
+            if [ "$first_tick" == "true" ]; then
+                first_tick=false
+                last_title="$curr_title"; last_idle="$idle"; last_paused="$curr_paused"
+                last_cols=$(get_terminal_width); last_idx="$curr_idx"; last_count="$curr_count"
+                last_shuf="$curr_shuf"; last_lf="$curr_lf"; last_lp="$curr_lp"
+                last_radio_state="off"; [ -f "$HOME/.cache/mpv/auto_enabled" ] && last_radio_state="on"
+                last_af="$curr_af"; last_fingerprint="$curr_fingerprint"
+                sleep 0.5; continue
+            fi
 
             curr_radio="off"
             [ -f "$HOME/.cache/mpv/auto_enabled" ] && curr_radio="on"

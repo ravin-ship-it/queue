@@ -177,7 +177,7 @@ show_queue() {
             print_boxed_line "$LINE_CONTENT"
         else
             # Simple format for FZF or Raw output
-            printf "%s%s. %s%s%s\n" "$ind" "$i" "$DISPLAY_TITLE" "$artist_part" "$dur_part"
+            printf "%s%s. %s%s%s\n" "$ind" "${C_ORANGE}$i${C_RESET}" "$DISPLAY_TITLE" "$artist_part" "$dur_part"
         fi
         
         # Pass NEEDS_FETCH status out of the loop via a temp file or similar if needed, 
