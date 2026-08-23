@@ -158,9 +158,9 @@ show_queue() {
         local ind="   "
         if [ "$state" == "current" ] && [ "$is_idle" != "true" ]; then
             if [ "$is_paused" == "true" ]; then
-                ind="|| "
+                ind="${C_PINK}||${C_RESET} "
             else
-                ind="|> "
+                ind="${C_PINK}|>${C_RESET} "
             fi
         fi
 
