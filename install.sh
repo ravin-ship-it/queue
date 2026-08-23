@@ -143,19 +143,23 @@ fi
 SHELL_RC=""
 [[ "$SHELL" == */zsh ]] && SHELL_RC="$HOME/.zshrc"
 [[ "$SHELL" == */bash ]] && SHELL_RC="$HOME/.bashrc"
-[ -z "$SHELL_RC" ] && [ -f "$HOME/.bashrc" ] && SHELL_RC="$HOME/.bashrc"
+[ -z "$SHELL_RC" ] && [ -f "$HOME/.zshrc" ] && SHELL_RC="$HOME/.zshrc"
+[ -z "$SHELL_RC" ] && SHELL_RC="$HOME/.bashrc"
 
 if [ -n "$SHELL_RC" ]; then
+    # Ensure the RC file exists before grepping
+    [ ! -f "$SHELL_RC" ] && touch "$SHELL_RC"
+
     # PATH Marker
-    if ! grep -q "# --- Q PATH START ---" "$SHELL_RC"; then
+    if ! grep -q "# --- Q PATH START ---" "$SHELL_RC" 2>/dev/null; then
         echo -e "\n# --- Q PATH START ---" >> "$SHELL_RC"
-        echo "export PATH=\"\$PATH:$DEST_DIR\"" >> "$SHELL_RC"
+        echo "export PATH=\"\$PATH:\$HOME/.local/bin:$DEST_DIR\"" >> "$SHELL_RC"
         echo "# --- Q PATH END ---" >> "$SHELL_RC"
-        echo -e "${GREEN}✅ Added $DEST_DIR to PATH in $SHELL_RC${NC}"
+        echo -e "${GREEN}✅ Added $DEST_DIR and ~/.local/bin to PATH in $SHELL_RC${NC}"
     fi
 
     # MPV Wrapper Marker
-    if grep -q "# --- Q MPV WRAPPER START ---" "$SHELL_RC"; then
+    if grep -q "# --- Q MPV WRAPPER START ---" "$SHELL_RC" 2>/dev/null; then
         sed -i '/# --- Q MPV WRAPPER START ---/,/# --- Q MPV WRAPPER END ---/d' "$SHELL_RC"
     fi
     echo -e "${CYAN}🔧 Injecting mandatory mpv IPC wrapper function...${NC}"

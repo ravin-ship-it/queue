@@ -154,14 +154,20 @@ show_queue() {
         [ -n "$meta_artist" ] && [ "$meta_artist" != "null" ] && [ "$meta_artist" != "$CLEAN_FILENAME" ] && artist_part=" ${C_GRAY}by${C_RESET} ${C_LIGHT_PINK}$meta_artist${C_RESET}"
         [ -n "$meta_duration" ] && [ "$meta_duration" != "null" ] && [ "$meta_duration" != "0:00" ] && dur_part=" ${C_ORANGE}[$meta_duration]${C_RESET}"
         
-        # Player Indicator (|>/||)
+        # Player Indicator (|>/||) and Active Track Highlighting
         local ind="   "
+        local title_color="${C_CYAN}"
+        local fzf_title_prefix=""
+        local fzf_title_suffix=""
         if [ "$state" == "current" ] && [ "$is_idle" != "true" ]; then
             if [ "$is_paused" == "true" ]; then
                 ind="${C_PINK}||${C_RESET} "
             else
                 ind="${C_PINK}|>${C_RESET} "
             fi
+            title_color="${C_PINK}"
+            fzf_title_prefix="${C_PINK}"
+            fzf_title_suffix="${C_RESET}"
         fi
 
         if [ -t 1 ] && [ "$IN_FZF" != "true" ]; then
@@ -173,11 +179,11 @@ show_queue() {
             [ "$title_max_w" -lt 15 ] && title_max_w=15
             
             local final_title=$(truncate_text "$DISPLAY_TITLE" "$title_max_w")
-            printf -v LINE_CONTENT "%s%s. %s%s%s%s%s" "$ind" "${C_ORANGE}$i${C_RESET}" "${C_CYAN}" "$final_title" "${C_RESET}" "$artist_part" "$dur_part"
+            printf -v LINE_CONTENT "%s%s. %s%s%s%s%s" "$ind" "${C_ORANGE}$i${C_RESET}" "$title_color" "$final_title" "${C_RESET}" "$artist_part" "$dur_part"
             print_boxed_line "$LINE_CONTENT"
         else
             # Simple format for FZF or Raw output
-            printf "%s%s. %s%s%s\n" "$ind" "${C_ORANGE}$i${C_RESET}" "$DISPLAY_TITLE" "$artist_part" "$dur_part"
+            printf "%s%s. %s%s%s%s%s\n" "$ind" "${C_ORANGE}$i${C_RESET}" "$fzf_title_prefix" "$DISPLAY_TITLE" "$fzf_title_suffix" "$artist_part" "$dur_part"
         fi
         
         # Pass NEEDS_FETCH status out of the loop via a temp file or similar if needed, 
