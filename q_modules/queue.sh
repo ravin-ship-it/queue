@@ -11,7 +11,7 @@ show_queue() {
     fi
 
     if [ "$MPV_RUNNING" = false ]; then
-        if [ -t 1 ] && [ "$IN_FZF" != "true" ] && [ "$IS_RAW" != "true" ]; then
+        if [ -t 1 ] && [ "$IN_FZF" != "true" ]; then
             print_header_box "😴💤 MPV isn't running... it must be taking a nap"
         else
             echo "😴💤 MPV isn't running"
@@ -20,7 +20,7 @@ show_queue() {
     fi
 
     # Only show the outer box if output is a direct terminal, not FZF and not raw
-    if [ -t 1 ] && [ "$IN_FZF" != "true" ] && [ "$IS_RAW" != "true" ]; then
+    if [ -t 1 ] && [ "$IN_FZF" != "true" ]; then
         print_header_box "${C_CYAN}🎵 Current Queue${C_RESET}"
     fi
 
@@ -164,7 +164,7 @@ show_queue() {
             fi
         fi
 
-        if [ -t 1 ] && [ "$IN_FZF" != "true" ] && [ "$IS_RAW" != "true" ]; then
+        if [ -t 1 ] && [ "$IN_FZF" != "true" ]; then
             # Truncate title to fit terminal while keeping artist/duration
             local index_w=${#i}
             local meta_w=$(get_visual_width "$(strip_colors "$artist_part$dur_part")")
@@ -191,7 +191,7 @@ show_queue() {
         save_current_playlist true >/dev/null 2>&1 & disown
     fi
 
-    if [ -t 1 ] && [ "$IN_FZF" != "true" ] && [ "$IS_RAW" != "true" ]; then
+    if [ -t 1 ] && [ "$IN_FZF" != "true" ]; then
         printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
         B_LINE=${B_LINE// /─}
         echo -e "${C_GRAY}${B_LINE}${C_RESET}"
