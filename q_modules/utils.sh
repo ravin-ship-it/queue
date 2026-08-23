@@ -120,7 +120,7 @@ notify_fzf_reload() {
         if [ -n "$fzf_sock" ] && [ -S "$fzf_sock" ]; then
             local script_path="${0:-q}"
             [[ ! "$script_path" =~ ^/ ]] && script_path=$(command -v "$script_path" || echo "/home/xen/.local/bin/mpv/q")
-            curl -s -X POST --unix-socket "$fzf_sock" -d "reload(bash \"$script_path\" -raw)" http://localhost/ >/dev/null 2>&1 &
+            curl -s -X POST --unix-socket "$fzf_sock" -d "reload-sync(bash \"$script_path\" -raw)" http://localhost/ >/dev/null 2>&1 &
         fi
     fi
 }

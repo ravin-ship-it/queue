@@ -477,7 +477,7 @@ if [ -z "$1" ]; then
 
             # 3. Reload Queue List items if tracks, active index, or pause state changes
             if [ "$curr_fingerprint" != "$last_fingerprint" ] || [ "$curr_count" != "$last_count" ] || [ "$curr_idx" != "$last_idx" ] || [ "$curr_paused" != "$last_paused" ]; then
-                curl -s -X POST --unix-socket "$FZF_SOCK" -d "reload(bash \"$SCRIPT_PATH\" -raw)" http://localhost/ >/dev/null 2>&1
+                curl -s -X POST --unix-socket "$FZF_SOCK" -d "reload-sync(bash \"$SCRIPT_PATH\" -raw)" http://localhost/ >/dev/null 2>&1
             fi
 
             # 4. Save state for next tick (Single synchronized update)

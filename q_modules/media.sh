@@ -939,7 +939,7 @@ cmd_play() {
         if [ -f "$HOME/.cache/mpv/fzf_sock" ]; then
             local fzf_sock=$(cat "$HOME/.cache/mpv/fzf_sock")
             local script_path=$(realpath "$0")
-            curl -s -X POST --unix-socket "$fzf_sock" -d "reload(bash \"$script_path\" -raw)" http://localhost/ >/dev/null 2>&1
+            curl -s -X POST --unix-socket "$fzf_sock" -d "reload-sync(bash \"$script_path\" -raw)" http://localhost/ >/dev/null 2>&1
         fi
     fi
 
