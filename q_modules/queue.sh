@@ -27,12 +27,14 @@ show_queue() {
     # Load cache into memory ONCE at the start
     load_cache_to_memory
 
-    PLAYLIST_JSON=$(echo "{ \"command\": [\"get_property\", \"playlist\"] }" | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
+    local mpv_raw=$(echo -e '{"command":["get_property","playlist"]}\n{"command":["get_property","pause"]}\n{"command":["get_property","idle-active"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
+    local is_paused=$(echo "$mpv_raw" | jq -s -r 'map(select(.event == null)) | .[1].data // false')
+    local is_idle=$(echo "$mpv_raw" | jq -s -r 'map(select(.event == null)) | .[2].data // false')
     local NEEDS_FETCH=false
 
     # Pre-fetch uploader/duration if possible (optional enhancement)
-    echo "$PLAYLIST_JSON" | jq -s -r 'map(select(.event == null)) | .[0].data | select(type == "array") | to_entries | .[] | 
-        "\(.key + 1)\t\(if .value.current then "|>" else "  " end)\t\(.value.filename)\t\((.value.title // "") | sub("^https?://[^\\t ]+[\\t ]+"; ""))"' 2>/dev/null | while IFS=$'\t' read -r i state filename mpv_title; do
+    echo "$mpv_raw" | jq -s -r 'map(select(.event == null)) | .[0].data | select(type == "array") | to_entries | .[] | 
+        "\(.key + 1)\t\(if .value.current then "current" else "other" end)\t\(.value.filename)\t\((.value.title // "") | sub("^https?://[^\\t ]+[\\t ]+"; ""))"' 2>/dev/null | while IFS=$'\t' read -r i state filename mpv_title; do
         
         # 1. Clean Filename (Only for remote URLs)
         CLEAN_FILENAME="$filename"
@@ -142,7 +144,6 @@ show_queue() {
         fi
 
         # FINAL CLEANUP: Ensure DISPLAY_TITLE is stripped of any embedded metadata (literal \t or real tabs)
-        # This fixes the glitch where "Title\tArtist" is displayed + "by Artist" appended
         DISPLAY_TITLE="${DISPLAY_TITLE%%\\t*}"
         DISPLAY_TITLE="${DISPLAY_TITLE%%$'\t'*}"
         
@@ -153,26 +154,30 @@ show_queue() {
         [ -n "$meta_artist" ] && [ "$meta_artist" != "null" ] && [ "$meta_artist" != "$CLEAN_FILENAME" ] && artist_part=" ${C_GRAY}by${C_RESET} ${C_LIGHT_PINK}$meta_artist${C_RESET}"
         [ -n "$meta_duration" ] && [ "$meta_duration" != "null" ] && [ "$meta_duration" != "0:00" ] && dur_part=" ${C_ORANGE}[$meta_duration]${C_RESET}"
         
-        # Index and State
-        local prefix="${C_ORANGE}${i}.${C_RESET} "
-        [ "$state" == "|>" ] && prefix="${C_PINK}${i}. ${C_RESET}"
+        # Player Indicator (|>/||)
+        local ind="   "
+        if [ "$state" == "current" ] && [ "$is_idle" != "true" ]; then
+            if [ "$is_paused" == "true" ]; then
+                ind="|| "
+            else
+                ind="|> "
+            fi
+        fi
 
         if [ -t 1 ] && [ "$IN_FZF" != "true" ] && [ "$IS_RAW" != "true" ]; then
             # Truncate title to fit terminal while keeping artist/duration
             local index_w=${#i}
             local meta_w=$(get_visual_width "$(strip_colors "$artist_part$dur_part")")
             # INNER_WIDTH is (TERM_WIDTH - 6) for borders and padding
-            local title_max_w=$((TERM_WIDTH - index_w - meta_w - 10))
+            local title_max_w=$((TERM_WIDTH - index_w - meta_w - 13))
             [ "$title_max_w" -lt 15 ] && title_max_w=15
             
             local final_title=$(truncate_text "$DISPLAY_TITLE" "$title_max_w")
-            # Use %s for all parts to keep ANSI codes as literals (\033...) until the final print_boxed_line (%b)
-            # This prevents premature interpretation or double-escaping issues.
-            printf -v LINE_CONTENT "%s%s%s%s%s%s" "$prefix" "${C_CYAN}" "$final_title" "${C_RESET}" "$artist_part" "$dur_part"
+            printf -v LINE_CONTENT "%s%s. %s%s%s%s%s" "$ind" "${C_ORANGE}$i${C_RESET}" "${C_CYAN}" "$final_title" "${C_RESET}" "$artist_part" "$dur_part"
             print_boxed_line "$LINE_CONTENT"
         else
             # Simple format for FZF or Raw output
-            printf "%s %s%s%s\n" "$i." "$DISPLAY_TITLE" "$artist_part" "$dur_part"
+            printf "%s%s. %s%s%s\n" "$ind" "$i" "$DISPLAY_TITLE" "$artist_part" "$dur_part"
         fi
         
         # Pass NEEDS_FETCH status out of the loop via a temp file or similar if needed, 

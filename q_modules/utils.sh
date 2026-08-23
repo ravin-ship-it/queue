@@ -46,14 +46,17 @@ check_and_resume() {
     local resume_cd="$HOME/.cache/mpv/auto_resume_cd"
     if [ -f "$resume_cd" ]; then return; fi
     touch "$resume_cd"
-    ( sleep 5; rm -f "$resume_cd" ) >/dev/null 2>&1 & disown
+    ( sleep 3; rm -f "$resume_cd" ) >/dev/null 2>&1 & disown
 
     if [ "$MPV_RUNNING" = true ]; then
-        local raw_state=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","eof-reached"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r 'map(select(.event == null)) | (.[0].data // false), "\t", (.[1].data // false)')
-        IFS=$'\t' read -r is_idle is_eof <<< "$raw_state"
+        local raw_state=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","eof-reached"]}\n{"command":["get_property","pause"]}\n{"command":["get_property","time-pos"]}\n{"command":["get_property","playlist-count"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r 'map(select(.event == null)) | (.[0].data // false), "\t", (.[1].data // false), "\t", (.[2].data // false), "\t", (.[3].data // 0), "\t", (.[4].data // 0)')
+        IFS=$'\t' read -r is_idle is_eof is_paused time_pos pl_count <<< "$raw_state"
         
-        # If idle or paused at EOF, we must intervene
-        if [ "$is_idle" == "true" ] || [ "$is_eof" == "true" ]; then
+        # If idle, at EOF, or paused at beginning of a track (transition glitch), resume playback!
+        local time_int=${time_pos%.*}
+        [[ ! "$time_int" =~ ^[0-9]+$ ]] && time_int=0
+
+        if [ "$is_idle" == "true" ] || [ "$is_eof" == "true" ] || { [ "$is_paused" == "true" ] && [ "$time_int" -le 1 ]; }; then
             if [ -n "$force_idx" ]; then
                  # Wait for playlist to actually have the item (Race condition fix)
                  for i in {1..15}; do
@@ -63,11 +66,7 @@ check_and_resume() {
                  done
                  # Force play specific index
                  echo "{ \"command\": [\"playlist-play-index\", $force_idx] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
-            else
-                 # Fallback to next
-                 echo '{ "command": ["playlist-next"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
             fi
-            echo '{ "command": ["seek", 0, "absolute"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
             echo '{ "command": ["set_property", "pause", false] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
             
             # Check success
@@ -91,8 +90,13 @@ ensure_mpv_running() {
             initial_pl=("--playlist=$pl_arg")
         fi
 
-        setsid mpv --idle --keep-open=yes --no-terminal --vo=null \
-            --input-ipc-server="$SOCKET" "${initial_pl[@]}" </dev/null >/dev/null 2>&1 &
+        if command -v setsid >/dev/null 2>&1; then
+            setsid mpv --idle --keep-open=yes --no-terminal --vo=null \
+                --input-ipc-server="$SOCKET" "${initial_pl[@]}" </dev/null >/dev/null 2>&1 &
+        else
+            nohup mpv --idle --keep-open=yes --no-terminal --vo=null \
+                --input-ipc-server="$SOCKET" "${initial_pl[@]}" </dev/null >/dev/null 2>&1 &
+        fi
         disown
 
         for i in {1..30}; do

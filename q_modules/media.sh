@@ -172,7 +172,17 @@ fetch_and_display_url_info() {
         print_boxed_line "${C_TEAL}${view_label:0:10} ${C_WHITE}${views}${C_RESET}"
         print_boxed_line "${C_TEAL}Likes:    ${C_WHITE}${likes}${C_RESET}"
         print_boxed_line "${C_TEAL}Uploaded: ${C_WHITE}${date}${C_RESET}"
-        print_boxed_line "${C_TEAL}Queue:    ${queue_display}"
+        
+        if [ "$is_current" == "true" ]; then
+            local is_paused=$(echo '{ "command": ["get_property", "pause"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // false')
+            if [ "$is_paused" == "true" ]; then
+                print_boxed_line "${C_TEAL}Status:   ${C_YELLOW}⏸ Paused${C_RESET} (${queue_display})"
+            else
+                print_boxed_line "${C_TEAL}Status:   ${C_PURPLE}▶ Playing${C_RESET} (${queue_display})"
+            fi
+        else
+            print_boxed_line "${C_TEAL}Queue:    ${queue_display}"
+        fi
         
         if [ "$is_current" == "true" ]; then
             local mpv_props=$(echo -e '{"command":["get_property","file-format"]}\n{"command":["get_property","audio-codec-name"]}\n{"command":["get_property","audio-bitrate"]}\n{"command":["get_property","audio-params/samplerate"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | (.[0].data // "N/A"), (.[1].data // "N/A"), (.[2].data // "N/A"), (.[3].data // "N/A")')
@@ -558,7 +568,12 @@ cmd_info() {
     print_boxed_line "${C_TEAL}Source Link: ${C_VIOLET}${filename:0:$((INNER_WIDTH-15))}${C_RESET}"
     
     if [ "$playing" == "true" ]; then
-        print_boxed_line "${C_TEAL}Status:      ${C_PURPLE}▶ Playing${C_RESET}"
+        local is_paused=$(echo '{ "command": ["get_property", "pause"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // false')
+        if [ "$is_paused" == "true" ]; then
+            print_boxed_line "${C_TEAL}Status:      ${C_YELLOW}⏸ Paused${C_RESET}"
+        else
+            print_boxed_line "${C_TEAL}Status:      ${C_PURPLE}▶ Playing${C_RESET}"
+        fi
     else
         print_boxed_line "${C_TEAL}Status:      ${C_GRAY}Queued${C_RESET}"
     fi
@@ -757,19 +772,19 @@ check_auto_trigger() {
         should_trigger=true
     fi
     
-    # 2. Ending Soon (Zero Gap) - Trigger with enough time for discovery
-    if [ "$idle" == "false" ] && [ "$count" -gt 0 ] && [ "$idx" -ge $((count - 1)) ]; then
+    # 2. Ending Soon (Zero Gap) - Trigger with ample time for network discovery
+    if [ "$idle" == "false" ] && [ "$count" -gt 0 ] && { [ "$idx" -ge $((count - 1)) ] || [ "$count" -le 2 ]; }; then
          [ -z "$rem" ] || [ "$rem" == "null" ] && rem=100
          local t_int=${rem%.*}
          if [[ "$t_int" =~ ^[0-9]+$ ]]; then
-             if [ "$t_int" -lt 45 ]; then should_trigger=true; fi
+             if [ "$t_int" -lt 60 ] || [ "$count" -le 2 ]; then should_trigger=true; fi
          else
              should_trigger=true
          fi
     fi
     
-    # 3. Finished playing / EOF Reached (idle is true, or eof is true on the last track)
-    if { [ "$idle" == "true" ] || [ "$eof" == "true" ]; } && [ "$count" -gt 0 ]; then
+    # 3. Finished playing / EOF Reached / Paused at EOF on last track
+    if { [ "$idle" == "true" ] || [ "$eof" == "true" ] || [ "$paused" == "true" ]; } && [ "$count" -gt 0 ] && [ "$idx" -ge $((count - 1)) ]; then
          [ -f "$HOME/.cache/mpv/auto_cooldown" ] && return
          should_trigger=true
     fi

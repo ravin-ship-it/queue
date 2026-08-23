@@ -343,9 +343,9 @@ if [ -z "$1" ]; then
     [ "$MPV_RUNNING" = true ] && start_idle_monitor
 
     # Get initial status
-    mapfile -t init < <(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","shuffle"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","af"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","filename"]}\n{"command":["get_property","playlist-pos-1"]}\n{"command":["get_property","playlist"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | .[0].data // 0, .[1].data // false, .[2].data // "no", .[3].data // "no", (if .[4].data == null or .[4].data == [] then "off" else "on" end), (if .[5].data == null then true else .[5].data end), ((.[6].data // .[7].data) // "😴💤" | gsub("\n"; " ")), (.[8].data // "?"), (.[9].data // [] | map(.filename) | join(";"))')    
+    mapfile -t init < <(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","shuffle"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","af"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","filename"]}\n{"command":["get_property","playlist-pos-1"]}\n{"command":["get_property","playlist"]}\n{"command":["get_property","pause"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | .[0].data // 0, .[1].data // false, .[2].data // "no", .[3].data // "no", (if .[4].data == null or .[4].data == [] then "off" else "on" end), (if .[5].data == null then true else .[5].data end), ((.[6].data // .[7].data) // "😴💤" | gsub("\n"; " ")), (.[8].data // "?"), (.[9].data // [] | map(.filename) | join(";")), (if .[10].data == true then "true" else "false" end)')    
     init_count="${init[0]}"; init_shuf="${init[1]}"; init_loop_f="${init[2]}"; init_loop_p="${init[3]}"; init_af="${init[4]}"
-    init_idle="${init[5]}"; init_title="${init[6]}"; init_idx="${init[7]}"; init_fingerprint="${init[8]}"
+    init_idle="${init[5]}"; init_title="${init[6]}"; init_idx="${init[7]}"; init_fingerprint="${init[8]}"; init_paused="${init[9]}"
 
     STATUS_ICONS=""
     P_DEEP_PINK="\033[38;5;197m"
@@ -375,10 +375,13 @@ if [ -z "$1" ]; then
 
     if [ "$init_idle" == "true" ]; then
         [ "$init_title" == "😴💤" ] && init_msg="$init_title" || init_msg="(Idle - Queue Finished)"
-        INITIAL_HEADER="${C_PURP}🪷 Now Playing: ${C_RST}${C_PINK}${C_BLD}${init_msg}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
+        INITIAL_HEADER="${C_PURP}🪷 Idle: ${C_RST}${C_PINK}${C_BLD}${init_msg}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
+    elif [ "$init_paused" == "true" ]; then
+        init_clean_title=$(echo "$init_title" | sed 's/"/\"/g')
+        INITIAL_HEADER="${C_PURP}🪷 Paused ${C_WHT}[${C_ORNG}${init_idx}${C_WHT}] ${C_RST}${C_PINK}${C_BLD}${init_clean_title}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
     else
         init_clean_title=$(echo "$init_title" | sed 's/"/\"/g')
-        INITIAL_HEADER="${C_PURP}🪷 Now Playing ${C_WHT}[${C_ORNG}${init_idx}${C_WHT}] ${C_RST}${C_PINK}${C_BLD}${init_clean_title}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
+        INITIAL_HEADER="${C_PURP}🪷 Playing ${C_WHT}[${C_ORNG}${init_idx}${C_WHT}] ${C_RST}${C_PINK}${C_BLD}${init_clean_title}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
     fi
 
     FZF_SOCK="$HOME/.cache/mpv/fzf_$$.sock"
@@ -387,7 +390,7 @@ if [ -z "$1" ]; then
     # Background Monitor
     (
         last_title="$init_title"; last_count="$init_count"; last_shuf="$init_shuf"
-        last_lf="$init_loop_f"; last_lp="$init_loop_p"; last_idle="$init_idle"
+        last_lf="$init_loop_f"; last_lp="$init_loop_p"; last_idle="$init_idle"; last_paused="$init_paused"
         last_radio_state="init"; last_af="$init_af"; last_cols="$cols"; last_idx="$init_idx"
         last_fingerprint="$init_fingerprint"
         socket_failures=0
@@ -399,7 +402,7 @@ if [ -z "$1" ]; then
         done
 
         while true; do
-            raw=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","filename"]}\n{"command":["get_property","playlist-count"]}\n{"command":["get_property","shuffle"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","playlist-pos-1"]}\n{"command":["get_property","af"]}\n{"command":["get_property","playlist"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r '
+            raw=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","filename"]}\n{"command":["get_property","playlist-count"]}\n{"command":["get_property","shuffle"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","playlist-pos-1"]}\n{"command":["get_property","af"]}\n{"command":["get_property","playlist"]}\n{"command":["get_property","pause"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r '
                 map(select(.event == null)) |
                 (if .[0].data == null then true else .[0].data end), "\t",
                 ((.[1].data // .[2].data) // "😴💤" | gsub("\n"; " ")), "\t",
@@ -409,7 +412,8 @@ if [ -z "$1" ]; then
                 (if .[6].data == null then "no" else .[6].data end), "\t",
                 (.[7].data // "?"), "\t",
                 (if .[8].data == null or .[8].data == [] then "off" else "on" end), "\t",
-                (.[9].data // [] | map(.filename) | join(";"))
+                (.[9].data // [] | map(.filename) | join(";")), "\t",
+                (if .[10].data == true then "true" else "false" end)
             ' 2>/dev/null)
             
             if [ -z "$raw" ]; then
@@ -418,29 +422,31 @@ if [ -z "$1" ]; then
                 sleep 1; continue
             fi
             socket_failures=0
-            IFS=$'\t' read -r idle curr_title curr_count curr_shuf curr_lf curr_lp curr_idx curr_af curr_fingerprint <<< "$raw"
+            IFS=$'\t' read -r idle curr_title curr_count curr_shuf curr_lf curr_lp curr_idx curr_af curr_fingerprint curr_paused <<< "$raw"
 
             curr_radio="off"
             [ -f "$HOME/.cache/mpv/auto_enabled" ] && curr_radio="on"
             curr_cols=$(get_terminal_width)
 
-            if [ "$curr_title" != "$last_title" ] || [ "$idle" != "$last_idle" ] || [ "$curr_cols" != "$last_cols" ]; then
+            # 1. Update Header if title, pause state, index, or width changes
+            if [ "$curr_title" != "$last_title" ] || [ "$idle" != "$last_idle" ] || [ "$curr_paused" != "$last_paused" ] || [ "$curr_cols" != "$last_cols" ] || [ "$curr_idx" != "$last_idx" ]; then
                 clean_title=$(echo "$curr_title" | sed 's/"/\"/g')
                 width=$((curr_cols - 2)); [ "$width" -lt 0 ] && width=0
                 printf -v LINE "%*s" "$width" ""; LINE=${LINE// /─}
                 
                 if [ "$idle" == "true" ]; then
                     [ "$curr_title" == "😴💤" ] && msg="$curr_title" || msg="(Idle - Queue Finished)"
-                    header_text="${C_PURP}🪷 Now Playing: ${C_RST}${C_PINK}${C_BLD}${msg}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
+                    header_text="${C_PURP}🪷 Idle: ${C_RST}${C_PINK}${C_BLD}${msg}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
+                elif [ "$curr_paused" == "true" ]; then
+                    header_text="${C_PURP}🪷 Paused ${C_WHT}[${C_ORNG}${curr_idx}${C_WHT}] ${C_RST}${C_PINK}${C_BLD}${clean_title}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
                 else
-                    header_text="${C_PURP}🪷 Now Playing ${C_WHT}[${C_ORNG}${curr_idx}${C_WHT}] ${C_RST}${C_PINK}${C_BLD}${clean_title}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
+                    header_text="${C_PURP}🪷 Playing ${C_WHT}[${C_ORNG}${curr_idx}${C_WHT}] ${C_RST}${C_PINK}${C_BLD}${clean_title}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
                 fi
-                if curl -s -X POST --unix-socket "$FZF_SOCK" -d "change-header~${header_text}~" http://localhost/ >/dev/null 2>&1; then
-                    last_title="$curr_title"; last_idle="$idle"; last_cols="$curr_cols"
-                fi
+                curl -s -X POST --unix-socket "$FZF_SOCK" -d "change-header~${header_text}~" http://localhost/ >/dev/null 2>&1
             fi
 
-            if [ "$curr_fingerprint" != "$last_fingerprint" ] || [ "$curr_count" != "$last_count" ] || [ "$curr_idx" != "$last_idx" ] || [ "$curr_shuf" != "$last_shuf" ] || [ "$curr_lf" != "$last_lf" ] || [ "$curr_lp" != "$last_lp" ] || [ "$curr_radio" != "$last_radio_state" ] || [ "$curr_af" != "$last_af" ]; then
+            # 2. Update Prompt icons if modes change
+            if [ "$curr_shuf" != "$last_shuf" ] || [ "$curr_lf" != "$last_lf" ] || [ "$curr_lp" != "$last_lp" ] || [ "$curr_radio" != "$last_radio_state" ] || [ "$curr_af" != "$last_af" ] || [ "$curr_count" != "$last_count" ]; then
                 NEW_ICONS=""
                 [ "$curr_shuf" == "true" ] && NEW_ICONS="${NEW_ICONS}${P_DEEP_PINK} ><${P_RESET}"
                 [ "$curr_lf" == "inf" ] && NEW_ICONS="${NEW_ICONS}${P_DEEP_PINK} ⟳1${P_RESET}"
@@ -453,16 +459,29 @@ if [ -z "$1" ]; then
                 else
                     new_p=$(printf "🎵 ${P_TEAL}Queue List${NEW_ICONS}${P_RESET} > ")
                 fi
-                if curl -s -X POST --unix-socket "$FZF_SOCK" -d "change-prompt~${new_p}~" http://localhost/ >/dev/null 2>&1; then
-                    if [ "$curr_fingerprint" != "$last_fingerprint" ] || [ "$curr_count" != "$last_count" ] || [ "$curr_idx" != "$last_idx" ]; then
-                        curl -s -X POST --unix-socket "$FZF_SOCK" -d "reload(bash \"$SCRIPT_PATH\" -raw)" http://localhost/ >/dev/null 2>&1
-                    fi
-                    last_count="$curr_count"; last_shuf="$curr_shuf"; last_lf="$curr_lf"; last_lp="$curr_lp"
-                    last_radio_state="$curr_radio"; last_af="$curr_af"; last_idx="$curr_idx"
-                    last_fingerprint="$curr_fingerprint"
-                fi
+                curl -s -X POST --unix-socket "$FZF_SOCK" -d "change-prompt~${new_p}~" http://localhost/ >/dev/null 2>&1
             fi
-            sleep 1
+
+            # 3. Reload Queue List items if tracks, active index, or pause state changes
+            if [ "$curr_fingerprint" != "$last_fingerprint" ] || [ "$curr_count" != "$last_count" ] || [ "$curr_idx" != "$last_idx" ] || [ "$curr_paused" != "$last_paused" ]; then
+                curl -s -X POST --unix-socket "$FZF_SOCK" -d "reload(bash \"$SCRIPT_PATH\" -raw)" http://localhost/ >/dev/null 2>&1
+            fi
+
+            # 4. Save state for next tick (Single synchronized update)
+            last_title="$curr_title"
+            last_idle="$idle"
+            last_paused="$curr_paused"
+            last_cols="$curr_cols"
+            last_idx="$curr_idx"
+            last_count="$curr_count"
+            last_shuf="$curr_shuf"
+            last_lf="$curr_lf"
+            last_lp="$curr_lp"
+            last_radio_state="$curr_radio"
+            last_af="$curr_af"
+            last_fingerprint="$curr_fingerprint"
+
+            sleep 0.5
         done
     ) &
     MONITOR_PID=$!
@@ -482,7 +501,7 @@ if [ -z "$1" ]; then
         --bind "delete:deselect-all+execute-silent(rm -f \"$SELECTION_MODE_FILE\")" \
         --bind "tab:toggle+execute-silent(touch \"$SELECTION_MODE_FILE\")" \
         --header="$INITIAL_HEADER" \
-        --info=inline-right --prompt="$PROMPT" | sed "s/\x1b\[[0-9;]*m//g" | sed -E -n 's/^[[:space:]]*([0-9]+)\..*/\1/p')
+        --info=inline-right --prompt="$PROMPT" | sed "s/\x1b\[[0-9;]*m//g" | sed -E -n 's/^[[:space:]]*([|><]{2}[[:space:]]*)?([0-9]+)\..*/\2/p')
     
     kill $MONITOR_PID 2>/dev/null
     
