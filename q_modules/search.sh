@@ -34,13 +34,25 @@ perform_search() {
     # Apply cookies if they exist
     [ -f "$COOKIES_FILE" ] && YTDL_OPTS+=("--cookies" "$COOKIES_FILE")
 
-    run_with_timeout 45 yt-dlp "${YTDL_OPTS[@]}" -- "$QUERY" > "$TMP_RESULTS" 2> "$ERR_LOG"
+    # Resolve working yt-dlp executable or Python module
+    local YTDL_CMD=("yt-dlp")
+    if ! yt-dlp --version >/dev/null 2>&1; then
+        if python3 -m yt_dlp --version >/dev/null 2>&1; then
+            YTDL_CMD=("python3" "-m" "yt_dlp")
+        elif python -m yt_dlp --version >/dev/null 2>&1; then
+            YTDL_CMD=("python" "-m" "yt_dlp")
+        elif [ -x "$HOME/.local/bin/yt-dlp" ]; then
+            YTDL_CMD=("$HOME/.local/bin/yt-dlp")
+        fi
+    fi
+
+    run_with_timeout 45 "${YTDL_CMD[@]}" "${YTDL_OPTS[@]}" -- "$QUERY" > "$TMP_RESULTS" 2> "$ERR_LOG"
     
     # Fallback: If search yielded empty results, retry with default web player client
     if [ ! -s "$TMP_RESULTS" ]; then
         local YTDL_FALLBACK_OPTS=("--default-search" "$PLATFORM" "--print" "%(title)s${TAB}%(webpage_url)s${TAB}%(duration_string)s${TAB}%(uploader)s" "--no-warnings" "--flat-playlist" "--skip-download")
         [ -f "$COOKIES_FILE" ] && YTDL_FALLBACK_OPTS+=("--cookies" "$COOKIES_FILE")
-        run_with_timeout 45 yt-dlp "${YTDL_FALLBACK_OPTS[@]}" -- "$QUERY" > "$TMP_RESULTS" 2>> "$ERR_LOG"
+        run_with_timeout 45 "${YTDL_CMD[@]}" "${YTDL_FALLBACK_OPTS[@]}" -- "$QUERY" > "$TMP_RESULTS" 2>> "$ERR_LOG"
     fi
     
     if [ ! -s "$TMP_RESULTS" ]; then 
@@ -50,6 +62,9 @@ perform_search() {
                 echo -e "${C_ORANGE}💡 Tip: YouTube is requesting bot verification. Run 'q' with YouTube cookies or update yt-dlp.${C_RESET}"
             elif grep -qi "CERTIFICATE_VERIFY_FAILED\|certificate verify failed" "$ERR_LOG"; then
                 echo -e "${C_ORANGE}💡 Tip: SSL Certificate error detected. Run 'pkg install -y ca-certificates openssl-tool' on Termux.${C_RESET}"
+            elif grep -qi "Traceback (most recent call last)" "$ERR_LOG"; then
+                echo -e "${C_ORANGE}💡 Tip: Termux Python yt-dlp installation is broken. Fix it instantly with:${C_RESET}"
+                echo -e "   ${C_CYAN}pkg install -y python python-pip && pip install -U --force-reinstall yt-dlp${C_RESET}"
             elif grep -qi "ExtractorError\|Unsupported URL" "$ERR_LOG"; then
                 echo -e "${C_ORANGE}💡 Tip: Try updating yt-dlp: run 'q -up' or 'pip install -U yt-dlp'${C_RESET}"
             else

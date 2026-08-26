@@ -63,18 +63,32 @@ cmd_update_ytdlp() {
     # 1. Update yt-dlp
     echo -e "${C_CYAN}📦 [1/2] Updating yt-dlp...${C_RESET}"
     local ytdl_updated=false
-    if yt-dlp -U 2>/dev/null; then
-        local new_ver=$(yt-dlp --version 2>/dev/null)
-        echo -e "${C_GREEN}✅ yt-dlp is up to date: ${C_YELLOW}${new_ver}${C_RESET}"
-        ytdl_updated=true
-    elif mkdir -p "$HOME/.local/bin" && { curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o "$HOME/.local/bin/yt-dlp" 2>/dev/null || wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O "$HOME/.local/bin/yt-dlp" 2>/dev/null; }; then
-        chmod +x "$HOME/.local/bin/yt-dlp"
-        local new_ver=$("$HOME/.local/bin/yt-dlp" --version 2>/dev/null)
-        echo -e "${C_GREEN}✅ yt-dlp updated to latest official version: ${C_YELLOW}${new_ver}${C_RESET}"
-        ytdl_updated=true
-    elif pip install -U yt-dlp --user 2>/dev/null || pip3 install -U yt-dlp --user 2>/dev/null; then
-        echo -e "${C_GREEN}✅ yt-dlp updated via pip!${C_RESET}"
-        ytdl_updated=true
+    
+    if command -v pkg >/dev/null 2>&1 && [ -d "/data/data/com.termux" ]; then
+        # Termux environment: prioritize pip with force-reinstall to prevent broken site-packages
+        if pip install -U --force-reinstall yt-dlp 2>/dev/null || pip3 install -U --force-reinstall yt-dlp 2>/dev/null; then
+            local new_ver=$(yt-dlp --version 2>/dev/null || python3 -m yt_dlp --version 2>/dev/null)
+            echo -e "${C_GREEN}✅ yt-dlp updated for Termux: ${C_YELLOW}${new_ver}${C_RESET}"
+            ytdl_updated=true
+        fi
+    fi
+
+    if [ "$ytdl_updated" = false ]; then
+        if yt-dlp -U 2>/dev/null; then
+            local new_ver=$(yt-dlp --version 2>/dev/null)
+            echo -e "${C_GREEN}✅ yt-dlp is up to date: ${C_YELLOW}${new_ver}${C_RESET}"
+            ytdl_updated=true
+        elif pip install -U yt-dlp 2>/dev/null || pip3 install -U yt-dlp 2>/dev/null || pip install -U yt-dlp --user 2>/dev/null; then
+            local new_ver=$(yt-dlp --version 2>/dev/null || python3 -m yt_dlp --version 2>/dev/null)
+            echo -e "${C_GREEN}✅ yt-dlp updated via pip: ${C_YELLOW}${new_ver}${C_RESET}"
+            ytdl_updated=true
+        elif mkdir -p "$HOME/.local/bin" && { curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o "$HOME/.local/bin/yt-dlp" 2>/dev/null || wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O "$HOME/.local/bin/yt-dlp" 2>/dev/null; }; then
+            chmod +x "$HOME/.local/bin/yt-dlp"
+            command -v termux-fix-shebang >/dev/null 2>&1 && termux-fix-shebang "$HOME/.local/bin/yt-dlp" 2>/dev/null
+            local new_ver=$("$HOME/.local/bin/yt-dlp" --version 2>/dev/null)
+            echo -e "${C_GREEN}✅ yt-dlp updated to latest official version: ${C_YELLOW}${new_ver}${C_RESET}"
+            ytdl_updated=true
+        fi
     fi
     [ "$ytdl_updated" = false ] && echo -e "${C_ORANGE}⚠️ Could not auto-update yt-dlp.${C_RESET}"
 
