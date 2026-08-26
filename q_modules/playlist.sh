@@ -181,7 +181,6 @@ cmd_playlist_list() {
         $FZF_COLOR_OPTS \
         --info=inline-right --prompt="🎵 Track > ")
 
-    rm "$items"
     [ -z "$selection" ] && return
 
     # 3. Choose Action
