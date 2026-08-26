@@ -779,10 +779,10 @@ if [ "$IS_BATCH" = true ]; then
     done
     execute_batch
 else
-    PLATFORM="ytsearch40"
+    PLATFORM="ytsearch25"
     case "$1" in
-        yt|youtube) PLATFORM="ytsearch40"; shift ;; 
-        sc|soundcloud) PLATFORM="scsearch40"; shift ;; 
+        yt|youtube) PLATFORM="ytsearch25"; shift ;; 
+        sc|soundcloud) PLATFORM="scsearch25"; shift ;; 
     esac
     for QUERY in "$@"; do
         [ -z "$QUERY" ] && continue

@@ -1,6 +1,6 @@
 perform_search() {
     local QUERY="$1"
-    local PLATFORM="${2:-ytsearch40}"
+    local PLATFORM="${2:-ytsearch25}"
     
     # Clear arrays for this query context
     PLAYLIST_URLS=()
@@ -22,18 +22,25 @@ perform_search() {
     # Use strict Tab delimiter for reliability
     local TAB=$'\t'
     local COOKIES_FILE="$HOME/.config/mpv/cookies.txt"
-    local YTDL_OPTS=("--js-runtimes" "node" "--extractor-args" "youtube:player_client=android,web" "--default-search" "$PLATFORM" "--print" "%(title)s${TAB}%(webpage_url)s${TAB}%(duration_string)s${TAB}%(uploader)s" "--no-warnings" "--flat-playlist" "--skip-download")
+    local YTDL_OPTS=("--default-search" "$PLATFORM" "--print" "%(title)s${TAB}%(webpage_url)s${TAB}%(duration_string)s${TAB}%(uploader)s" "--no-warnings" "--flat-playlist" "--skip-download")
     
+    # Auto-add JS runtime if available
+    if command -v node >/dev/null 2>&1; then
+        YTDL_OPTS+=("--js-runtimes" "node")
+    elif command -v deno >/dev/null 2>&1; then
+        YTDL_OPTS+=("--js-runtimes" "deno")
+    fi
+
     # Apply cookies if they exist
     [ -f "$COOKIES_FILE" ] && YTDL_OPTS+=("--cookies" "$COOKIES_FILE")
 
-    run_with_timeout 30 yt-dlp "${YTDL_OPTS[@]}" -- "$QUERY" > "$TMP_RESULTS" 2> "$ERR_LOG"
+    run_with_timeout 45 yt-dlp "${YTDL_OPTS[@]}" -- "$QUERY" > "$TMP_RESULTS" 2> "$ERR_LOG"
     
     # Fallback: If search yielded empty results, retry with default web player client
     if [ ! -s "$TMP_RESULTS" ]; then
-        local YTDL_FALLBACK_OPTS=("--js-runtimes" "node" "--default-search" "$PLATFORM" "--print" "%(title)s${TAB}%(webpage_url)s${TAB}%(duration_string)s${TAB}%(uploader)s" "--no-warnings" "--flat-playlist" "--skip-download")
+        local YTDL_FALLBACK_OPTS=("--default-search" "$PLATFORM" "--print" "%(title)s${TAB}%(webpage_url)s${TAB}%(duration_string)s${TAB}%(uploader)s" "--no-warnings" "--flat-playlist" "--skip-download")
         [ -f "$COOKIES_FILE" ] && YTDL_FALLBACK_OPTS+=("--cookies" "$COOKIES_FILE")
-        run_with_timeout 30 yt-dlp "${YTDL_FALLBACK_OPTS[@]}" -- "$QUERY" > "$TMP_RESULTS" 2>> "$ERR_LOG"
+        run_with_timeout 45 yt-dlp "${YTDL_FALLBACK_OPTS[@]}" -- "$QUERY" > "$TMP_RESULTS" 2>> "$ERR_LOG"
     fi
     
     if [ ! -s "$TMP_RESULTS" ]; then 
@@ -41,8 +48,13 @@ perform_search() {
         if [ -s "$ERR_LOG" ]; then
             if grep -qi "Sign in to confirm you’re not a bot\|bot\|captcha" "$ERR_LOG"; then
                 echo -e "${C_ORANGE}💡 Tip: YouTube is requesting bot verification. Run 'q' with YouTube cookies or update yt-dlp.${C_RESET}"
+            elif grep -qi "CERTIFICATE_VERIFY_FAILED\|certificate verify failed" "$ERR_LOG"; then
+                echo -e "${C_ORANGE}💡 Tip: SSL Certificate error detected. Run 'pkg install -y ca-certificates openssl-tool' on Termux.${C_RESET}"
             elif grep -qi "ExtractorError\|Unsupported URL" "$ERR_LOG"; then
-                echo -e "${C_ORANGE}💡 Tip: Try updating yt-dlp: run 'yt-dlp -U' or 'pip install -U yt-dlp'${C_RESET}"
+                echo -e "${C_ORANGE}💡 Tip: Try updating yt-dlp: run 'q -up' or 'pip install -U yt-dlp'${C_RESET}"
+            else
+                local err_sample=$(head -n 2 "$ERR_LOG" 2>/dev/null | tr '\n' ' ' | sed 's/^[[:space:]]*//')
+                [ -n "$err_sample" ] && echo -e "${C_GRAY}   Details: ${err_sample:0:120}...${C_RESET}"
             fi
         fi
         rm -f "$TMP_RESULTS"

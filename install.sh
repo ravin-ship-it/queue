@@ -49,7 +49,7 @@ install_deps() {
     
     if command -v pkg >/dev/null 2>&1; then # Termux
         pkg update
-        pkg install -y coreutils
+        pkg install -y coreutils ca-certificates openssl-tool
         for pkg in "${missing[@]}"; do
             [ "$pkg" == "netcat" ] && pkg="netcat-openbsd"
             pkg install -y "$pkg"
