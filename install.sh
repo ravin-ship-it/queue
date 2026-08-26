@@ -104,10 +104,20 @@ rm -rf "$DEST_DIR/q" "$DEST_DIR/q_modules"
 cp -r "$REPO_DIR/q" "$REPO_DIR/q_modules" "$DEST_DIR/"
 chmod +x "$DEST_DIR/q"
 
-# Link ~/.local/bin/q to the permanent destination
+# Link to user and system bin paths for instant zero-restart availability
 ln -sf "$DEST_DIR/q" "$HOME/.local/bin/q"
 
-echo -e "${GREEN}✅ Queue installed permanently to $DEST_DIR (symlinked to ~/.local/bin/q)${NC}"
+# Termux immediate PATH integration (accessible instantly without 'source ~/.bashrc' or 'exec bash')
+if [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ] && [ -w "$PREFIX/bin" ]; then
+    ln -sf "$DEST_DIR/q" "$PREFIX/bin/q"
+fi
+
+# Standard Linux/macOS global path if writable
+if [ -d "/usr/local/bin" ] && [ -w "/usr/local/bin" ]; then
+    ln -sf "$DEST_DIR/q" "/usr/local/bin/q" 2>/dev/null || true
+fi
+
+echo -e "${GREEN}✅ Queue installed permanently to $DEST_DIR (symlinked to PATH)${NC}"
 echo -e "${GRAY}   👉 Self-Contained: You can delete the cloned folder anytime without breaking q!${NC}"
 echo -e "${GRAY}   👉 Auto-Updates: Run 'q -up' anytime from any directory to update Queue & yt-dlp.${NC}"
 

@@ -55,6 +55,11 @@ prompt_remove() {
 echo -e "${CYAN}--- File Components ---${NC}"
 
 # Core
+prompt_remove "$HOME/.local/bin/q" "Symlink (~/.local/bin/q)" "false"
+if [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ]; then
+    prompt_remove "$PREFIX/bin/q" "Symlink ($PREFIX/bin/q)" "false"
+fi
+prompt_remove "/usr/local/bin/q" "Symlink (/usr/local/bin/q)" "false"
 prompt_remove "$HOME/.local/bin/mpv/q" "Core Executable" "false"
 prompt_remove "$HOME/.local/bin/mpv/q_modules" "Core Modules" "true"
 
