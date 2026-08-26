@@ -32,26 +32,30 @@ get_clipboard() {
 check_dependencies() {
     local missing=()
     command -v mpv >/dev/null || missing+=("mpv")
-    command -v yt-dlp >/dev/null || missing+=("yt-dlp")
+    if ! command -v yt-dlp >/dev/null || ! yt-dlp --version >/dev/null 2>&1; then
+        if ! python3 -m yt_dlp --version >/dev/null 2>&1; then
+            missing+=("yt-dlp (broken/missing)")
+        fi
+    fi
     command -v fzf >/dev/null || missing+=("fzf")
     command -v jq >/dev/null || missing+=("jq")
-    command -v nc >/dev/null || missing+=("netcat (openbsd)")
+    command -v nc >/dev/null || missing+=("netcat")
     
     if [ ${#missing[@]} -gt 0 ]; then
-        echo -e "${C_PINK}❌ Missing Dependencies:${C_RESET} ${missing[*]}"
+        echo -e "${C_PINK}❌ Missing or Broken Dependencies:${C_RESET} ${missing[*]}"
         
         if command -v pkg >/dev/null && [ -d "/data/data/com.termux" ]; then
-            echo -e "${C_GRAY}Install on Termux with:${C_RESET}"
-            echo -e "  ${C_CYAN}pkg update && pkg install mpv fzf jq netcat-openbsd ffmpeg python-pip && pip install yt-dlp${C_RESET}"
+            echo -e "${C_GRAY}Fix/Install on Termux with:${C_RESET}"
+            echo -e "  ${C_CYAN}pkg install -y python python-pip && pip install -U --force-reinstall yt-dlp${C_RESET}"
         else
             echo -e "${C_GRAY}Install on Linux/WSL with:${C_RESET}"
             echo -e "  ${C_CYAN}sudo apt update && sudo apt install mpv fzf jq netcat-openbsd ffmpeg${C_RESET}"
-            echo -e "  ${C_CYAN}sudo wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O /usr/local/bin/yt-dlp${C_RESET}"
+            echo -e "  ${C_CYAN}pip install -U yt-dlp || sudo wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O /usr/local/bin/yt-dlp${C_RESET}"
             echo -e "  ${C_CYAN}sudo chmod a+rx /usr/local/bin/yt-dlp${C_RESET}"
         fi
         return 1
     fi
-    echo -e "${C_GREEN}✅ All core dependencies are installed:${C_RESET} ${C_CYAN}mpv, yt-dlp, fzf, jq, netcat${C_RESET}"
+    echo -e "${C_GREEN}✅ All core dependencies are installed and functioning:${C_RESET} ${C_CYAN}mpv, yt-dlp, fzf, jq, netcat${C_RESET}"
     return 0
 }
 

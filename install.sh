@@ -19,6 +19,9 @@ install_deps() {
     for cmd in "${deps[@]}"; do
         if ! command -v "$cmd" >/dev/null 2>&1; then
             missing+=("$cmd")
+        elif [ "$cmd" == "yt-dlp" ] && ! yt-dlp --version >/dev/null 2>&1; then
+            # Binary exists but crashes on execution (e.g. Termux Python package mismatch)
+            missing+=("yt-dlp")
         fi
     done
     
@@ -40,24 +43,24 @@ install_deps() {
     fi
 
     if [ ${#missing[@]} -eq 0 ]; then
-        echo -e "${GREEN}✅ All core dependencies are already installed.${NC}"
+        echo -e "${GREEN}✅ All core dependencies are already installed and working.${NC}"
         return
     fi
     
-    echo -e "${YELLOW}⚠️  Missing dependencies detected: ${missing[*]}${NC}"
+    echo -e "${YELLOW}⚠️  Missing or broken dependencies detected: ${missing[*]}${NC}"
     echo -e "${CYAN}🔧 Attempting automatic installation...${NC}"
     
     if command -v pkg >/dev/null 2>&1; then # Termux
         pkg update
-        pkg install -y coreutils ca-certificates openssl-tool
+        pkg install -y coreutils ca-certificates openssl-tool python python-pip
         for pkg in "${missing[@]}"; do
             [ "$pkg" == "netcat" ] && pkg="netcat-openbsd"
+            [ "$pkg" == "yt-dlp" ] && continue # Handled via pip below
             pkg install -y "$pkg"
         done
-        # Ensure latest yt-dlp extraction engine on Termux
-        if command -v yt-dlp >/dev/null 2>&1; then
-            yt-dlp -U >/dev/null 2>&1 || true
-        fi
+        # Termux apt package for yt-dlp is often broken with Python 3.14; always install/heal via pip
+        echo -e "${CYAN}🔧 Installing/Healing yt-dlp via pip for Termux Python...${NC}"
+        pip install -U --force-reinstall yt-dlp || pkg install -y yt-dlp || true
     elif command -v apt-get >/dev/null 2>&1; then # Debian/Ubuntu/Kali
         sudo apt-get update
         for pkg in "${missing[@]}"; do
