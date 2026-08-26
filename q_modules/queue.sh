@@ -791,8 +791,8 @@ auto_queue_related() {
         [[ "$url" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && c_id="${BASH_REMATCH[2]}"
         
         [ -n "$seed_id" ] && [ "$c_id" == "$seed_id" ] && continue
-        [ -n "$c_id" ] && echo "$cur_ids" | grep -qx "$c_id" && continue
-        grep -qx "$c_id" "$history_file" 2>/dev/null && continue
+        [ -n "$c_id" ] && echo "$cur_ids" | grep -qx -- "$c_id" && continue
+        grep -qx -- "$c_id" "$history_file" 2>/dev/null && continue
         
         pool_u+=("$url"); pool_t+=("$t"); pool_a+=("$a"); pool_d+=("$d")
     done <<< "$candidates"
