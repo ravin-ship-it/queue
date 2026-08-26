@@ -67,10 +67,8 @@ show_queue() {
         # 4. Meta Information (Artist/Duration) - Try to find in cache
         local meta_artist=""
         local meta_duration=""
+        local cached_row="${CACHE_MEM[$CLEAN_FILENAME]}"
         if [[ "$CLEAN_FILENAME" =~ ^http.* ]] || [[ "$CLEAN_FILENAME" == watch\?v=* ]]; then
-            # Instant memory lookup
-            local cached_row="${CACHE_MEM[$CLEAN_FILENAME]}"
-            
             # Fuzzy match by ID if direct lookup fails (for stream URLs)
             if [ -z "$cached_row" ]; then
                 local vid_id=""
@@ -122,6 +120,9 @@ show_queue() {
             else
                 NEEDS_FETCH=true
             fi
+        elif [ -n "$cached_row" ]; then
+            meta_artist=$(echo -e "$cached_row" | awk -F'\t' '{print $2}')
+            meta_duration=$(echo -e "$cached_row" | awk -F'\t' '{print $3}')
         fi
 
         TITLE_SUFFIX=""

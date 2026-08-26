@@ -234,7 +234,7 @@ is_media_file() {
     local ext="${filename##*.}"
     ext=$(echo "$ext" | tr '[:upper:]' '[:lower:]')
     case "$ext" in
-        mp3|flac|wav|m4a|ogg|opus|mp4|webm|mkv|avi|mov|ts|m3u|m3u8) return 0 ;;
+        mp3|flac|wav|m4a|ogg|opus|mp4|webm|mkv|avi|mov|ts|m3u|m3u8|aac|wma|alac|aiff|ape|m4v) return 0 ;;
         *) return 1 ;;
     esac
 }

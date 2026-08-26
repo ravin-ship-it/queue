@@ -674,10 +674,12 @@ fi
 # --- BATCH PROCESSING ---
 declare -a PLAYLIST_URLS
 declare -a PLAYLIST_TITLES
+declare -a PLAYLIST_ARTISTS
+declare -a PLAYLIST_DURATIONS
 
 IS_BATCH=false
 for arg in "$@"; do
-    if [[ "$arg" =~ ^http.* ]] || [ -f "$arg" ]; then
+    if [[ "$arg" =~ ^http.* ]] || [ -f "$arg" ] || [ -d "$arg" ]; then
         IS_BATCH=true
         break
     fi
@@ -685,13 +687,34 @@ done
 
 if [ "$IS_BATCH" = true ]; then
     for input in "$@"; do
-        if [ -f "$input" ]; then
+        if [ -d "$input" ]; then
+            found_count=0
+            while IFS= read -r -d $'\0' f; do
+                if is_media_file "$f"; then
+                    target=$(realpath -- "$f")
+                    name=$(basename -- "$f")
+                    PLAYLIST_URLS+=("$target")
+                    PLAYLIST_TITLES+=("$name")
+                    PLAYLIST_ARTISTS+=("")
+                    PLAYLIST_DURATIONS+=("")
+                    ((found_count++))
+                fi
+            done < <(find -L "$input" -maxdepth 4 -type f -print0 2>/dev/null | sort -z -V)
+            
+            if [ "$found_count" -gt 0 ]; then
+                echo -e "${C_PINK}📁 Found ${C_ORANGE}${found_count}${C_PINK} tracks in ${C_CYAN}${input}${C_RESET}"
+            else
+                echo -e "${C_PINK}⚠️ No audio/media files found in directory: ${C_CYAN}${input}${C_RESET}"
+            fi
+        elif [ -f "$input" ]; then
             # Filter non-media local files
             if ! is_media_file "$input"; then
+                echo -e "${C_GRAY}⏩ Skipping non-media file: $(basename -- "$input")${C_RESET}"
                 continue
             fi
             TARGET=$(realpath -- "$input"); NAME=$(basename -- "$input")
             PLAYLIST_URLS+=("$TARGET"); PLAYLIST_TITLES+=("$NAME")
+            PLAYLIST_ARTISTS+=(""); PLAYLIST_DURATIONS+=("")
         elif [[ "$input" =~ ^http.* ]]; then
             if [[ "$input" == *"list=RD"* ]] && [[ "$input" != *"v="* ]]; then
                 if [[ "$input" =~ list=RD([^&]+) ]]; then
@@ -745,11 +768,13 @@ if [ "$IS_BATCH" = true ]; then
             else
                 echo -e "${C_PINK}🙈 Failed to fetch info... the internet might be playing hide and seek!${C_RESET}"
                 PLAYLIST_URLS+=("$input"); PLAYLIST_TITLES+=("$input")
+                PLAYLIST_ARTISTS+=(""); PLAYLIST_DURATIONS+=("")
                 fetch_title_bg "$input"
             fi
             rm "$PL_TMP"
         else
             PLAYLIST_URLS+=("$input"); PLAYLIST_TITLES+=("$input")
+            PLAYLIST_ARTISTS+=(""); PLAYLIST_DURATIONS+=("")
         fi
     done
     execute_batch

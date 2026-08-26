@@ -326,12 +326,12 @@ format_track_log() {
     local cached_artist=""
     local cached_duration="$force_dur"
     
-    if [[ "$clean_fname" =~ ^http ]] || [[ "$clean_fname" == watch\?v=* ]]; then
+    if [ -n "$clean_fname" ]; then
         [ ${#CACHE_MEM[@]} -eq 0 ] && load_cache_to_memory
         
         local row="${CACHE_MEM[$clean_fname]}"
-        # Fuzzy match by ID if direct lookup fails
-        if [ -z "$row" ]; then
+        # Fuzzy match by ID if direct lookup fails (for remote URLs)
+        if [ -z "$row" ] && { [[ "$clean_fname" =~ ^http ]] || [[ "$clean_fname" == watch\?v=* ]]; }; then
             local vid_id=""
             [[ "$clean_fname" =~ v=([a-zA-Z0-9_-]{11}) ]] && vid_id="${BASH_REMATCH[1]}"
             [[ "$clean_fname" =~ watch\?v=([a-zA-Z0-9_-]{11}) ]] && vid_id="${BASH_REMATCH[1]}"

@@ -116,10 +116,13 @@ cmd_playlist_load() {
 
         while IFS= read -r url; do
             [ -z "$url" ] && continue
-            # Robust URL cleaning
-            local clean_url="${url%%\\t*}"
-            clean_url="${clean_url%%[[:space:]]*}"
-            clean_url=$(echo "$clean_url" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+            # Robust URL cleaning (Only for remote HTTP URLs)
+            local clean_url="$url"
+            if [[ "$url" =~ ^http ]]; then
+                clean_url="${url%%\\t*}"
+                clean_url="${clean_url%%[[:space:]]*}"
+                clean_url=$(echo "$clean_url" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+            fi
             
             local m="append-play"
             if { [[ "$load_mode" == *"Replace"* ]] || [[ "$load_mode" == *"New Queue"* ]]; } && [ "$is_first_replace" = true ]; then
@@ -211,9 +214,12 @@ cmd_playlist_list() {
         local is_first=true
         while IFS= read -r url; do
             [ -z "$url" ] && continue
-            local clean_url="${url%%\\t*}"
-            clean_url="${clean_url%%[[:space:]]*}"
-            clean_url=$(echo "$clean_url" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+            local clean_url="$url"
+            if [[ "$url" =~ ^http ]]; then
+                clean_url="${url%%\\t*}"
+                clean_url="${clean_url%%[[:space:]]*}"
+                clean_url=$(echo "$clean_url" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+            fi
             
             local m="append-play"
             [ "$is_first" = true ] && { m="replace"; is_first=false; }
@@ -243,9 +249,12 @@ cmd_playlist_list() {
 
     while IFS= read -r url; do
         [ -z "$url" ] && continue
-        local clean_url="${url%%\\t*}"
-        clean_url="${clean_url%%[[:space:]]*}"
-        clean_url=$(echo "$clean_url" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+        local clean_url="$url"
+        if [[ "$url" =~ ^http ]]; then
+            clean_url="${url%%\\t*}"
+            clean_url="${clean_url%%[[:space:]]*}"
+            clean_url=$(echo "$clean_url" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+        fi
         local json_cmd=$(jq -nc --arg path "$clean_url" '{"command": ["loadfile", $path, "append-play"]}')
         send_ipc "$json_cmd" > /dev/null
     done < <(echo "$urls")

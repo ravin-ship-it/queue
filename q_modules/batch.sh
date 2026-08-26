@@ -97,10 +97,13 @@ execute_batch() {
                 local pl_artist="${PLAYLIST_ARTISTS[$i]}"
                 local pl_dur="${PLAYLIST_DURATIONS[$i]}"
                 
-                # Robust URL cleaning
-                local pl_clean_url="${pl_url%%\\t*}"
-                pl_clean_url="${pl_clean_url%%[[:space:]]*}"
-                pl_clean_url=$(echo "$pl_clean_url" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+                # Robust URL cleaning (Only for remote HTTP URLs)
+                local pl_clean_url="$pl_url"
+                if [[ "$pl_url" =~ ^http ]]; then
+                    pl_clean_url="${pl_url%%\\t*}"
+                    pl_clean_url="${pl_clean_url%%[[:space:]]*}"
+                    pl_clean_url=$(echo "$pl_clean_url" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+                fi
 
                 echo "$pl_clean_url" >> "$pl_file"
                 # Cache title
@@ -126,9 +129,12 @@ execute_batch() {
                 local q_artist="${PLAYLIST_ARTISTS[$i]}"
                 local q_dur="${PLAYLIST_DURATIONS[$i]}"
 
-                local q_clean_url="${q_url%%\\t*}"
-                q_clean_url="${q_clean_url%%[[:space:]]*}"
-                q_clean_url=$(echo "$q_clean_url" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+                local q_clean_url="$q_url"
+                if [[ "$q_url" =~ ^http ]]; then
+                    q_clean_url="${q_url%%\\t*}"
+                    q_clean_url="${q_clean_url%%[[:space:]]*}"
+                    q_clean_url=$(echo "$q_clean_url" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+                fi
 
                 if [ -n "$q_title" ] && [ "$q_title" != "$q_url" ]; then
                     printf "%s\t%s\t%s\t%s\n" "$q_clean_url" "$q_title" "$q_artist" "$q_dur" >> "$CACHE_FILE"
@@ -185,10 +191,13 @@ execute_batch() {
                 local q_artist="${PLAYLIST_ARTISTS[$i]}"
                 local q_dur="${PLAYLIST_DURATIONS[$i]}"
 
-                # Robust URL cleaning
-                local q_clean_url="${q_url%%\\t*}"
-                q_clean_url="${q_clean_url%%[[:space:]]*}"
-                q_clean_url=$(echo "$q_clean_url" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+                # Robust URL cleaning (Only for remote HTTP URLs)
+                local q_clean_url="$q_url"
+                if [[ "$q_url" =~ ^http ]]; then
+                    q_clean_url="${q_url%%\\t*}"
+                    q_clean_url="${q_clean_url%%[[:space:]]*}"
+                    q_clean_url=$(echo "$q_clean_url" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+                fi
 
                 if [ -n "$q_title" ] && [ "$q_title" != "$q_url" ]; then
                     printf "%s\t%s\t%s\t%s\n" "$q_clean_url" "$q_title" "$q_artist" "$q_dur" >> "$CACHE_FILE"
