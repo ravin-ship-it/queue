@@ -101,7 +101,7 @@ cmd_update_ytdlp() {
     local dest_dir="$HOME/.local/bin/mpv"
     mkdir -p "$dest_dir/q_modules"
     
-    local files=("q" "q_modules/ui.sh" "q_modules/utils.sh" "q_modules/media.sh" "q_modules/queue.sh" "q_modules/search.sh" "q_modules/batch.sh" "q_modules/playlist.sh")
+    local files=("q" "q_modules/ui.sh" "q_modules/utils.sh" "q_modules/media.sh" "q_modules/queue.sh" "q_modules/search.sh" "q_modules/batch.sh" "q_modules/playlist.sh" "q_modules/download.sh")
     local success=true
     local base_url="https://raw.githubusercontent.com/ravin-ship-it/queue/main"
     
@@ -114,13 +114,21 @@ cmd_update_ytdlp() {
         fi
     done
     
+    # Always ensure executable permissions and symlinks
+    chmod +x "$dest_dir/q" 2>/dev/null || true
+    mkdir -p "$HOME/.local/bin"
+    ln -sf "$dest_dir/q" "$HOME/.local/bin/q"
+    if [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ] && [ -w "$PREFIX/bin" ]; then
+        ln -sf "$dest_dir/q" "$PREFIX/bin/q"
+    fi
+    if [ -d "/usr/local/bin" ] && [ -w "/usr/local/bin" ]; then
+        ln -sf "$dest_dir/q" "/usr/local/bin/q" 2>/dev/null || true
+    fi
+    
     if [ "$success" = true ]; then
-        chmod +x "$dest_dir/q"
-        mkdir -p "$HOME/.local/bin"
-        ln -sf "$dest_dir/q" "$HOME/.local/bin/q"
         echo -e "${C_GREEN}✅ Queue Engine successfully updated to latest version!${C_RESET}"
     else
-        echo -e "${C_ORANGE}⚠️ Failed to fetch Queue updates from GitHub. Check your connection.${C_RESET}"
+        echo -e "${C_ORANGE}⚠️ Failed to fetch all Queue updates from GitHub. Check your connection.${C_RESET}"
     fi
     echo -e "${C_CYAN}──────────────────────────────────────────────────────────────────────────────${C_RESET}"
 }
@@ -240,7 +248,8 @@ show_help() {
     print_boxed_line "  q <query>       Search and select to queue"
     print_boxed_line ""
     print_boxed_line "${C_YELLOW}Commands:${C_RESET}"
-    print_boxed_line "  -i [N|url]      Metadata & Download Info (Synced Resolution)"
+    print_boxed_line "  -i [N|url]      Metadata & Track Inspector (Synced Resolution)"
+    print_boxed_line "  -d / -dl [N|u]  Interactive Downloader Hub (Format & Dir Wizard)"
     print_boxed_line "  -p [N]          Play/Pause or Jump to track N ${C_GRAY}(Supports: 10+5)${C_RESET}"
     print_boxed_line "  -next / -prev   Next/Prev track ${C_GRAY}(Synced Logs)${C_RESET}"
     print_boxed_line "  -stop           Stop (Quit) MPV"

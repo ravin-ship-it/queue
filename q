@@ -54,6 +54,7 @@ source "$MODULE_DIR/queue.sh"
 source "$MODULE_DIR/media.sh"
 source "$MODULE_DIR/search.sh"
 source "$MODULE_DIR/batch.sh"
+source "$MODULE_DIR/download.sh"
 
 SCRIPT_PATH=$(realpath "$0")
 
@@ -91,7 +92,7 @@ fi
 # --- Command Parsing ---
 
 PROCESSED_ANY_FLAG=false
-SMART_CMDS="^(play|pause|stop|next|prev|vol|info|list|clear|shuffle|remove|move|swap|help|save|load|auto|fx|deps|up)$"
+SMART_CMDS="^(play|pause|stop|next|prev|vol|info|list|clear|shuffle|remove|move|swap|help|save|load|auto|fx|deps|up|download|dl|d)$"
 
 while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
     PROCESSED_ANY_FLAG=true
@@ -119,6 +120,7 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
             fx) CMD="-fx" ;;
             deps) CMD="-deps" ;;
             up) CMD="-up" ;;
+            download|dl|d) CMD="-d" ;;
         esac
     fi
 
@@ -324,6 +326,16 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
             ;; 
         -deps) check_dependencies; shift ;;
         -up) cmd_update_ytdlp; shift ;;
+        -d|-dl)
+            shift
+            target="$1"
+            if [ -n "$target" ] && [[ ! "$target" =~ ^- ]] && [[ ! "$target" =~ $SMART_CMDS ]]; then
+                shift
+            else
+                target=""
+            fi
+            cmd_download "$target"
+            ;;
         -h|--help) show_help; shift ;; 
         *) 
             echo -e "${C_PINK}🧐 I don't know what \"$1\" is 🔫... is it your distant cousin 👀❔${C_RESET}"
@@ -532,7 +544,7 @@ if [ -z "$1" ]; then
         track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
         
         if [ "$count" -gt 1 ] || [ -f "$SELECTION_MODE_FILE" ]; then
-             action=$(echo -e "  |>  Play Selected\n  ✨  New Queue from Selected & Play\n  ✖  Remove from Queue\n  ✚  Save to Playlist" | \
+             action=$(echo -e "  |>  Play Selected\n  ✨  New Queue from Selected & Play\n  📥  Download Selected\n  ✖  Remove from Queue\n  ✚  Save to Playlist" | \
                  fzf --height=100% --layout=reverse --border --info=inline-right \
                  $FZF_COLOR_OPTS \
                  --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \
@@ -541,7 +553,17 @@ if [ -z "$1" ]; then
              
              if [ -z "$action" ]; then exit 0; fi
 
-             # 1. Save to Playlist
+             # 1. Download Selected
+             if echo "$action" | grep -q "Download"; then
+                 while IFS= read -r idx; do
+                     item_json=$(echo "$track_info" | jq -s -c "map(select(.event == null)) | .[0].data[$((idx - 1))] // empty")
+                     url=$(echo "$item_json" | jq -r '.filename // ""')
+                     [ -n "$url" ] && cmd_download "$url"
+                 done <<< "$selection"
+                 exit 0
+             fi
+
+             # 2. Save to Playlist
              if echo "$action" | grep -q "Save"; then
                  declare -a TARGET_FILES
                  pl_name=""

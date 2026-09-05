@@ -60,10 +60,10 @@ fetch_and_display_url_info() {
 
                 echo -e "${C_PURPLE}├${H_LINE:2}┤${C_RESET}"
                 print_boxed_line "${C_PINK}🎵 Current Playback Quality${C_RESET}"
-                print_boxed_line "  ${C_TEAL}Format:  ${C_WHITE}$fmt${C_RESET}" true
-                print_boxed_line "  ${C_TEAL}Codec:   ${C_WHITE}$codec${C_RESET}" true
-                print_boxed_line "  ${C_TEAL}Rate:    ${C_WHITE}${rate} Hz${C_RESET}" true
-                print_boxed_line "  ${C_TEAL}Duration: ${C_WHITE}$dur${C_RESET}" true
+                print_boxed_line "${C_TEAL}Format:   ${C_WHITE}$fmt${C_RESET}"
+                print_boxed_line "${C_TEAL}Codec:    ${C_WHITE}$codec${C_RESET}"
+                print_boxed_line "${C_TEAL}Rate:     ${C_WHITE}${rate} Hz${C_RESET}"
+                print_boxed_line "${C_TEAL}Duration: ${C_WHITE}$dur${C_RESET}"
             fi
             printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
             B_LINE=${B_LINE// /─}
@@ -146,28 +146,12 @@ fetch_and_display_url_info() {
             queue_display="${C_TEAL}Queued at ${C_WHITE}[${C_ORANGE}${idx}${C_WHITE}]${C_RESET}"
         fi
         
-        # --- SMART FORMAT CATEGORIZATION ---
-        
-        # Best Video Tier (Ultra/High/Mid/Low)
-        local vid_ultra=$(echo "$json_dump" | jq -r '.formats[]? | select(.vcodec!="none" and .height >= 2160) | "\(.format_id)|\(.height)p|\(.fps)fps"' | head -n 1)
-        local vid_high=$(echo "$json_dump" | jq -r '.formats[]? | select(.vcodec!="none" and .height >= 1080 and .height < 2160) | "\(.format_id)|\(.height)p|\(.fps)fps"' | head -n 1)
-        local vid_mid=$(echo "$json_dump" | jq -r '.formats[]? | select(.vcodec!="none" and .height >= 720 and .height < 1080) | "\(.format_id)|\(.height)p|\(.fps)fps"' | head -n 1)
-        local vid_low=$(echo "$json_dump" | jq -r '.formats[]? | select(.vcodec!="none" and .height < 720) | "\(.format_id)|\(.height)p|\(.fps)fps"' | sort -t'|' -k2 -nr | head -n 1)
-
-        # Best Audio Tier (Lossless/High/Mid/Low)
-        local aud_lossless=$(echo "$json_dump" | jq -r '.formats[]? | select(.vcodec=="none" and (.acodec // "" | test("flac|alac|wav"; "i"))) | "\(.format_id)|\(.ext)|\(.acodec)"' | head -n 1)
-        local aud_high=$(echo "$json_dump" | jq -r '.formats[]? | select(.vcodec=="none" and .abr >= 250) | "\(.format_id)|\(.abr)kbps|\(.acodec)"' | head -n 1)
-        local aud_mid=$(echo "$json_dump" | jq -r '.formats[]? | select(.vcodec=="none" and .abr >= 128 and .abr < 250) | "\(.format_id)|\(.abr)kbps|\(.acodec)"' | head -n 1)
-        local aud_low=$(echo "$json_dump" | jq -r '.formats[]? | select(.vcodec=="none" and .abr < 128) | "\(.format_id)|\(.abr)kbps|\(.acodec)"' | sort -t'|' -k2 -nr | head -n 1)
-
-        # Get best audio ID for merging with video
-        local best_audio_id=$(echo "$json_dump" | jq -r '.formats[]? | select(.vcodec=="none") | "\(.format_id)|\(.abr // 0)"' | sort -t'|' -k2 -nr | head -n 1 | cut -d'|' -f1)
-
         print_header_box "${C_PINK}🪷 Track Metadata${C_RESET}"
         print_boxed_line "${C_TEAL}Title:    ${C_CYAN}${title:0:$((INNER_WIDTH-12))}${C_RESET}"
         print_boxed_line "${C_TEAL}Artist:   ${C_LIGHT_PINK}${artist}${C_RESET}"
         print_boxed_line "${C_TEAL}Duration: ${C_ORANGE}${dur}${C_RESET}"
         print_boxed_line "${C_TEAL}Platform: ${C_WHITE}${platform}${C_RESET}"
+        print_boxed_line "${C_TEAL}URL:      ${C_VIOLET}${clean_url:0:$((INNER_WIDTH-12))}${C_RESET}"
         echo -e "${C_PURPLE}├${H_LINE:2}┤${C_RESET}"
         print_boxed_line "${C_TEAL}${view_label:0:10} ${C_WHITE}${views}${C_RESET}"
         print_boxed_line "${C_TEAL}Likes:    ${C_WHITE}${likes}${C_RESET}"
@@ -195,88 +179,24 @@ fetch_and_display_url_info() {
             
             echo -e "${C_PURPLE}├${H_LINE:2}┤${C_RESET}"
             print_boxed_line "${C_PINK}🎵 Current Playback Quality${C_RESET}"
-            print_boxed_line "" true
-            print_boxed_line "  ${C_TEAL}Format:  ${C_WHITE}$fmt${C_RESET}" true
-            print_boxed_line "  ${C_TEAL}Codec:   ${C_WHITE}$codec${C_RESET}" true
-            print_boxed_line "  ${C_TEAL}Bitrate: ${C_WHITE}$bitrate${C_RESET}" true
-            print_boxed_line "  ${C_TEAL}Rate:    ${C_WHITE}${rate} Hz${C_RESET}" true
+            print_boxed_line "${C_TEAL}Format:   ${C_WHITE}$fmt${C_RESET}"
+            print_boxed_line "${C_TEAL}Codec:    ${C_WHITE}$codec${C_RESET}"
+            print_boxed_line "${C_TEAL}Bitrate:  ${C_WHITE}$bitrate${C_RESET}"
+            print_boxed_line "${C_TEAL}Rate:     ${C_WHITE}${rate} Hz${C_RESET}"
         fi
         
-        # --- SMART SECTION DISPLAY ---
-        
-        # Only show Video section if video formats exist
-        if [ -n "$vid_ultra" ] || [ -n "$vid_high" ] || [ -n "$vid_mid" ] || [ -n "$vid_low" ]; then
-            echo -e "${C_PURPLE}├${H_LINE:2}┤${C_RESET}"
-            print_boxed_line "${C_PINK}📥 Download Options (Video + Audio)${C_RESET}"
-            print_boxed_line "" true
-            
-            # Essentials for yt-dlp commands
-            local dl_opts="--embed-metadata --embed-thumbnail"
-
-            [ -n "$vid_ultra" ] && IFS='|' read -r id res fps <<< "$vid_ultra" && {
-                print_boxed_line "  ${C_YELLOW}[ULTRA] ${C_WHITE}${res} (${fps})${C_RESET}" true
-                print_boxed_line "  ${C_GRAY}yt-dlp ${dl_opts} -f ${id}+${best_audio_id} \"${C_VIOLET}${clean_url}${C_GRAY}\"${C_RESET}" true
-                print_boxed_line "" true
-            }
-            [ -n "$vid_high" ]  && IFS='|' read -r id res fps <<< "$vid_high"  && {
-                print_boxed_line "  ${C_CYAN}[HIGH]  ${C_WHITE}${res} (${fps})${C_RESET}" true
-                print_boxed_line "  ${C_GRAY}yt-dlp ${dl_opts} -f ${id}+${best_audio_id} \"${C_VIOLET}${clean_url}${C_GRAY}\"${C_RESET}" true
-                print_boxed_line "" true
-            }
-            [ -n "$vid_mid" ]   && IFS='|' read -r id res fps <<< "$vid_mid"   && {
-                print_boxed_line "  ${C_GREEN}[MID]   ${C_WHITE}${res} (${fps})${C_RESET}" true
-                print_boxed_line "  ${C_GRAY}yt-dlp ${dl_opts} -f ${id}+${best_audio_id} \"${C_VIOLET}${clean_url}${C_GRAY}\"${C_RESET}" true
-                print_boxed_line "" true
-            }
-            [ -n "$vid_low" ]   && IFS='|' read -r id res fps <<< "$vid_low"   && {
-                print_boxed_line "  ${C_PURPLE}[LOW]   ${C_WHITE}${res} (${fps})${C_RESET}" true
-                print_boxed_line "  ${C_GRAY}yt-dlp ${dl_opts} -f ${id}+${best_audio_id} \"${C_VIOLET}${clean_url}${C_GRAY}\"${C_RESET}" true
-                print_boxed_line "" true
-            }
-        fi
-
-        echo -e "${C_PURPLE}├${H_LINE:2}┤${C_RESET}"
-        print_boxed_line "${C_PINK}📥 Download Options (Audio Only)${C_RESET}"
-        print_boxed_line "" true
-        
-        local dl_opts="--embed-metadata --embed-thumbnail"
-        if [ -n "$aud_lossless" ]; then
-            IFS='|' read -r id ext codec <<< "$aud_lossless"
-            local current_dl_opts="$dl_opts"
-            # WAV doesn't support thumbnails/metadata well in yt-dlp
-            [[ "$ext" == "wav" ]] && current_dl_opts="--embed-metadata"
-            
-            print_boxed_line "  ${C_YELLOW}[LOSSLESS] ${C_WHITE}${ext^^} (${codec})${C_RESET}" true
-            print_boxed_line "  ${C_GRAY}yt-dlp ${current_dl_opts} -f ${id} \"${C_VIOLET}${clean_url}${C_GRAY}\"${C_RESET}" true
-            print_boxed_line "" true
-        else
-            print_boxed_line "  ${C_YELLOW}[LOSSLESS] ${C_WHITE}FLAC (Auto)${C_RESET}" true
-            print_boxed_line "  ${C_GRAY}yt-dlp ${dl_opts} -x --audio-format flac \"${C_VIOLET}${clean_url}${C_GRAY}\"${C_RESET}" true
-            print_boxed_line "" true
-            print_boxed_line "  ${C_YELLOW}[LOSSLESS] ${C_WHITE}WAV  (Auto)${C_RESET}" true
-            print_boxed_line "  ${C_GRAY}yt-dlp --embed-metadata -x --audio-format wav \"${C_VIOLET}${clean_url}${C_GRAY}\"${C_RESET}" true
-            print_boxed_line "" true
-        fi
-
-        [ -n "$aud_high" ] && IFS='|' read -r id abr codec <<< "$aud_high" && {
-            print_boxed_line "  ${C_CYAN}[HIGH]     ${C_WHITE}${abr} (${codec})${C_RESET}" true
-            print_boxed_line "  ${C_GRAY}yt-dlp ${dl_opts} -f ${id} \"${C_VIOLET}${clean_url}${C_GRAY}\"${C_RESET}" true
-            print_boxed_line "" true
-        }
-        [ -n "$aud_mid" ]  && IFS='|' read -r id abr codec <<< "$aud_mid"  && {
-            print_boxed_line "  ${C_GREEN}[MID]      ${C_WHITE}${abr} (${codec})${C_RESET}" true
-            print_boxed_line "  ${C_GRAY}yt-dlp ${dl_opts} -f ${id} \"${C_VIOLET}${clean_url}${C_GRAY}\"${C_RESET}" true
-            print_boxed_line "" true
-        }
-        [ -n "$aud_low" ]  && IFS='|' read -r id abr codec <<< "$aud_low"  && {
-            print_boxed_line "  ${C_PURPLE}[LOW]      ${C_WHITE}${abr} (${codec})${C_RESET}" true
-            print_boxed_line "  ${C_GRAY}yt-dlp ${dl_opts} -f ${id} \"${C_VIOLET}${clean_url}${C_GRAY}\"${C_RESET}" true
-            print_boxed_line "" true
-        }
-
         printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
         B_LINE=${B_LINE// /─}
         echo -e "${C_PURPLE}${B_LINE}${C_RESET}"
+
+        if [ -t 0 ] && [ -t 1 ]; then
+            echo -ne "${C_PINK}>>> Press 'd' for interactive downloader, or ENTER to return: ${C_RESET}"
+            read -r -n 1 user_key < /dev/tty 2>/dev/null || read -r -n 1 user_key
+            echo ""
+            if [[ "$user_key" =~ ^[dD]$ ]]; then
+                cmd_download "$clean_url"
+            fi
+        fi
     fi
     fi
 }
