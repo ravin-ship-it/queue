@@ -106,7 +106,7 @@ cmd_update_ytdlp() {
     local base_url="https://raw.githubusercontent.com/ravin-ship-it/queue/main"
     
     for f in "${files[@]}"; do
-        if curl -sSL -f "${base_url}/${f}" -o "${dest_dir}/${f}.tmp" 2>/dev/null; then
+        if curl -sSL -f -H "Cache-Control: no-cache" "${base_url}/${f}" -o "${dest_dir}/${f}.tmp" 2>/dev/null; then
             mv "${dest_dir}/${f}.tmp" "${dest_dir}/${f}"
         else
             success=false
