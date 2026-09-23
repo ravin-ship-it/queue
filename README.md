@@ -108,6 +108,7 @@ Launch the full-screen interactive queue simply by typing `q`:
 | **Zero-Stutter Audio Architecture** | ✅ 48kHz Resampler & 1s Buffer | ⚠️ High CPU usage | ⚠️ Sinks drop on load |
 | **WSL2 / Linux Virtualization Hardened**| ✅ Native Pulse/SHM Bypass | ⚠️ Audio desync / crackle | ⚠️ Buffer underruns on VM |
 | **Android / Termux 1-Click Support**| ✅ Autonomous package & driver setup | ⚠️ App crashes / battery drain | ⚠️ Manual driver config |
+| **Taste Blacklisting & Dislike Hub**| ✅ `q -disl` / `q -rmd` / `CTRL-D` | ⚠️ Cloud thumbs down only | ❌ None |
 | **Dead Link Auto-Cleaner** | ✅ `q -clean` | ❌ None | ❌ None |
 
 ---
@@ -230,10 +231,14 @@ You can use standard short flags (`q -p`) or clean smart commands (`q play`).
 
 ---
 
-### 📋 Queue Management
+### 📋 Queue Management & Taste Control
 | Command | Flag | Action |
 | :--- | :--- | :--- |
-| `q remove [N]` | `q -rm [N\|query]` | Remove track by index, title search, or remove currently playing track |
+| `q remove [N]` | `q -rm [N\|query]` | Remove track from queue *(normal removal, no blacklist)* |
+| `q rmd [N]` | `q -rmd [N]` / `q -rm -dis` | **Remove & Dislike** *(removes track and blacklists from Auto Mode)* |
+| `q dislike [N]` | `q -dis [N]` | **Dislike track** *(blacklists track while keeping in queue)* |
+| `q disl` | `q -disl` | **Interactive Dislike Manager** *(FZF hub: view, whitelist, add tracks)* |
+| `q undis <query\|ID>` | `q -undis <query\|ID>` | **Remove from Dislike List** *(whitelist track)* |
 | `q move <A> <B>` | `q -mv <A> <B>` | Move track from position `A` to `B` |
 | `q swap <A> <B>` | `q -sw <A> <B>` | Swap track positions `A` and `B` |
 | `q clear` | `q -clr` | Wipe the current queue |
@@ -269,16 +274,18 @@ You can use standard short flags (`q -p`) or clean smart commands (`q play`).
 
 ## ⌨️ Interactive Keybindings (FZF Mode)
 
-When navigating the interactive queue (`q`):
+When navigating the interactive queue (`q`) or interactive search (`q <query>`):
 
-| Key | Function |
-| :--- | :--- |
-| <kbd>Enter</kbd> | **Play focused track** immediately *(or open Batch Actions menu if tracks selected)* |
-| <kbd>Tab</kbd> | **Select / Mark track** for multi-item actions *(Move, Remove, Export, New Queue)* |
-| <kbd>Alt</kbd> + <kbd>A</kbd> | **Invert selection** (toggle all tracks) |
-| <kbd>Insert</kbd> / <kbd>Delete</kbd> | Select All / Deselect All |
-| <kbd>Ctrl</kbd> + <kbd>V</kbd> | **Paste URL from clipboard** directly into the queue |
-| <kbd>Esc</kbd> / <kbd>Ctrl</kbd> + <kbd>C</kbd> | Exit TUI *(music continues playing uninterrupted)* |
+| Key | Context | Function |
+| :--- | :--- | :--- |
+| <kbd>Enter</kbd> | Queue / Search | **Play focused track** immediately *(or open Batch Actions menu if tracks selected)* |
+| <kbd>Tab</kbd> | Queue / Playlist | **Select / Mark track** *(Triggers Action Menu: Move, Remove, Dislike, Export)* |
+| <kbd>Ctrl</kbd> + <kbd>D</kbd> | Search Mode | **Dislike & Blacklist** selected track directly without playing or queuing |
+| <kbd>x</kbd> | Inspector (`q -i`) | **Blacklist inspected track** instantly |
+| <kbd>Alt</kbd> + <kbd>A</kbd> | Queue | **Invert selection** (toggle all tracks) |
+| <kbd>Insert</kbd> / <kbd>Delete</kbd> | Queue | Select All / Deselect All |
+| <kbd>Ctrl</kbd> + <kbd>V</kbd> | Queue | **Paste URL from clipboard** directly into the queue |
+| <kbd>Esc</kbd> / <kbd>Ctrl</kbd> + <kbd>C</kbd> | Everywhere | Exit TUI *(music continues playing uninterrupted)* |
 
 > ⚡ **Zero-Flicker Virtual DOM Live Auto-Sync (`reload-sync`)**: The interactive queue uses full queue fingerprinting and modern atomic frame swapping (`reload-sync`). When songs change, pause, or are modified from any terminal (`q -mv`, `q -sw`, `q -rm`, `q -shuf`), the list updates seamlessly with **zero screen-clearing flicker**, even across 1,000+ tracks.
 >
@@ -344,11 +351,13 @@ q -i
 ## 🤖 Smart Auto-Mode (`q -auto`)
 
 When Auto-Mode is enabled:
-1. **Intelligent Seed Analysis**: When your queue approaches the end, `q` dynamically analyzes recent tracks and seeds diverse discovery queries across YouTube Mixes (`RDAMVM`) and YouTube Music catalogs.
-2. **24/7 Zero-Gap Discovery**: Fetches and prepares candidate tracks in the background before the current song finishes playing.
-3. **End-of-Queue (EOF) Awareness**: If playback reaches the end of the queue, Auto-Mode seamlessly discovers, queues, and starts playback of new tracks so silence never interrupts your flow.
-4. **Smart User Override Respect**: Automatically pauses auto-discovery if you manually pause playback or activate single-track looping (`q -l`).
-5. **Anti-Repetition History Engine**: Maintains an intelligent ring buffer of played track IDs to prevent duplicate plays.
+1. **Studio Audio Quality Heuristic**: Uses an intelligent scoring engine that prioritizes clean studio releases (`- Topic`, `Official Audio`, `Lyric Video`) while aggressively penalizing and rejecting dialogue skits, teasers, trailers, podcasts, and behind-the-scenes clips.
+2. **Pure Queue & History Seeding**: Dynamically derives recommendation seeds strictly from active queue tracks and recent play history. Saved playlists (`~/.local/share/mpv/playlists/`) are completely isolated and never contaminate your auto-discovery seeds.
+3. **Taste Profile & Blacklist Enforcement**: Integrates with the global blacklist (`~/.cache/mpv/auto_blacklist`). Any song disliked via `q -dis`, `q -rmd`, `CTRL-D` in search, or the Dislike Hub (`q -disl`) is strictly excluded from recommendations.
+4. **24/7 Zero-Gap Discovery**: Pre-fetches and prepares candidate tracks in the background before the current song finishes playing.
+5. **End-of-Queue (EOF) Awareness**: If playback reaches the end of the queue, Auto-Mode seamlessly discovers, queues, and starts playback of new tracks so silence never interrupts your flow.
+6. **Smart User Override Respect**: Automatically pauses auto-discovery if you manually pause playback or activate single-track looping (`q -l`).
+7. **Anti-Repetition History Engine**: Maintains an intelligent ring buffer of played track IDs to prevent duplicate plays.
 
 ---
 

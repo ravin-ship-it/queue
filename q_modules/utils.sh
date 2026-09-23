@@ -240,16 +240,15 @@ is_media_file() {
 }
 
 load_cache_to_memory() {
-    # Properly clear associative array without losing its attribute
-    unset CACHE_MEM
-    declare -g -A CACHE_MEM
+    declare -g -A CACHE_MEM=()
     [ ! -f "$CACHE_FILE" ] && return
     
-    # Read the 4-column cache file into memory
-    while IFS=$'\t' read -r url title artist duration; do
-        [ -z "$url" ] && continue
+    # Read the 4-column cache file into memory safely with local variables
+    local c_url c_title c_artist c_dur
+    while IFS=$'\t' read -r c_url c_title c_artist c_dur; do
+        [ -z "$c_url" ] && continue
         # Store as a single tab-separated string for easy extraction
-        CACHE_MEM["$url"]="${title}"$'\t'"${artist}"$'\t'"${duration}"
+        CACHE_MEM["$c_url"]="${c_title}"$'\t'"${c_artist}"$'\t'"${c_dur}"
     done < "$CACHE_FILE"
 }
 
@@ -260,10 +259,11 @@ get_cached_row() {
 
 get_cached_title() {
     local url="$1"
+    [ ${#CACHE_MEM[@]} -eq 0 ] && load_cache_to_memory
     local row="${CACHE_MEM[$url]}"
     
     # Fuzzy match by ID if direct lookup fails
-    if [ -z "$row" ] && ([[ "$url" =~ ^http.* ]] || [[ "$url" == watch\?v=* ]]); then
+    if [ -z "$row" ]; then
         local vid_id=""
         local id_regex="[?&]id=([a-zA-Z0-9_-]{11})"
         local pb_regex="videoplayback/id/([a-zA-Z0-9_-]{11})"
@@ -276,6 +276,8 @@ get_cached_title() {
             vid_id="${BASH_REMATCH[1]}"
         elif [[ "$url" =~ $pb_regex ]]; then
             vid_id="${BASH_REMATCH[1]}"
+        elif [[ "$url" =~ ^[a-zA-Z0-9_-]{11}$ ]]; then
+            vid_id="$url"
         fi
         
         if [ -n "$vid_id" ] && [ "${#vid_id}" -eq 11 ]; then

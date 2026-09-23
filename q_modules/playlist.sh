@@ -188,7 +188,7 @@ cmd_playlist_list() {
 
     # 3. Choose Action
     local sel_count=$(echo "$selection" | wc -l)
-    local action=$(echo -e "  🎧  Append to Active Queue\n  ✨  New Queue from Selected & Play\n  🔀  Shuffle & Append to Active Queue\n  ✖  Remove from Playlist" | \
+    local action=$(echo -e "  🎧  Append to Active Queue\n  ✨  New Queue from Selected & Play\n  🔀  Shuffle & Append to Active Queue\n  👎  Dislike Track (Add to Blacklist)\n  👎✖ Dislike & Remove from Playlist\n  ✖  Remove from Playlist" | \
         fzf --height=100% --layout=reverse --border --info=inline-right \
         $FZF_COLOR_OPTS \
         --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \
@@ -197,7 +197,33 @@ cmd_playlist_list() {
     
     [ -z "$action" ] && return
 
-    if [[ "$action" == *"Remove"* ]]; then
+    if [[ "$action" == *"Dislike Track"* ]]; then
+        while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            local url=$(echo "$line" | awk -F'::' '{print $2}')
+            local title=$(echo "$line" | awk -F'::' '{print $3}')
+            add_to_auto_blacklist "$url" "$title"
+            echo -e "${C_PINK}👎 Disliked & Blacklisted:${C_RESET} ${C_CYAN}${title:-$url}${C_RESET}"
+        done <<< "$selection"
+        return
+    fi
+
+    if [[ "$action" == *"Dislike & Remove"* ]]; then
+        local temp_pl=$(mktemp)
+        local urls_to_remove=$(echo "$selection" | awk -F'::' '{print $2}')
+        grep -vFf <(echo "$urls_to_remove") "$file" > "$temp_pl"
+        mv "$temp_pl" "$file"
+        while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            local url=$(echo "$line" | awk -F'::' '{print $2}')
+            local title=$(echo "$line" | awk -F'::' '{print $3}')
+            add_to_auto_blacklist "$url" "$title"
+        done <<< "$selection"
+        echo -e "${C_PINK}👎✖ Removed & Blacklisted ${C_ORANGE}${sel_count}${C_PINK} tracks from ${C_CYAN}${selected_pl}${C_RESET}"
+        return
+    fi
+
+    if [[ "$action" == *"Remove from Playlist"* ]]; then
         # Removal Logic
         local temp_pl=$(mktemp)
         local urls_to_remove=$(echo "$selection" | awk -F'::' '{print $2}')

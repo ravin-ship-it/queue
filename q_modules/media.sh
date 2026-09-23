@@ -190,11 +190,13 @@ fetch_and_display_url_info() {
         echo -e "${C_PURPLE}${B_LINE}${C_RESET}"
 
         if [ -t 0 ] && [ -t 1 ]; then
-            echo -ne "${C_PINK}>>> Press 'd' for interactive downloader, or ENTER to return: ${C_RESET}"
+            echo -ne "${C_PINK}>>> Press 'd' to download, 'x' to dislike, or ENTER to return: ${C_RESET}"
             read -r -n 1 user_key < /dev/tty 2>/dev/null || read -r -n 1 user_key
             echo ""
             if [[ "$user_key" =~ ^[dD]$ ]]; then
                 cmd_download "$clean_url"
+            elif [[ "$user_key" =~ ^[xX]$ ]]; then
+                cmd_dislike "$clean_url"
             fi
         fi
     fi

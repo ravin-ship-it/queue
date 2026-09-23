@@ -205,7 +205,62 @@ show_queue() {
     fi
 }
 
+cmd_dislike() {
+    local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
+
+    if [ "$#" -eq 0 ] || [ -z "$1" ]; then
+        # Default: current playing track
+        local item_json=$(echo "$track_info" | jq -s -c 'map(select(.event == null)) | .[0].data[] | select(.current) // empty' 2>/dev/null)
+        local filename=$(echo "$item_json" | jq -r '.filename // ""')
+        local title=$(echo "$item_json" | jq -r '.title // ""')
+        if [ -z "$filename" ]; then
+            echo -e "${C_PINK}🔇 No track currently playing to dislike.${C_RESET}"
+            return 1
+        fi
+        add_to_auto_blacklist "$filename" "$title"
+        echo -e "${C_PINK}👎 Disliked & Blacklisted from Auto Mode:${C_RESET} ${C_CYAN}${title:-$filename}${C_RESET}"
+        return 0
+    fi
+
+    for target in "$@"; do
+        [ -z "$target" ] && continue
+        local filename=""
+        local title=""
+        if [[ "$target" =~ ^[0-9]+$ ]]; then
+            local idx=$((target - 1))
+            local item_json=$(echo "$track_info" | jq -s -c "map(select(.event == null)) | .[0].data[$idx] // empty" 2>/dev/null)
+            filename=$(echo "$item_json" | jq -r '.filename // ""')
+            title=$(echo "$item_json" | jq -r '.title // ""')
+        elif [[ "$target" =~ ^http ]]; then
+            filename="$target"
+            title="$target"
+        else
+            # Search by text in playlist
+            local item_json=$(echo "$track_info" | jq -s -c --arg query "$target" '
+                map(select(.event == null)) |
+                .[0].data[] | 
+                select(((.title? // "") | test($query; "i")) or ((.filename? // "") | test($query; "i")))
+            ' 2>/dev/null | head -n 1)
+            filename=$(echo "$item_json" | jq -r '.filename // ""')
+            title=$(echo "$item_json" | jq -r '.title // ""')
+        fi
+
+        if [ -n "$filename" ]; then
+            add_to_auto_blacklist "$filename" "$title"
+            echo -e "${C_PINK}👎 Disliked & Blacklisted from Auto Mode:${C_RESET} ${C_CYAN}${title:-$filename}${C_RESET}"
+        else
+            echo -e "${C_PINK}🔍🤷 No track matching [${C_ORANGE}${target}${C_PINK}] found to dislike.${C_RESET}"
+        fi
+    done
+}
+
 cmd_remove() {
+    local also_dislike=false
+    if [ "$1" == "--dislike" ]; then
+        also_dislike=true
+        shift
+    fi
+
     local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET")
     declare -a INDICES_TO_REMOVE
 
@@ -274,7 +329,12 @@ cmd_remove() {
             local formatted_track=$(format_track_log "$idx" "$filename" "$mpv_title")
 
             echo "{ \"command\": [\"playlist-remove\", $((idx - 1))] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
-            echo -e "${C_PINK}✖  Removed ${formatted_track}"
+            if [ "$also_dislike" = true ]; then
+                add_to_auto_blacklist "$filename" "$mpv_title"
+                echo -e "${C_PINK}👎✖ Removed & Blacklisted ${formatted_track}${C_RESET}"
+            else
+                echo -e "${C_PINK}✖  Removed ${formatted_track}${C_RESET}"
+            fi
         done
         
         # Let mpv settle after removal before querying state
@@ -669,7 +729,360 @@ queue_item_ipc() {
     save_current_playlist true >/dev/null 2>&1 & disown
 }
 
-# --- AUTO MODE LOGIC (24/7 Zero-Gap Discovery) ---
+# --- PERSONALIZED AUTO DISCOVERY SUBSYSTEM ---
+
+add_to_auto_blacklist() {
+    local target="$1"
+    local opt_title="$2"
+    local b_id=""
+    if [[ "$target" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]]; then
+        b_id="${BASH_REMATCH[2]}"
+    elif [[ "$target" =~ ^[a-zA-Z0-9_-]{11}$ ]]; then
+        b_id="$target"
+    fi
+    if [ -n "$b_id" ]; then
+        local bl_file="$HOME/.cache/mpv/auto_blacklist"
+        mkdir -p "$(dirname "$bl_file")" 2>/dev/null
+        touch "$bl_file" 2>/dev/null
+
+        # If opt_title is missing, try looking up in titles cache
+        if [ -z "$opt_title" ] || [ "$opt_title" == "$target" ] || [ "$opt_title" == "$b_id" ]; then
+            opt_title=$(get_cached_title "$target")
+            [ -z "$opt_title" ] && opt_title=$(get_cached_title "$b_id")
+        fi
+        [ -z "$opt_title" ] && opt_title="Disliked Track"
+
+        # Check if already in blacklist
+        if ! grep -E -q "^${b_id}([[:blank:]]|$)" "$bl_file" 2>/dev/null; then
+            printf "%s\t%s\n" "$b_id" "$opt_title" >> "$bl_file"
+        fi
+        if [ $((RANDOM % 15)) -eq 0 ] && [ -f "$bl_file" ]; then
+            sort -u -k1,1 "$bl_file" | tail -n 500 > "$bl_file.tmp" 2>/dev/null && mv "$bl_file.tmp" "$bl_file"
+        fi
+    fi
+}
+
+remove_from_auto_blacklist() {
+    local target="$1"
+    local b_id=""
+    if [[ "$target" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]]; then
+        b_id="${BASH_REMATCH[2]}"
+    elif [[ "$target" =~ ^[a-zA-Z0-9_-]{11}$ ]]; then
+        b_id="$target"
+    else
+        b_id="$target"
+    fi
+    local bl_file="$HOME/.cache/mpv/auto_blacklist"
+    if [ -f "$bl_file" ] && [ -n "$b_id" ]; then
+        local tmp=$(mktemp)
+        grep -E -v "^${b_id}([[:blank:]]|$)" "$bl_file" > "$tmp" 2>/dev/null || true
+        mv "$tmp" "$bl_file"
+    fi
+}
+
+cmd_undislike() {
+    local bl_file="$HOME/.cache/mpv/auto_blacklist"
+    if [ ! -f "$bl_file" ] || [ ! -s "$bl_file" ]; then
+        echo -e "${C_PINK}ℹ️ Dislike list is currently empty.${C_RESET}"
+        return 0
+    fi
+
+    # If no argument passed:
+    if [ "$#" -eq 0 ] || [ -z "$1" ]; then
+        local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
+        local item_json=$(echo "$track_info" | jq -s -c 'map(select(.event == null)) | .[0].data[] | select(.current) // empty' 2>/dev/null)
+        local filename=$(echo "$item_json" | jq -r '.filename // ""')
+        local title=$(echo "$item_json" | jq -r '.title // ""')
+
+        local cur_id=""
+        [[ "$filename" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && cur_id="${BASH_REMATCH[2]}"
+
+        if [ -n "$cur_id" ] && grep -E -q "^${cur_id}([[:blank:]]|$)" "$bl_file" 2>/dev/null; then
+            remove_from_auto_blacklist "$cur_id"
+            echo -e "${C_GREEN}✨ Removed from Dislike List & Whitelisted:${C_RESET} ${C_CYAN}${title:-$cur_id}${C_RESET}"
+            return 0
+        else
+            cmd_dislike_list
+            return $?
+        fi
+    fi
+
+    for target in "$@"; do
+        [ -z "$target" ] && continue
+        local b_id=""
+        local b_title=""
+
+        if [[ "$target" =~ ^[0-9]+$ ]]; then
+            local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
+            local idx=$((target - 1))
+            local item_json=$(echo "$track_info" | jq -s -c "map(select(.event == null)) | .[0].data[$idx] // empty" 2>/dev/null)
+            local filename=$(echo "$item_json" | jq -r '.filename // ""')
+            b_title=$(echo "$item_json" | jq -r '.title // ""')
+            [[ "$filename" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && b_id="${BASH_REMATCH[2]}"
+        elif [[ "$target" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]]; then
+            b_id="${BASH_REMATCH[2]}"
+        elif [[ "$target" =~ ^[a-zA-Z0-9_-]{11}$ ]]; then
+            b_id="$target"
+        else
+            local match_line=$(grep -i -F "$target" "$bl_file" 2>/dev/null | head -n 1)
+            if [ -n "$match_line" ]; then
+                b_id=$(echo "$match_line" | awk -F'\t' '{print $1}')
+                b_title=$(echo "$match_line" | awk -F'\t' '{print $2}')
+            fi
+        fi
+
+        if [ -n "$b_id" ] && grep -E -q "^${b_id}([[:blank:]]|$)" "$bl_file" 2>/dev/null; then
+            if [ -z "$b_title" ]; then
+                b_title=$(grep -E "^${b_id}([[:blank:]]|$)" "$bl_file" 2>/dev/null | head -n 1 | awk -F'\t' '{print $2}')
+            fi
+            remove_from_auto_blacklist "$b_id"
+            echo -e "${C_GREEN}✨ Removed from Dislike List & Whitelisted:${C_RESET} ${C_CYAN}${b_title:-$b_id}${C_RESET}"
+        else
+            echo -e "${C_PINK}🔍🤷 Track [${C_ORANGE}${target}${C_PINK}] not found in dislike blacklist.${C_RESET}"
+        fi
+    done
+}
+
+cmd_dislike_list() {
+    local bl_file="$HOME/.cache/mpv/auto_blacklist"
+    touch "$bl_file" 2>/dev/null
+
+    while true; do
+        local items=""
+        local count=0
+        if [ -s "$bl_file" ]; then
+            local i=1
+            while IFS=$'\t' read -r bid btitle; do
+                [ -z "$bid" ] && continue
+                [ -z "$btitle" ] && btitle=$(get_cached_title "$bid")
+                [ -z "$btitle" ] && btitle="Track ($bid)"
+                items+="${C_ORANGE}${i}.${C_RESET} ${C_CYAN}${btitle}${C_RESET} ${C_GRAY}[${bid}]${C_RESET}"$'\t'"${bid}"$'\t'"${btitle}"$'\n'
+                ((i++))
+                ((count++))
+            done < "$bl_file"
+        fi
+
+        local fzf_input=""
+        fzf_input+="  ✚  Add Track to Dislike List...\n"
+        [ "$count" -gt 0 ] && fzf_input+="  🗑️   Clear Entire Dislike List ($count tracks)\n"
+        fzf_input+="$items"
+
+        local header=$(printf "${C_GRAY}${H_LINE}${C_RESET}\n  ${C_PURPLE}👎 Dislike List Manager${C_RESET} ${C_GRAY}(${count} blacklisted tracks)${C_RESET}\n  ${C_GRAY}ENTER: Remove from Dislike List | TAB: Select Multiple | ESC: Exit${C_RESET}")
+
+        local sel=$(echo -ne "$fzf_input" | fzf --multi --ansi --height=100% --layout=reverse --border \
+            --header="$header" \
+            --delimiter=$'\t' --with-nth=1 \
+            --bind "tab:toggle,alt-a:toggle-all,insert:select-all,delete:deselect-all" \
+            --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \
+            $FZF_COLOR_OPTS \
+            --info=inline-right --prompt="Dislike Manager > ")
+
+        [ -z "$sel" ] && break
+
+        # Case 1: Add Track to Dislike List
+        if echo "$sel" | grep -q "Add Track to Dislike List"; then
+            local add_action=$(echo -e "  🎵  Currently Playing Track\n  📋  Pick from Current Queue\n  🕒  Pick from Recent History\n  🔍  Search YouTube to Dislike\n  🔗  Enter URL or Video ID manually" | \
+                fzf --height=100% --layout=reverse --border --info=inline-right \
+                $FZF_COLOR_OPTS \
+                --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \
+                --header="How would you like to add track(s) to the Dislike List?" \
+                --prompt="Add Dislike > ")
+
+            [ -z "$add_action" ] && continue
+
+            if echo "$add_action" | grep -q "Currently Playing"; then
+                cmd_dislike
+            elif echo "$add_action" | grep -q "Current Queue"; then
+                local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
+                local q_count=$(echo "$track_info" | jq -s -r 'map(select(.event == null)) | .[0].data | length // 0' 2>/dev/null)
+                if [ "$q_count" -eq 0 ]; then
+                    echo -e "${C_PINK}ℹ️ Current queue is empty.${C_RESET}"
+                else
+                    local q_items=""
+                    for ((k=0; k<q_count; k++)); do
+                        local item_json=$(echo "$track_info" | jq -s -c "map(select(.event == null)) | .[0].data[$k] // empty")
+                        local fn=$(echo "$item_json" | jq -r '.filename // ""')
+                        local tt=$(echo "$item_json" | jq -r '.title // ""')
+                        [ -z "$tt" ] && tt="$fn"
+                        q_items+="${C_ORANGE}$((k+1)).${C_RESET} ${C_CYAN}${tt}${C_RESET}"$'\t'"${fn}"$'\t'"${tt}"$'\n'
+                    done
+                    local q_sel=$(echo -ne "$q_items" | fzf --multi --ansi --height=100% --layout=reverse --border \
+                        --delimiter=$'\t' --with-nth=1 \
+                        --bind "tab:toggle,alt-a:toggle-all,insert:select-all,delete:deselect-all" \
+                        $FZF_COLOR_OPTS \
+                        --header="Select track(s) from current queue to dislike:" \
+                        --prompt="Queue Track > ")
+                    if [ -n "$q_sel" ]; then
+                        while IFS= read -r q_line; do
+                            [ -z "$q_line" ] && continue
+                            local q_url=$(echo "$q_line" | awk -F'\t' '{print $2}')
+                            local q_tit=$(echo "$q_line" | awk -F'\t' '{print $3}')
+                            add_to_auto_blacklist "$q_url" "$q_tit"
+                            echo -e "${C_PINK}👎 Disliked & Blacklisted:${C_RESET} ${C_CYAN}${q_tit:-$q_url}${C_RESET}"
+                        done <<< "$q_sel"
+                    fi
+                fi
+            elif echo "$add_action" | grep -q "Recent History"; then
+                local hist_file="$HOME/.cache/mpv/auto_history"
+                if [ ! -s "$hist_file" ]; then
+                    echo -e "${C_PINK}ℹ️ Recent history is empty.${C_RESET}"
+                else
+                    local h_items=""
+                    local h_idx=1
+                    while IFS= read -r h_id; do
+                        [ -z "$h_id" ] && continue
+                        local h_tit=$(get_cached_title "$h_id")
+                        [ -z "$h_tit" ] && h_tit="History Track ($h_id)"
+                        h_items+="${C_ORANGE}${h_idx}.${C_RESET} ${C_CYAN}${h_tit}${C_RESET} ${C_GRAY}[${h_id}]${C_RESET}"$'\t'"${h_id}"$'\t'"${h_tit}"$'\n'
+                        ((h_idx++))
+                    done < <(tail -n 30 "$hist_file" 2>/dev/null | tac)
+                    local h_sel=$(echo -ne "$h_items" | fzf --multi --ansi --height=100% --layout=reverse --border \
+                        --delimiter=$'\t' --with-nth=1 \
+                        --bind "tab:toggle,alt-a:toggle-all,insert:select-all,delete:deselect-all" \
+                        $FZF_COLOR_OPTS \
+                        --header="Select track(s) from history to dislike:" \
+                        --prompt="History Track > ")
+                    if [ -n "$h_sel" ]; then
+                        while IFS= read -r h_line; do
+                            [ -z "$h_line" ] && continue
+                            local h_url=$(echo "$h_line" | awk -F'\t' '{print $2}')
+                            local h_tit=$(echo "$h_line" | awk -F'\t' '{print $3}')
+                            add_to_auto_blacklist "$h_url" "$h_tit"
+                            echo -e "${C_PINK}👎 Disliked & Blacklisted:${C_RESET} ${C_CYAN}${h_tit:-$h_url}${C_RESET}"
+                        done <<< "$h_sel"
+                    fi
+                fi
+            elif echo "$add_action" | grep -q "Search YouTube"; then
+                local s_query=$(get_input "Search YouTube to Dislike" "Search > ")
+                if [ -n "$s_query" ]; then
+                    echo -e "${C_GRAY}⏳ Searching YouTube for \"$s_query\"...${C_RESET}"
+                    local s_tmp=$(mktemp)
+                    run_with_timeout 25s yt-dlp --print "%(webpage_url)s\t%(title)s\t%(uploader)s\t%(duration_string)s" --flat-playlist --no-warnings --skip-download --playlist-end 15 "ytsearch15:${s_query}" > "$s_tmp" 2>/dev/null
+                    if [ -s "$s_tmp" ]; then
+                        local s_items=""
+                        local s_idx=1
+                        while IFS=$'\t' read -r su st sa sd; do
+                            [ -z "$su" ] && continue
+                            s_items+="${C_ORANGE}${s_idx}.${C_RESET} ${C_CYAN}${st}${C_RESET} ${C_LIGHT_PINK}by ${sa}${C_RESET} [${sd}]"$'\t'"${su}"$'\t'"${st}"$'\n'
+                            ((s_idx++))
+                        done < "$s_tmp"
+                        local s_sel=$(echo -ne "$s_items" | fzf --multi --ansi --height=100% --layout=reverse --border \
+                            --delimiter=$'\t' --with-nth=1 \
+                            --bind "tab:toggle,alt-a:toggle-all,insert:select-all,delete:deselect-all" \
+                            $FZF_COLOR_OPTS \
+                            --header="Select track(s) to blacklist from Auto Mode:" \
+                            --prompt="Dislike Track > ")
+                        if [ -n "$s_sel" ]; then
+                            while IFS= read -r s_line; do
+                                [ -z "$s_line" ] && continue
+                                local s_url=$(echo "$s_line" | awk -F'\t' '{print $2}')
+                                local s_tit=$(echo "$s_line" | awk -F'\t' '{print $3}')
+                                add_to_auto_blacklist "$s_url" "$s_tit"
+                                echo -e "${C_PINK}👎 Disliked & Blacklisted:${C_RESET} ${C_CYAN}${s_tit:-$s_url}${C_RESET}"
+                            done <<< "$s_sel"
+                        fi
+                    else
+                        echo -e "${C_PINK}⚠️ No search results found.${C_RESET}"
+                    fi
+                    rm -f "$s_tmp"
+                fi
+            elif echo "$add_action" | grep -q "Enter URL"; then
+                local manual_url=$(get_input "Enter URL or Video ID to Dislike" "URL/ID > ")
+                if [ -n "$manual_url" ]; then
+                    add_to_auto_blacklist "$manual_url"
+                    echo -e "${C_PINK}👎 Disliked & Blacklisted:${C_RESET} ${C_CYAN}$manual_url${C_RESET}"
+                fi
+            fi
+            sleep 0.8
+            continue
+        fi
+
+        # Case 2: Clear Entire Dislike List
+        if echo "$sel" | grep -q "Clear Entire Dislike List"; then
+            local confirm=$(echo -e "  ❌  No, Cancel\n  🗑️   Yes, Clear All Dislikes" | \
+                fzf --height=100% --layout=reverse --border --info=inline-right \
+                $FZF_COLOR_OPTS \
+                --header="Are you sure you want to completely clear the dislike list ($count tracks)?" \
+                --prompt="Confirm > ")
+            if echo "$confirm" | grep -q "Yes, Clear"; then
+                > "$bl_file"
+                echo -e "${C_GREEN}✅ Dislike list cleared completely.${C_RESET}"
+            fi
+            sleep 0.8
+            continue
+        fi
+
+        # Case 3: User selected one or more tracks to un-dislike
+        local removed_count=0
+        while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            local target_id=$(echo "$line" | awk -F'\t' '{print $2}')
+            local target_title=$(echo "$line" | awk -F'\t' '{print $3}')
+            if [ -n "$target_id" ]; then
+                remove_from_auto_blacklist "$target_id"
+                echo -e "${C_GREEN}✨ Whitelisted & Removed from Dislike List:${C_RESET} ${C_CYAN}${target_title:-$target_id}${C_RESET}"
+                ((removed_count++))
+            fi
+        done <<< "$sel"
+        sleep 0.8
+    done
+}
+
+parse_duration_to_seconds() {
+    local d="$1"
+    local s=0
+    IFS=: read -r -a p <<< "$d"
+    if [ ${#p[@]} -eq 2 ]; then
+        s=$(( 10#${p[0]} * 60 + 10#${p[1]} ))
+    elif [ ${#p[@]} -eq 3 ]; then
+        s=$(( 10#${p[0]} * 3600 + 10#${p[1]} * 60 + 10#${p[2]} ))
+    fi
+    echo "$s"
+}
+
+score_candidate_track() {
+    local title="$1"
+    local uploader="$2"
+    local dur="$3"
+    local score=10
+    local lower_title=$(echo "$title" | tr '[:upper:]' '[:lower:]')
+    local lower_uploader=$(echo "$uploader" | tr '[:upper:]' '[:lower:]')
+
+    # Hard Reject: Non-music, Spoken Skits, Reviews, Teasers
+    if [[ "$lower_title" =~ (teaser|trailer|reaction|reacts|review|full[[:space:]]+movie|short[[:space:]]+film|interview|behind[[:space:]]+the[[:space:]]+scenes|bts|episode|ep\.|making[[:space:]]+of) ]]; then
+        echo -9999
+        return
+    fi
+
+    # Bonus: Studio Topic upload (+60) - Clean album release from music distributor
+    if [[ "$lower_uploader" =~ -[[:space:]]*topic$ ]] || [[ "$lower_title" =~ -[[:space:]]*topic$ ]]; then
+        score=$((score + 60))
+    fi
+
+    # Bonus: Clean studio audio releases (+40)
+    if [[ "$lower_title" =~ (official[[:space:]]+audio|audio[[:space:]]+only|lyric[[:space:]]+video|lyrics|clean[[:space:]]+audio|studio[[:space:]]+version|original[[:space:]]+track) ]]; then
+        score=$((score + 40))
+    fi
+
+    # Penalty: Official music videos without audio/lyric tags (-15, so studio tracks take precedence)
+    if [[ "$lower_title" =~ (official[[:space:]]+music[[:space:]]+video|official[[:space:]]+video) ]] && [[ ! "$lower_title" =~ (audio|lyric) ]]; then
+        score=$((score - 15))
+    fi
+
+    # Duration scoring:
+    if [ -n "$dur" ] && [ "$dur" != "N/A" ] && [ "$dur" != "null" ]; then
+        local dur_s=$(parse_duration_to_seconds "$dur")
+        if [ "$dur_s" -ge 120 ] && [ "$dur_s" -le 360 ]; then
+            score=$((score + 25))
+        elif [ "$dur_s" -gt 450 ]; then
+            score=$((score - 35))
+        elif [ "$dur_s" -lt 80 ] && [ "$dur_s" -gt 0 ]; then
+            score=$((score - 50))
+        fi
+    fi
+
+    echo "$score"
+}
 
 auto_queue_related() {
     local input_title="$1"; local input_filename="$2"; local force_fetch="${3:-false}"
@@ -709,11 +1122,10 @@ auto_queue_related() {
     fi
 
     if [ "$force_fetch" != "true" ]; then
-        # PROTOCOL 2 & 4: Intelligent Discovery Timing
+        # Intelligent Discovery Timing: only trigger when near end
         if [ "$pos" -ne -1 ] && [ "$count" -gt $((pos + 2)) ]; then
             return
         fi
-        
         [ -f "$HOME/.cache/mpv/auto_cooldown" ] && return
     fi
 
@@ -726,54 +1138,75 @@ auto_queue_related() {
         return
     fi
 
-    # --- PROTOCOL 5 & 6: Seed & Priority Determination (Seed Diversity) ---
     local history_file="$HOME/.cache/mpv/auto_history"
+    local blacklist_file="$HOME/.cache/mpv/auto_blacklist"
     [ ! -f "$history_file" ] && touch "$history_file"
+    [ ! -f "$blacklist_file" ] && touch "$blacklist_file"
 
-    if [ -z "$input_filename" ] && [ "$count" -gt 0 ]; then
-        local target_idx=0
-        if [ "$count" -gt 1 ]; then
-            if [ $((RANDOM % 10)) -lt 7 ]; then
-                local half=$((count / 2))
-                target_idx=$(( (RANDOM % (count - half)) + half ))
-            else
-                target_idx=$(( RANDOM % count ))
-            fi
-        fi
-        
-        local seed_json=$(echo "{\"command\":[\"get_property\", \"playlist/$target_idx\"]}" | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // empty')
-        input_filename=$(echo "$seed_json" | jq -r '.filename // ""')
-        input_title=$(echo "$seed_json" | jq -r '.title // ""')
-        echo "[$(date +%T)] [Seed] Diversity Pick: Index $target_idx (${input_title:-Unknown})" >> "$debug_log"
-    fi
-    
-    local is_default_search=false
-    if [ -z "$input_filename" ] || [[ "$input_filename" =~ (😴💤|null) ]]; then
-        is_default_search=true
-        echo "[$(date +%T)] [Seed] Queue Empty. Shifting to Default Priority (Popular Songs)." >> "$debug_log"
-    fi
-
+    # --- PROTOCOL: Personalized Seed Determination ---
     local seed_id=""
-    if [[ "$input_filename" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]]; then
+    local seed_title="$input_title"
+
+    # 1. If explicit input given:
+    if [ -n "$input_filename" ] && [[ "$input_filename" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]]; then
         seed_id="${BASH_REMATCH[2]}"
     fi
 
-    # --- 2. Candidate Discovery ---
+    # 2. If no explicit input or queue empty:
+    if [ -z "$seed_id" ]; then
+        if [ "$count" -gt 0 ]; then
+            # Strictly seed from current active queue / currently playing playlist
+            local target_idx=0
+            if [ "$count" -gt 1 ]; then
+                # Prefer the currently playing or most recent tracks in queue to preserve current vibe/genre
+                if [ "$pos" -ge 0 ] && [ $((RANDOM % 10)) -lt 8 ]; then
+                    target_idx="$pos"
+                else
+                    # Fallback to a random recent track in the second half of queue
+                    local half=$((count / 2))
+                    target_idx=$(( (RANDOM % (count - half)) + half ))
+                fi
+            fi
+
+            local seed_json=$(echo "{\"command\":[\"get_property\", \"playlist/$target_idx\"]}" | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // empty')
+            local s_file=$(echo "$seed_json" | jq -r '.filename // ""')
+            seed_title=$(echo "$seed_json" | jq -r '.title // ""')
+            if [[ "$s_file" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]]; then
+                seed_id="${BASH_REMATCH[2]}"
+            fi
+            echo "[$(date +%T)] [Seed] Current Session Seed: Index $target_idx ($seed_id - ${seed_title:-Unknown})" >> "$debug_log"
+        else
+            # Queue is completely empty:
+            # Continue from the track you last listened to in active history (never touching saved playlists)
+            local last_hist_id=$(tail -n 1 "$history_file" 2>/dev/null)
+            if [ -n "$last_hist_id" ] && [[ "$last_hist_id" =~ ^[a-zA-Z0-9_-]{11}$ ]]; then
+                seed_id="$last_hist_id"
+                echo "[$(date +%T)] [Seed] Empty Queue Initialized from Last Listened History: $seed_id" >> "$debug_log"
+            fi
+        fi
+    fi
+
+    # --- 2. Candidate Discovery (Radio & Studio Prioritization) ---
     local fields="%(webpage_url)s"$'\t'"%(title)s"$'\t'"%(uploader)s"$'\t'"%(duration_string)s"
     local candidates=""
 
-    if [ "$is_default_search" = false ] && [ -n "$seed_id" ]; then
-        echo "[$(date +%T)] [Discovery] Mix for Seed ID: $seed_id" >> "$debug_log"
-        candidates=$(run_with_timeout 25s nice -n 19 yt-dlp --js-runtimes node --extractor-args "youtube:player_client=android,web" --print "$fields" --flat-playlist --no-warnings --skip-download --playlist-end 15 "https://www.youtube.com/watch?v=${seed_id}&list=RDAMVM${seed_id}" 2>/dev/null)
+    # Strategy A: YouTube Song Radio Mix (RD<ID>) - NOT RDAMVM
+    if [ -n "$seed_id" ]; then
+        echo "[$(date +%T)] [Discovery] Radio Mix for Seed ID: $seed_id" >> "$debug_log"
+        candidates=$(run_with_timeout 25s nice -n 19 yt-dlp --print "$fields" --flat-playlist --no-warnings --skip-download --playlist-end 20 "https://www.youtube.com/watch?v=${seed_id}&list=RD${seed_id}" 2>/dev/null)
     fi
 
+    # Strategy B: Studio Search fallback or augment
     if [ -z "$candidates" ]; then
         local query="popular music"
-        [ "$is_default_search" = false ] && query="related to ${input_title:-music}"
-        echo "[$(date +%T)] [Discovery] Search for: $query" >> "$debug_log"
-        candidates=$(run_with_timeout 25s nice -n 19 yt-dlp --js-runtimes node --extractor-args "youtube:player_client=android,web" --print "$fields" --no-warnings --skip-download --playlist-end 15 "ytmsearch15:${query}" 2>/dev/null)
+        if [ -n "$seed_title" ] && [ "$seed_title" != "null" ]; then
+            local clean_q=$(echo "$seed_title" | sed -E 's/(\[|\()[^]]*(\]|\))//g' | sed 's/[^a-zA-Z0-9 ]/ /g' | awk '{$1=$1};1')
+            query="${clean_q:0:50} audio"
+        fi
+        echo "[$(date +%T)] [Discovery] Studio Search: $query" >> "$debug_log"
+        candidates=$(run_with_timeout 25s nice -n 19 yt-dlp --print "$fields" --no-warnings --skip-download --playlist-end 15 "ytsearch15:${query}" 2>/dev/null)
     fi
-    
+
     if [ -z "$candidates" ]; then
         touch "$HOME/.cache/mpv/auto_failed"
         touch "$HOME/.cache/mpv/auto_cooldown"
@@ -781,39 +1214,56 @@ auto_queue_related() {
         return
     fi
 
-    # --- 3. Deduplication ---
+    # --- 3. Deduplication, Blacklist Check & Studio Scoring ---
     local pl_json=$(echo '{"command":["get_property","playlist"]}' | nc $NC_OPTS -w 2 "$SOCKET" 2>/dev/null)
-    local cur_ids=$(echo "$pl_json" | jq -r '.data[].filename' | grep -oP '(?<=[v=be/])[a-zA-Z0-9_-]{11}' | sort -u)
+    local cur_ids=$(echo "$pl_json" | jq -r '.data[].filename // empty' 2>/dev/null | grep -oP '(?<=[v=be/])[a-zA-Z0-9_-]{11}' | sort -u)
 
-    declare -a pool_u; declare -a pool_t; declare -a pool_a; declare -a pool_d
+    declare -a scored_pool
+    # scored_pool entries: "SCORE\tURL\tTITLE\tARTIST\tDUR"
     while IFS=$'\t' read -r url t a d; do
         [ -z "$url" ] || [ "$url" == "null" ] && continue
         local c_id=""
         [[ "$url" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && c_id="${BASH_REMATCH[2]}"
-        
+        [ -z "$c_id" ] && continue
+
+        # Exclusions: seed itself, already in current queue, played recently in history, or in blacklist
         [ -n "$seed_id" ] && [ "$c_id" == "$seed_id" ] && continue
-        [ -n "$c_id" ] && echo "$cur_ids" | grep -qx -- "$c_id" && continue
+        echo "$cur_ids" | grep -qx -- "$c_id" && continue
         grep -qx -- "$c_id" "$history_file" 2>/dev/null && continue
-        
-        pool_u+=("$url"); pool_t+=("$t"); pool_a+=("$a"); pool_d+=("$d")
+        grep -E -q "^${c_id}([[:blank:]]|$)" "$blacklist_file" 2>/dev/null && continue
+
+        # Evaluate Candidate Score
+        local s=$(score_candidate_track "$t" "$a" "$d")
+        if [ "$s" -gt -100 ]; then
+            scored_pool+=("$s"$'\t'"$url"$'\t'"$t"$'\t'"$a"$'\t'"$d")
+        fi
     done <<< "$candidates"
 
-    # --- 4. Queue Selection ---
-    if [ ${#pool_u[@]} -gt 0 ]; then
+    # --- 4. Intelligent Selection from Top-Scored Candidates ---
+    if [ ${#scored_pool[@]} -gt 0 ]; then
         if ! [ -S "$SOCKET" ]; then return; fi
-        
-        local r=$((RANDOM % ${#pool_u[@]})); [ "$r" -gt 5 ] && r=$((RANDOM % 5))
-        
-        echo "[$(date +%T)] [Success] Queuing: ${pool_t[$r]}" >> "$debug_log"
-        queue_item_ipc "${pool_u[$r]}" "${pool_t[$r]}" "${pool_a[$r]}" "${pool_d[$r]}"
-        
-        [[ "${pool_u[$r]}" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && echo "${BASH_REMATCH[2]}" >> "$history_file"
+
+        # Sort pool by score descending
+        mapfile -t sorted_pool < <(printf "%s\n" "${scored_pool[@]}" | sort -t$'\t' -k1 -nr)
+
+        # Pick randomly from the top 3 (or fewer) highest-ranked candidates to balance studio quality & variety
+        local max_pick=3
+        [ ${#sorted_pool[@]} -lt 3 ] && max_pick=${#sorted_pool[@]}
+        local pick_idx=$((RANDOM % max_pick))
+
+        IFS=$'\t' read -r chosen_score chosen_url chosen_t chosen_a chosen_d <<< "${sorted_pool[$pick_idx]}"
+
+        echo "[$(date +%T)] [Success] Queuing (Score: $chosen_score): $chosen_t (by $chosen_a)" >> "$debug_log"
+        queue_item_ipc "$chosen_url" "$chosen_t" "$chosen_a" "$chosen_d"
+
+        [[ "$chosen_url" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && echo "${BASH_REMATCH[2]}" >> "$history_file"
         tail -n 100 "$history_file" > "$history_file.tmp" && mv "$history_file.tmp" "$history_file"
-        
+
         touch "$HOME/.cache/mpv/auto_cooldown"
         ( sleep 20; rm -f "$HOME/.cache/mpv/auto_cooldown" ) & disown
     else
+        echo "[$(date +%T)] [Warning] No candidates passed quality & blacklist filters." >> "$debug_log"
         touch "$HOME/.cache/mpv/auto_cooldown"
-        ( sleep 60; rm -f "$HOME/.cache/mpv/auto_cooldown" ) & disown
+        ( sleep 45; rm -f "$HOME/.cache/mpv/auto_cooldown" ) & disown
     fi
 }

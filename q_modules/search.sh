@@ -81,17 +81,42 @@ perform_search() {
     if command -v fzf >/dev/null; then
         # FZF Mode: Format for humans, hide URL/Title/Artist/Duration after ::
         # We pack ::URL::Title::Artist::Duration for retrieval
-        local selection=$(awk -F'\t' -v c="$C_CYAN" -v p="$C_LIGHT_PINK" -v o="$C_ORANGE" -v r="$C_RESET" -v clr_idx="$C_ORANGE" \
+        local s_header=$(printf "${C_GRAY}${H_LINE}${C_RESET}\n  ${C_PURPLE}🔍 Results for: ${C_CYAN}${QUERY}${C_RESET} ${C_GRAY}(ENTER select, TAB multi, CTRL-D dislike)${C_RESET}")
+        local raw_sel=$(awk -F'\t' -v c="$C_CYAN" -v p="$C_LIGHT_PINK" -v o="$C_ORANGE" -v r="$C_RESET" -v clr_idx="$C_ORANGE" \
             '{gsub("::", ":", $1); gsub("::", ":", $3); gsub("::", ":", $4); printf "%s%d.%s %s%s %sby %s %s[%s]%s::%s::%s::%s::%s\n", clr_idx, NR, r, c, $1, p, $4, o, $3, r, $2, $1, $4, $3}' "$TMP_RESULTS" | \
-            fzf --multi --exact --cycle --tiebreak=index --bind "tab:toggle,alt-a:toggle-all,insert:select-all,delete:deselect-all" --delimiter="::" --with-nth=1 --height=100% --layout=reverse --border --ansi \
+            fzf --multi --exact --cycle --tiebreak=index --expect=ctrl-d,ctrl-x \
+                --bind "tab:toggle,alt-a:toggle-all,insert:select-all,delete:deselect-all" --delimiter="::" --with-nth=1 --height=100% --layout=reverse --border --ansi \
                 --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \
+                --header="$s_header" \
                 $FZF_COLOR_OPTS \
                 --info=inline-right --prompt="🎵 Select for \"$QUERY\" > ")
         
+        [ -z "$raw_sel" ] && { echo -e "${C_PINK}👋 Selection cancelled for \"$QUERY\"${C_RESET}"; rm -f "$TMP_RESULTS"; return 1; }
+
+        local key=$(head -n 1 <<< "$raw_sel")
+        local selection=$(tail -n +2 <<< "$raw_sel")
+
         if [ -z "$selection" ]; then 
             echo -e "${C_PINK}👋 Selection cancelled for \"$QUERY\"${C_RESET}"
-            rm "$TMP_RESULTS"
+            rm -f "$TMP_RESULTS"
             return 1 # Skip to next query
+        fi
+
+        if [ "$key" == "ctrl-d" ] || [ "$key" == "ctrl-x" ]; then
+            while IFS= read -r line; do
+                [ -z "$line" ] && continue
+                local duration="${line##*::}"
+                local tmp1="${line%::*}"
+                local artist="${tmp1##*::}"
+                local tmp2="${tmp1%::*}"
+                local title="${tmp2##*::}"
+                local tmp3="${tmp2%::*}"
+                local url="${tmp3##*::}"
+                add_to_auto_blacklist "$url" "$title"
+                echo -e "${C_PINK}👎 Disliked & Blacklisted from Auto Mode:${C_RESET} ${C_CYAN}${title:-$url}${C_RESET}"
+            done <<< "$selection"
+            rm -f "$TMP_RESULTS"
+            return 1
         fi
         
         while IFS= read -r line; do
