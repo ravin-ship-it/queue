@@ -387,11 +387,24 @@ cmd_remove() {
 cmd_move() {
     local from=$1
     local to=$2
-    [ -z "$from" ] || [ -z "$to" ] && return
+    if [ -z "$from" ] || [ -z "$to" ]; then
+        echo -e "${C_PINK}⚠️ Usage: ${C_WHITE}q -mv <from> <to>${C_RESET}"
+        return
+    fi
 
     # Fetch track info for pretty logging
     local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET")
     local count=$(echo "$track_info" | jq -s -r 'map(select(.event == null)) | .[0].data | length // 0' 2>/dev/null); : "${count:=0}"
+
+    if [ "$count" -eq 0 ]; then
+        echo -e "${C_ORANGE}⚠️ Queue is empty.${C_RESET}"
+        return
+    fi
+
+    if ! [[ "$from" =~ ^[0-9]+$ ]] || ! [[ "$to" =~ ^[0-9]+$ ]]; then
+        echo -e "${C_PINK}🚫 Indices must be numbers. Max Track ${C_WHITE}[${C_ORANGE}${count}${C_WHITE}]${C_RESET}"
+        return
+    fi
 
     if [ "$from" -gt "$count" ] || [ "$from" -lt 1 ]; then
         echo -e "${C_PINK}🚫 Track ${C_WHITE}[${C_ORANGE}${from}${C_WHITE}] ${C_PINK}does not exist. Max Track ${C_WHITE}[${C_ORANGE}${count}${C_WHITE}]${C_RESET}"
@@ -401,6 +414,11 @@ cmd_move() {
     # Cap 'to' index at bounds
     [ "$to" -gt "$count" ] && to="$count"
     [ "$to" -lt 1 ] && to=1
+
+    if [ "$from" -eq "$to" ]; then
+        echo -e "${C_PINK}⚠️ Track ${C_WHITE}[${C_ORANGE}${from}${C_WHITE}] ${C_PINK}is already at destination ${C_WHITE}[${C_ORANGE}${to}${C_WHITE}]${C_PINK}.${C_RESET}"
+        return
+    fi
 
     local target_idx=$((to - 1))
     # MPV adjustment: if moving forward, target index must be 'to' to land at 'to'
@@ -422,15 +440,43 @@ cmd_move() {
 cmd_swap() {
     local p1=$1
     local p2=$2
-    [ -z "$p1" ] || [ -z "$p2" ] && return
-    [ "$p1" -eq "$p2" ] && return
+    if [ -z "$p1" ] || [ -z "$p2" ]; then
+        echo -e "${C_PINK}⚠️ Usage: ${C_WHITE}q -sw <index1> <index2>${C_RESET}"
+        return
+    fi
 
     # Validate bounds
     local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET")
     local count=$(echo "$track_info" | jq -s -r 'map(select(.event == null)) | .[0].data | length // 0' 2>/dev/null); : "${count:=0}"
 
-    if [ "$p1" -gt "$count" ] || [ "$p1" -lt 1 ] || [ "$p2" -gt "$count" ] || [ "$p2" -lt 1 ]; then
-        echo -e "${C_PINK}🚫 Invalid indices for swap${C_RESET}"
+    if [ "$count" -eq 0 ]; then
+        echo -e "${C_ORANGE}⚠️ Queue is empty.${C_RESET}"
+        return
+    fi
+
+    if ! [[ "$p1" =~ ^[0-9]+$ ]] || ! [[ "$p2" =~ ^[0-9]+$ ]]; then
+        echo -e "${C_PINK}🚫 Indices must be numbers. Max Track ${C_WHITE}[${C_ORANGE}${count}${C_WHITE}]${C_RESET}"
+        return
+    fi
+
+    if [ "$p1" -eq "$p2" ]; then
+        echo -e "${C_PINK}⚠️ Indices are identical ${C_WHITE}[${C_ORANGE}${p1}${C_WHITE}]${C_PINK}. Nothing to swap.${C_RESET}"
+        return
+    fi
+
+    local p1_invalid=false
+    local p2_invalid=false
+    if [ "$p1" -gt "$count" ] || [ "$p1" -lt 1 ]; then p1_invalid=true; fi
+    if [ "$p2" -gt "$count" ] || [ "$p2" -lt 1 ]; then p2_invalid=true; fi
+
+    if [ "$p1_invalid" = true ] && [ "$p2_invalid" = true ]; then
+        echo -e "${C_PINK}🚫 Tracks ${C_WHITE}[${C_ORANGE}${p1}${C_WHITE}]${C_PINK} and ${C_WHITE}[${C_ORANGE}${p2}${C_WHITE}] ${C_PINK}do not exist. Max Track ${C_WHITE}[${C_ORANGE}${count}${C_WHITE}]${C_RESET}"
+        return
+    elif [ "$p1_invalid" = true ]; then
+        echo -e "${C_PINK}🚫 Track ${C_WHITE}[${C_ORANGE}${p1}${C_WHITE}] ${C_PINK}does not exist. Max Track ${C_WHITE}[${C_ORANGE}${count}${C_WHITE}]${C_RESET}"
+        return
+    elif [ "$p2_invalid" = true ]; then
+        echo -e "${C_PINK}🚫 Track ${C_WHITE}[${C_ORANGE}${p2}${C_WHITE}] ${C_PINK}does not exist. Max Track ${C_WHITE}[${C_ORANGE}${count}${C_WHITE}]${C_RESET}"
         return
     fi
 

@@ -218,19 +218,39 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
         -lp) cmd_loop "playlist"; shift ;; 
         -mv) 
             shift
+            did_move=false
             while [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]] && [[ ! "$1" =~ $SMART_CMDS ]] && \
                   [[ -n "$2" ]] && [[ ! "$2" =~ ^- ]] && [[ ! "$2" =~ $SMART_CMDS ]]; do
                 cmd_move "$1" "$2"
+                did_move=true
                 shift 2
             done
+            if [ "$did_move" = false ]; then
+                if [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]] && [[ ! "$1" =~ $SMART_CMDS ]]; then
+                    cmd_move "$1" "$2"
+                    shift
+                else
+                    cmd_move "" ""
+                fi
+            fi
             ;; 
         -sw|-swap)
             shift
+            did_swap=false
             while [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]] && [[ ! "$1" =~ $SMART_CMDS ]] && \
                   [[ -n "$2" ]] && [[ ! "$2" =~ ^- ]] && [[ ! "$2" =~ $SMART_CMDS ]]; do
                 cmd_swap "$1" "$2"
+                did_swap=true
                 shift 2
             done
+            if [ "$did_swap" = false ]; then
+                if [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]] && [[ ! "$1" =~ $SMART_CMDS ]]; then
+                    cmd_swap "$1" "$2"
+                    shift
+                else
+                    cmd_swap "" ""
+                fi
+            fi
             ;;
         -rname) 
             shift
