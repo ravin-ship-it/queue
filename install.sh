@@ -195,8 +195,12 @@ if [ -n "$SHELL_RC" ]; then
         echo "export PATH=\"\$PATH:\$HOME/.local/bin:$DEST_DIR\"" >> "$SHELL_RC"
         echo "export XCURSOR_THEME=\"\${XCURSOR_THEME:-Adwaita}\"" >> "$SHELL_RC"
         echo "export XCURSOR_SIZE=\"\${XCURSOR_SIZE:-36}\"" >> "$SHELL_RC"
+        echo "export GALLIUM_DRIVER=\"\${GALLIUM_DRIVER:-d3d12}\"" >> "$SHELL_RC"
+        echo "if [ -d \"/usr/lib/wsl/lib\" ] && [[ \":\$LD_LIBRARY_PATH:\" != *\":/usr/lib/wsl/lib:\"* ]]; then" >> "$SHELL_RC"
+        echo "    export LD_LIBRARY_PATH=\"/usr/lib/wsl/lib\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}\"" >> "$SHELL_RC"
+        echo "fi" >> "$SHELL_RC"
         echo "# --- Q PATH END ---" >> "$SHELL_RC"
-        echo -e "${GREEN}✅ Added $DEST_DIR, ~/.local/bin, and XCURSOR settings to $SHELL_RC${NC}"
+        echo -e "${GREEN}✅ Added $DEST_DIR, ~/.local/bin, and GPU acceleration settings to $SHELL_RC${NC}"
     fi
 
     # MPV Wrapper Marker

@@ -91,12 +91,18 @@ ensure_mpv_running() {
             initial_pl=("--playlist=$pl_arg")
         fi
 
-        # Ensure graphical display connection is available for on-demand video window
+        # Ensure graphical display connection & GPU acceleration (WSL2 D3D12 / Wayland / X11)
         if [ -z "$DISPLAY" ] && [ -z "$WAYLAND_DISPLAY" ]; then
             if [ -d "/mnt/wslg" ] || [ -S "/tmp/.X11-unix/X0" ]; then
                 export DISPLAY=":0"
                 export WAYLAND_DISPLAY="wayland-0"
             fi
+        fi
+
+        # Enable host GPU acceleration via Microsoft D3D12 in WSL2
+        export GALLIUM_DRIVER="${GALLIUM_DRIVER:-d3d12}"
+        if [ -d "/usr/lib/wsl/lib" ] && [[ ":$LD_LIBRARY_PATH:" != *":/usr/lib/wsl/lib:"* ]]; then
+            export LD_LIBRARY_PATH="/usr/lib/wsl/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
         fi
 
         # Ensure normal cursor size in WSLg / X11 (prevent tiny cursor on high-DPI displays)

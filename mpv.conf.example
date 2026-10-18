@@ -36,6 +36,16 @@ auto-window-resize=no
 keepaspect-window=no
 cursor-autohide=1000
 
+# GPU Hardware Acceleration & 60fps Smoothness Optimization
+vo=gpu
+gpu-context=wayland,auto
+profile=fast
+hwdec=auto-safe
+opengl-pbo=yes
+swapchain-depth=3
+video-sync=audio
+vd-lavc-threads=0
+
 # Headless Audio
 vo=null
 video=no
