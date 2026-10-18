@@ -1,4 +1,4 @@
-QUEUE_VERSION="1.0.0"
+QUEUE_VERSION="1.1.0"
 CACHE_FILE="$HOME/.cache/mpv/titles.txt"
 LAST_PLAYLIST_FILE="$HOME/.cache/mpv/last_playlist.txt"
 PLAYLIST_DIR="$HOME/.local/share/mpv/playlists"
