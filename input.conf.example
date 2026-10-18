@@ -1,9 +1,12 @@
 # MPV Keybindings for Queue Video Mode
 F11 cycle fullscreen
 f cycle fullscreen
-q set vid no ; set vo null ; set force-window no
-CLOSE_WIN set vid no ; set vo null ; set force-window no
-Q quit
+q script-message safe-hide-video
+Q script-message safe-hide-video
+CLOSE_WIN script-message safe-hide-video
+Ctrl+w script-message safe-hide-video
+Ctrl+W script-message safe-hide-video
+Alt+F4 script-message safe-hide-video
 ESC set fullscreen no
 > playlist-next
 < playlist-prev

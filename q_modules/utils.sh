@@ -121,13 +121,20 @@ ensure_mpv_running() {
             input_conf_opt=("--input-conf=$HOME/.config/mpv/input.conf")
         fi
 
+        local script_opt=()
+        if [ -f "$HOME/.config/mpv/scripts/queue_video.lua" ]; then
+            script_opt=("--script=$HOME/.config/mpv/scripts/queue_video.lua")
+        elif [ -f "$SCRIPT_DIR/scripts/queue_video.lua" ]; then
+            script_opt=("--script=$SCRIPT_DIR/scripts/queue_video.lua")
+        fi
+
         if command -v setsid >/dev/null 2>&1; then
             setsid mpv --idle --keep-open=yes --no-terminal --vo=null \
-                "${input_conf_opt[@]}" \
+                "${input_conf_opt[@]}" "${script_opt[@]}" \
                 --input-ipc-server="$SOCKET" "${initial_pl[@]}" </dev/null >/dev/null 2>&1 &
         else
             nohup mpv --idle --keep-open=yes --no-terminal --vo=null \
-                "${input_conf_opt[@]}" \
+                "${input_conf_opt[@]}" "${script_opt[@]}" \
                 --input-ipc-server="$SOCKET" "${initial_pl[@]}" </dev/null >/dev/null 2>&1 &
         fi
         disown

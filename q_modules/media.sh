@@ -667,7 +667,7 @@ cmd_video_toggle() {
     # --- TOGGLE OFF: If video window is currently open and no target specified ---
     if is_video_window_open && [ -z "$target_idx" ]; then
         echo -e "${C_CYAN}📺 Hiding desktop video window...${C_RESET}"
-        echo -e '{"command":["set_property","vid","no"]}\n{"command":["set_property","vo","null"]}\n{"command":["set_property","force-window","no"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
+        echo -e '{"command":["set_property","vid","no"]}\n{"command":["set_property","force-window","no"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
         echo -e "🎧 ${C_PINK}Returned to background audio mode (video hidden)${C_RESET}"
         return 0
     fi
@@ -723,8 +723,13 @@ cmd_video_toggle() {
     fi
     echo '{"command":["keybind","F11","cycle fullscreen"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
     echo '{"command":["keybind","f","cycle fullscreen"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo '{"command":["keybind","CLOSE_WIN","set vid no ; set vo null ; set force-window no"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo '{"command":["keybind","q","set vid no ; set vo null ; set force-window no"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo '{"command":["keybind","CLOSE_WIN","script-message safe-hide-video"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo '{"command":["keybind","q","script-message safe-hide-video"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo '{"command":["keybind","Q","script-message safe-hide-video"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo '{"command":["keybind","Ctrl+w","script-message safe-hide-video"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo '{"command":["keybind","Ctrl+W","script-message safe-hide-video"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo '{"command":["keybind","Alt+F4","script-message safe-hide-video"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo '{"command":["keybind","ESC","set fullscreen no"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
     echo '{"command":["keybind","Ctrl+s","cycle shuffle"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
     echo '{"command":["keybind","r","playlist-shuffle"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
 

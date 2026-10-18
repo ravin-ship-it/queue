@@ -140,6 +140,13 @@ if [ -f "input.conf.example" ]; then
     echo -e "${GREEN}✅ Installed fresh input.conf (quality & window-scale hotkeys)${NC}"
 fi
 
+# --- MPV Helper Scripts ---
+if [ -d "scripts" ]; then
+    mkdir -p "$CONF_DIR/scripts"
+    cp -rf scripts/* "$CONF_DIR/scripts/"
+    echo -e "${GREEN}✅ Installed helper scripts to $CONF_DIR/scripts/${NC}"
+fi
+
 # --- High-DPI Cursor Scaling (WSLg / Linux) ---
 mkdir -p "$HOME/.icons/default"
 cat << 'EOF' > "$HOME/.icons/default/index.theme"
