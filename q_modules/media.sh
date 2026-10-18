@@ -648,14 +648,15 @@ is_video_window_open() {
     [ ! -S "$SOCKET" ] && return 1
 
     local raw
-    raw=$(echo -e '{"command":["get_property","vo"]}\n{"command":["get_property","vid"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" 2>/dev/null)
+    raw=$(echo -e '{"command":["get_property","vo"]}\n{"command":["get_property","vid"]}\n{"command":["get_property","window-minimized"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" 2>/dev/null)
     [ -z "$raw" ] && return 1
 
-    local vo_name vid_val
+    local vo_name vid_val min_val
     vo_name=$(echo "$raw" | jq -s -r 'map(select(.event == null)) | .[0].data[0].name // "null"' 2>/dev/null)
     vid_val=$(echo "$raw" | jq -s -r 'map(select(.event == null)) | .[1].data // false' 2>/dev/null)
+    min_val=$(echo "$raw" | jq -s -r 'map(select(.event == null)) | .[2].data // false' 2>/dev/null)
 
-    if [ "$vo_name" != "null" ] && [ -n "$vo_name" ] && [ "$vid_val" != "false" ] && [ "$vid_val" != "no" ]; then
+    if [ "$vo_name" != "null" ] && [ -n "$vo_name" ] && [ "$vid_val" != "false" ] && [ "$vid_val" != "no" ] && [ "$min_val" != "true" ]; then
         return 0
     fi
     return 1
@@ -667,7 +668,7 @@ cmd_video_toggle() {
     # --- TOGGLE OFF: If video window is currently open and no target specified ---
     if is_video_window_open && [ -z "$target_idx" ]; then
         echo -e "${C_CYAN}📺 Hiding desktop video window...${C_RESET}"
-        echo -e '{"command":["set_property","vid","no"]}\n{"command":["set_property","force-window","no"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
+        echo -e '{"command":["script-message","safe-hide-video"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
         echo -e "🎧 ${C_PINK}Returned to background audio mode (video hidden)${C_RESET}"
         return 0
     fi
@@ -795,7 +796,7 @@ cmd_video_toggle() {
     # 12. video=auto & vid=auto -> Demux & render video stream
     # 13. force-window=yes -> Keep window persistent across playlist transitions
     # 14. pause=false -> Resume/continue playback
-    echo -e "{\"command\":[\"set_property\",\"autofit\",\"$target_autofit\"]}\n{\"command\":[\"set_property\",\"window-scale\",$target_scale]}\n{\"command\":[\"set_property\",\"geometry\",\"50%:50%\"]}\n{\"command\":[\"set_property\",\"auto-window-resize\",false]}\n{\"command\":[\"set_property\",\"keepaspect-window\",false]}\n{\"command\":[\"apply-profile\",\"fast\"]}\n{\"command\":[\"set_property\",\"hwdec\",\"auto-safe\"]}\n{\"command\":[\"set_property\",\"opengl-pbo\",true]}\n{\"command\":[\"set_property\",\"swapchain-depth\",3]}\n{\"command\":[\"set_property\",\"video-sync\",\"audio\"]}\n{\"command\":[\"set_property\",\"gpu-context\",\"$gpu_ctx\"]}\n{\"command\":[\"set_property\",\"vo\",\"$vo_opt\"]}\n{\"command\":[\"set_property\",\"video\",\"auto\"]}\n{\"command\":[\"set_property\",\"vid\",\"auto\"]}\n{\"command\":[\"set_property\",\"fullscreen\",$target_fs]}\n{\"command\":[\"set_property\",\"force-window\",\"yes\"]}\n{\"command\":[\"set_property\",\"pause\",false]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo -e "{\"command\":[\"set_property\",\"window-minimized\",false]}\n{\"command\":[\"set_property\",\"autofit\",\"$target_autofit\"]}\n{\"command\":[\"set_property\",\"window-scale\",$target_scale]}\n{\"command\":[\"set_property\",\"geometry\",\"50%:50%\"]}\n{\"command\":[\"set_property\",\"auto-window-resize\",false]}\n{\"command\":[\"set_property\",\"keepaspect-window\",false]}\n{\"command\":[\"apply-profile\",\"fast\"]}\n{\"command\":[\"set_property\",\"hwdec\",\"auto-safe\"]}\n{\"command\":[\"set_property\",\"opengl-pbo\",true]}\n{\"command\":[\"set_property\",\"swapchain-depth\",3]}\n{\"command\":[\"set_property\",\"video-sync\",\"audio\"]}\n{\"command\":[\"set_property\",\"gpu-context\",\"$gpu_ctx\"]}\n{\"command\":[\"set_property\",\"vo\",\"$vo_opt\"]}\n{\"command\":[\"set_property\",\"video\",\"auto\"]}\n{\"command\":[\"set_property\",\"vid\",\"auto\"]}\n{\"command\":[\"set_property\",\"fullscreen\",$target_fs]}\n{\"command\":[\"set_property\",\"force-window\",\"yes\"]}\n{\"command\":[\"set_property\",\"pause\",false]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
 
     # Fetch track title and format notification
     local title
