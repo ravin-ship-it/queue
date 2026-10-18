@@ -99,11 +99,15 @@ ensure_mpv_running() {
             fi
         fi
 
-        # Ensure normal cursor size in WSLg / X11
+        # Ensure normal cursor size in WSLg / X11 (prevent tiny cursor on high-DPI displays)
         export XCURSOR_THEME="${XCURSOR_THEME:-Adwaita}"
-        export XCURSOR_SIZE="${XCURSOR_SIZE:-24}"
-        if [ -n "$DISPLAY" ] && command -v xrdb >/dev/null 2>&1 && [ -f "$HOME/.Xresources" ]; then
-            xrdb -merge "$HOME/.Xresources" 2>/dev/null
+        export XCURSOR_SIZE="${XCURSOR_SIZE:-36}"
+        if [ -n "$DISPLAY" ] && command -v xrdb >/dev/null 2>&1; then
+            if [ -f "$HOME/.Xresources" ]; then
+                xrdb -merge "$HOME/.Xresources" 2>/dev/null
+            else
+                echo -e "Xcursor.theme: $XCURSOR_THEME\nXcursor.size: $XCURSOR_SIZE" | xrdb -merge 2>/dev/null
+            fi
         fi
 
         local input_conf_opt=()

@@ -1,0 +1,29 @@
+# MPV Keybindings for Queue Video Mode
+F11 cycle fullscreen
+f cycle fullscreen
+q set vid no ; set vo null ; set force-window no
+CLOSE_WIN set vid no ; set vo null ; set force-window no
+Q quit
+ESC set fullscreen no
+> playlist-next
+< playlist-prev
+SPACE cycle pause
+
+# Window Sizing & Scaling (Quick Resizing)
+w cycle_values window-scale 0.35 0.5 0.75 1.0 ; show-text "Window Scale: ${window-scale}" 1500
+W cycle_values window-scale 1.0 0.75 0.5 0.35 ; show-text "Window Scale: ${window-scale}" 1500
++ add window-scale 0.05 ; show-text "Window Scale: ${window-scale}" 1500
+= add window-scale 0.05 ; show-text "Window Scale: ${window-scale}" 1500
+- add window-scale -0.05 ; show-text "Window Scale: ${window-scale}" 1500
+_ add window-scale -0.05 ; show-text "Window Scale: ${window-scale}" 1500
+Ctrl+WHEEL_UP add window-scale 0.05 ; show-text "Window Scale: ${window-scale}" 1500
+Ctrl+WHEEL_DOWN add window-scale -0.05 ; show-text "Window Scale: ${window-scale}" 1500
+
+# Quick Quality / Resolution Switchers
+1 set ytdl-format "bestvideo[height<=720][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=720][format_note!*=Premium]+bestaudio/best[height<=720]" ; playlist-play-index current ; show-text "Quality: 720p HD (60fps)" 2500
+2 set ytdl-format "bestvideo[height<=1080][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=1080][format_note!*=Premium]+bestaudio/best" ; playlist-play-index current ; show-text "Quality: 1080p Full HD (60fps)" 2500
+3 set ytdl-format "bestvideo[height<=1440][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=1440][format_note!*=Premium]+bestaudio/best" ; playlist-play-index current ; show-text "Quality: 1440p 2K QHD (60fps)" 2500
+4 set ytdl-format "bestvideo[format_note!*=Premium]+bestaudio/best" ; playlist-play-index current ; show-text "Quality: Max / 4K UHD" 2500
+
+Ctrl+s cycle shuffle
+r playlist-shuffle

@@ -131,6 +131,33 @@ fi
 cp mpv.conf.example "$CONF_DIR/mpv.conf"
 echo -e "${GREEN}✅ Installed fresh mpv.conf${NC}"
 
+# --- MPV Input Keybindings ---
+if [ -f "input.conf.example" ]; then
+    if [ -f "$CONF_DIR/input.conf" ]; then
+        cp "$CONF_DIR/input.conf" "$CONF_DIR/input.conf.bak"
+    fi
+    cp input.conf.example "$CONF_DIR/input.conf"
+    echo -e "${GREEN}✅ Installed fresh input.conf (quality & window-scale hotkeys)${NC}"
+fi
+
+# --- High-DPI Cursor Scaling (WSLg / Linux) ---
+mkdir -p "$HOME/.icons/default"
+cat << 'EOF' > "$HOME/.icons/default/index.theme"
+[Icon Theme]
+Name=Default
+Comment=Default Cursor Theme
+Inherits=Adwaita
+Size=36
+EOF
+cat << 'EOF' > "$HOME/.Xresources"
+Xcursor.theme: Adwaita
+Xcursor.size: 36
+EOF
+if [ -n "$DISPLAY" ] && command -v xrdb >/dev/null 2>&1; then
+    xrdb -merge "$HOME/.Xresources" 2>/dev/null || true
+fi
+echo -e "${GREEN}✅ High-DPI cursor scaling configured (size 36)${NC}"
+
 # --- YT-DLP Configuration ---
 YTDLP_CONF_DIR="$HOME/.config/yt-dlp"
 mkdir -p "$YTDLP_CONF_DIR"
@@ -162,12 +189,14 @@ if [ -n "$SHELL_RC" ]; then
     # Ensure the RC file exists before grepping
     [ ! -f "$SHELL_RC" ] && touch "$SHELL_RC"
 
-    # PATH Marker
+    # PATH & Environment Marker
     if ! grep -q "# --- Q PATH START ---" "$SHELL_RC" 2>/dev/null; then
         echo -e "\n# --- Q PATH START ---" >> "$SHELL_RC"
         echo "export PATH=\"\$PATH:\$HOME/.local/bin:$DEST_DIR\"" >> "$SHELL_RC"
+        echo "export XCURSOR_THEME=\"\${XCURSOR_THEME:-Adwaita}\"" >> "$SHELL_RC"
+        echo "export XCURSOR_SIZE=\"\${XCURSOR_SIZE:-36}\"" >> "$SHELL_RC"
         echo "# --- Q PATH END ---" >> "$SHELL_RC"
-        echo -e "${GREEN}✅ Added $DEST_DIR and ~/.local/bin to PATH in $SHELL_RC${NC}"
+        echo -e "${GREEN}✅ Added $DEST_DIR, ~/.local/bin, and XCURSOR settings to $SHELL_RC${NC}"
     fi
 
     # MPV Wrapper Marker

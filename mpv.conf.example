@@ -29,6 +29,13 @@ ytdl-format=bestvideo[height<=1440][fps>=50][format_note!*=Premium]+bestaudio/be
 script-opts=ytdl_hook-ytdl_path=yt-dlp
 tls-verify=no
 
+# Desktop Video & Window Behavior
+autofit=50%x50%
+geometry=50%:50%
+auto-window-resize=no
+keepaspect-window=no
+cursor-autohide=1000
+
 # Headless Audio
 vo=null
 video=no

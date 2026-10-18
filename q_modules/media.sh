@@ -685,9 +685,13 @@ cmd_video_toggle() {
 
     # Fix tiny cursor on Windows 11 high-DPI displays in WSLg
     export XCURSOR_THEME="${XCURSOR_THEME:-Adwaita}"
-    export XCURSOR_SIZE="${XCURSOR_SIZE:-24}"
-    if [ -n "$DISPLAY" ] && command -v xrdb >/dev/null 2>&1 && [ -f "$HOME/.Xresources" ]; then
-        xrdb -merge "$HOME/.Xresources" 2>/dev/null
+    export XCURSOR_SIZE="${XCURSOR_SIZE:-36}"
+    if [ -n "$DISPLAY" ] && command -v xrdb >/dev/null 2>&1; then
+        if [ -f "$HOME/.Xresources" ]; then
+            xrdb -merge "$HOME/.Xresources" 2>/dev/null
+        else
+            echo -e "Xcursor.theme: $XCURSOR_THEME\nXcursor.size: $XCURSOR_SIZE" | xrdb -merge 2>/dev/null
+        fi
     fi
 
     ensure_mpv_running
@@ -707,19 +711,33 @@ cmd_video_toggle() {
     if [ -f "$HOME/.config/mpv/input.conf" ]; then
         echo "{\"command\":[\"load-input-conf\",\"$HOME/.config/mpv/input.conf\"]}" | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
     fi
-    echo '{"command":["keybind","F11","cycle fullscreen"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
-    echo '{"command":["keybind","f","cycle fullscreen"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
-    echo '{"command":["keybind","CLOSE_WIN","set vid no ; set vo null ; set force-window no"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
-    echo '{"command":["keybind","q","set vid no ; set vo null ; set force-window no"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
-    echo '{"command":["keybind","Ctrl+s","cycle shuffle"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
-    echo '{"command":["keybind","r","playlist-shuffle"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
+    echo '{"command":["keybind","F11","cycle fullscreen"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo '{"command":["keybind","f","cycle fullscreen"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo '{"command":["keybind","CLOSE_WIN","set vid no ; set vo null ; set force-window no"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo '{"command":["keybind","q","set vid no ; set vo null ; set force-window no"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo '{"command":["keybind","Ctrl+s","cycle shuffle"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo '{"command":["keybind","r","playlist-shuffle"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+
+    # In-Window Scaling & Sizing Hotkeys
+    echo '{"command":["keybind","w","cycle_values window-scale 0.35 0.5 0.75 1.0 ; show-text \"Window Scale: ${window-scale}\" 1500"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo '{"command":["keybind","W","cycle_values window-scale 1.0 0.75 0.5 0.35 ; show-text \"Window Scale: ${window-scale}\" 1500"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo '{"command":["keybind","+","add window-scale 0.05 ; show-text \"Window Scale: ${window-scale}\" 1500"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo '{"command":["keybind","=","add window-scale 0.05 ; show-text \"Window Scale: ${window-scale}\" 1500"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo '{"command":["keybind","-","add window-scale -0.05 ; show-text \"Window Scale: ${window-scale}\" 1500"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo '{"command":["keybind","_","add window-scale -0.05 ; show-text \"Window Scale: ${window-scale}\" 1500"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo '{"command":["keybind","Ctrl+WHEEL_UP","add window-scale 0.05 ; show-text \"Window Scale: ${window-scale}\" 1500"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo '{"command":["keybind","Ctrl+WHEEL_DOWN","add window-scale -0.05 ; show-text \"Window Scale: ${window-scale}\" 1500"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
 
     echo '{"command":["keybind","1","set ytdl-format \"bestvideo[height<=720][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=720][format_note!*=Premium]+bestaudio/best[height<=720]\" ; playlist-play-index current ; show-text \"Quality: 720p HD (60fps)\" 2500"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
     echo '{"command":["keybind","2","set ytdl-format \"bestvideo[height<=1080][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=1080][format_note!*=Premium]+bestaudio/best\" ; playlist-play-index current ; show-text \"Quality: 1080p Full HD (60fps)\" 2500"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
     echo '{"command":["keybind","3","set ytdl-format \"bestvideo[height<=1440][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=1440][format_note!*=Premium]+bestaudio/best\" ; playlist-play-index current ; show-text \"Quality: 1440p 2K QHD (60fps)\" 2500"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
     echo '{"command":["keybind","4","set ytdl-format \"bestvideo[format_note!*=Premium]+bestaudio/best\" ; playlist-play-index current ; show-text \"Quality: Max / 4K UHD\" 2500"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
 
-    # If target index or URL is passed
+    local target_autofit="50%x50%"
+    local target_scale="0.5"
+    local target_fs="false"
+
+    # If target index, size preset, or URL is passed
     if [ -n "$target_idx" ]; then
         if [[ "$target_idx" =~ ^http.* ]]; then
             # Direct URL passed: queue and play it
@@ -733,6 +751,13 @@ cmd_video_toggle() {
                 return 1
             fi
             echo "{\"command\":[\"set_property\",\"playlist-pos\",$((target_idx - 1))]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+        elif [[ "$target_idx" =~ ^(small|sm|35|med|medium|50|large|lg|75|full|fs|100)$ ]]; then
+            case "$target_idx" in
+                small|sm|35) target_autofit="35%x35%"; target_scale="0.35" ;;
+                med|medium|50) target_autofit="50%x50%"; target_scale="0.50" ;;
+                large|lg|75) target_autofit="75%x75%"; target_scale="0.75" ;;
+                full|fs|100) target_fs="true" ;;
+            esac
         fi
     fi
 
@@ -741,19 +766,22 @@ cmd_video_toggle() {
     echo "{\"command\":[\"set_property\",\"ytdl-format\",\"$smart_fmt\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
 
     # Enable video window directly on the active MPV player:
-    # 1. auto-window-resize=false -> Prevents window size from changing when track changes
-    # 2. keepaspect-window=false -> Allows dragging and resizing window freely to any dimensions
-    # 3. vo=$vo_opt -> X11 driver in WSLg, gpu on native
-    # 4. video=auto & vid=auto -> Demux & render video stream
-    # 5. force-window=yes -> Keep window persistent across playlist transitions
-    # 6. pause=false -> Resume/continue playback
-    echo -e "{\"command\":[\"set_property\",\"auto-window-resize\",false]}\n{\"command\":[\"set_property\",\"keepaspect-window\",false]}\n{\"command\":[\"set_property\",\"vo\",\"$vo_opt\"]}\n{\"command\":[\"set_property\",\"video\",\"auto\"]}\n{\"command\":[\"set_property\",\"vid\",\"auto\"]}\n{\"command\":[\"set_property\",\"fullscreen\",false]}\n{\"command\":[\"set_property\",\"force-window\",\"yes\"]}\n{\"command\":[\"set_property\",\"pause\",false]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    # 1. autofit=$target_autofit -> Clean small/medium window, never covers entire screen
+    # 2. window-scale=$target_scale -> Direct initial window scale
+    # 3. geometry=50%:50% -> Centered cleanly on the screen
+    # 4. auto-window-resize=false -> Preserves user manual resize across track changes
+    # 5. keepaspect-window=false -> Allows freely dragging borders to any dimension
+    # 6. vo=$vo_opt -> X11 driver in WSLg, gpu on native
+    # 7. video=auto & vid=auto -> Demux & render video stream
+    # 8. force-window=yes -> Keep window persistent across playlist transitions
+    # 9. pause=false -> Resume/continue playback
+    echo -e "{\"command\":[\"set_property\",\"autofit\",\"$target_autofit\"]}\n{\"command\":[\"set_property\",\"window-scale\",$target_scale]}\n{\"command\":[\"set_property\",\"geometry\",\"50%:50%\"]}\n{\"command\":[\"set_property\",\"auto-window-resize\",false]}\n{\"command\":[\"set_property\",\"keepaspect-window\",false]}\n{\"command\":[\"set_property\",\"vo\",\"$vo_opt\"]}\n{\"command\":[\"set_property\",\"video\",\"auto\"]}\n{\"command\":[\"set_property\",\"vid\",\"auto\"]}\n{\"command\":[\"set_property\",\"fullscreen\",$target_fs]}\n{\"command\":[\"set_property\",\"force-window\",\"yes\"]}\n{\"command\":[\"set_property\",\"pause\",false]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
 
     # Fetch track title and format notification
     local title
     title=$(echo '{"command":["get_property","media-title"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // "Queue Video"')
     echo -e "📺 ${C_PINK}Desktop Video Window Active:${C_RESET} ${C_CYAN}${title}${C_RESET}"
-    echo -e "${C_GRAY}💡 Resizable window. Press ${C_WHITE}F11${C_GRAY} fullscreen, ${C_WHITE}1${C_GRAY}-${C_WHITE}4${C_GRAY} switch quality (720p/1080p60/2K/4K), ${C_WHITE}q${C_GRAY} or 'q -vid' to return to audio.${C_RESET}"
+    echo -e "${C_GRAY}💡 Resizable window. Press ${C_WHITE}w${C_GRAY} (cycle small/med/large), ${C_WHITE}+${C_GRAY}/${C_WHITE}-${C_GRAY} scale, ${C_WHITE}F11${C_GRAY} fullscreen, ${C_WHITE}1${C_GRAY}-${C_WHITE}4${C_GRAY} quality, ${C_WHITE}q${C_GRAY} return to audio.${C_RESET}"
 }
 
 cmd_resolution() {
