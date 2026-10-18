@@ -83,7 +83,7 @@ if [ ! -t 0 ]; then
              if is_media_file "$target_path"; then
                  set -- "$@" "$target_path"
              fi
-        elif [[ "$line" =~ ^http ]]; then
+        elif [[ "$line" =~ ^http ]] || [[ "$line" =~ ^spotify: ]]; then
              set -- "$@" "$(echo "$line" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')"
         fi
     done
@@ -92,7 +92,7 @@ fi
 # --- Command Parsing ---
 
 PROCESSED_ANY_FLAG=false
-SMART_CMDS="^(play|pause|stop|next|prev|vol|info|list|clear|shuffle|remove|move|swap|help|save|load|auto|fx|deps|up|download|dl|d|dislike|dis|disl|rmd|undis|undislike|like)$"
+SMART_CMDS="^(play|pause|stop|next|prev|vol|info|list|clear|shuffle|remove|move|swap|help|save|load|auto|fx|deps|up|download|dl|d|dislike|dis|disl|rmd|undis|undislike|like|vid|video|watch)$"
 
 while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
     PROCESSED_ANY_FLAG=true
@@ -125,6 +125,7 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
             disl) CMD="-disl" ;;
             undis|undislike|like) CMD="-undis" ;;
             rmd) CMD="-rmd" ;;
+            vid|video|watch) CMD="-vid" ;;
         esac
     fi
 
@@ -336,6 +337,16 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
             done
             [ "$found" = false ] && cmd_info ""
             ;; 
+        -vid|-video|-watch)
+            shift
+            found=false
+            while [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]] && [[ ! "$1" =~ $SMART_CMDS ]]; do
+                cmd_video_toggle "$1"
+                found=true
+                shift
+            done
+            [ "$found" = false ] && cmd_video_toggle ""
+            ;; 
         -raw) 
             export IS_RAW=true
             show_queue
@@ -423,9 +434,10 @@ if [ -z "$1" ]; then
     [ "$MPV_RUNNING" = true ] && start_idle_monitor
 
     # Get initial status
-    mapfile -t init < <(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","shuffle"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","af"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","filename"]}\n{"command":["get_property","playlist-pos-1"]}\n{"command":["get_property","playlist"]}\n{"command":["get_property","pause"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | .[0].data // 0, .[1].data // false, .[2].data // "no", .[3].data // "no", (if .[4].data == null or .[4].data == [] then "off" else "on" end), (if .[5].data == null then true else .[5].data end), ((.[6].data // .[7].data) // "😴💤" | gsub("\n"; " ")), (.[8].data // "?"), (.[9].data // [] | map(.filename) | join(";")), (if .[10].data == true then "true" else "false" end)')    
+    mapfile -t init < <(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","shuffle"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","af"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","filename"]}\n{"command":["get_property","playlist-pos-1"]}\n{"command":["get_property","playlist"]}\n{"command":["get_property","pause"]}\n{"command":["get_property","vo"]}\n{"command":["get_property","vid"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | .[0].data // 0, .[1].data // false, .[2].data // "no", .[3].data // "no", (if .[4].data == null or .[4].data == [] then "off" else "on" end), (if .[5].data == null then true else .[5].data end), ((.[6].data // .[7].data) // "😴💤" | gsub("\n"; " ")), (.[8].data // "?"), (.[9].data // [] | map(.filename) | join(";")), (if .[10].data == true then "true" else "false" end), (if (.[11].data[0].name // "null") != "null" and (.[12].data // false) != false and (.[12].data // false) != "no" then "on" else "off" end)')    
     init_count="${init[0]}"; init_shuf="${init[1]}"; init_loop_f="${init[2]}"; init_loop_p="${init[3]}"; init_af="${init[4]}"
     init_idle="${init[5]}"; init_title="${init[6]}"; init_idx="${init[7]}"; init_fingerprint="${init[8]}"; init_paused="${init[9]}"
+    init_vid="${init[10]}"
 
     STATUS_ICONS=""
     P_DEEP_PINK="\033[38;5;197m"
@@ -438,6 +450,7 @@ if [ -z "$1" ]; then
     [ "$init_loop_p" == "inf" ] && STATUS_ICONS="${STATUS_ICONS}${P_DEEP_PINK} ⟳${P_RESET}"
     [ "$init_af" == "on" ] && STATUS_ICONS="${STATUS_ICONS}${P_DEEP_PINK} Ꭰᗡ${P_RESET}"
     [ -f "$HOME/.cache/mpv/auto_enabled" ] && STATUS_ICONS="${STATUS_ICONS}${P_DEEP_PINK} ◖∞◗${P_RESET}"
+    [ "$init_vid" == "on" ] && STATUS_ICONS="${STATUS_ICONS}${P_DEEP_PINK} <|V|>${P_RESET}"
 
     if [ "$init_count" == "0" ]; then
         PROMPT=$(printf "🎵 ${P_TEAL}Queue List ${P_YELLOW}(${P_PURPLE}Empty${P_YELLOW})${STATUS_ICONS}${P_RESET} > ")
@@ -473,7 +486,7 @@ if [ -z "$1" ]; then
         last_lf="$init_loop_f"; last_lp="$init_loop_p"; last_idle="$init_idle"; last_paused="$init_paused"
         last_radio_state="off"; [ -f "$HOME/.cache/mpv/auto_enabled" ] && last_radio_state="on"
         last_af="$init_af"; last_cols="$cols"; last_idx="$init_idx"
-        last_fingerprint="$init_fingerprint"
+        last_fingerprint="$init_fingerprint"; last_vid="$init_vid"
         socket_failures=0
         first_tick=true
 
@@ -484,7 +497,7 @@ if [ -z "$1" ]; then
         done
 
         while true; do
-            raw=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","filename"]}\n{"command":["get_property","playlist-count"]}\n{"command":["get_property","shuffle"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","playlist-pos-1"]}\n{"command":["get_property","af"]}\n{"command":["get_property","playlist"]}\n{"command":["get_property","pause"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r '
+            raw=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","filename"]}\n{"command":["get_property","playlist-count"]}\n{"command":["get_property","shuffle"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","playlist-pos-1"]}\n{"command":["get_property","af"]}\n{"command":["get_property","playlist"]}\n{"command":["get_property","pause"]}\n{"command":["get_property","vo"]}\n{"command":["get_property","vid"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r '
                 map(select(.event == null)) |
                 (if .[0].data == null then true else .[0].data end), "\u001f",
                 ((.[1].data // .[2].data) // "😴💤" | gsub("\n"; " ")), "\u001f",
@@ -495,7 +508,8 @@ if [ -z "$1" ]; then
                 (.[7].data // "?"), "\u001f",
                 (if .[8].data == null or .[8].data == [] then "off" else "on" end), "\u001f",
                 (.[9].data // [] | map(.filename) | join(";")), "\u001f",
-                (if .[10].data == true then "true" else "false" end)
+                (if .[10].data == true then "true" else "false" end), "\u001f",
+                (if (.[11].data[0].name // "null") != "null" and (.[12].data // false) != false and (.[12].data // false) != "no" then "on" else "off" end)
             ' 2>/dev/null)
             
             if [ -z "$raw" ]; then
@@ -504,7 +518,7 @@ if [ -z "$1" ]; then
                 sleep 1; continue
             fi
             socket_failures=0
-            IFS=$'\x1f' read -r idle curr_title curr_count curr_shuf curr_lf curr_lp curr_idx curr_af curr_fingerprint curr_paused <<< "$raw"
+            IFS=$'\x1f' read -r idle curr_title curr_count curr_shuf curr_lf curr_lp curr_idx curr_af curr_fingerprint curr_paused curr_vid <<< "$raw"
 
             # First tick: sync baseline from monitor's own output, skip all actions
             if [ "$first_tick" == "true" ]; then
@@ -513,7 +527,7 @@ if [ -z "$1" ]; then
                 last_cols=$(get_terminal_width); last_idx="$curr_idx"; last_count="$curr_count"
                 last_shuf="$curr_shuf"; last_lf="$curr_lf"; last_lp="$curr_lp"
                 last_radio_state="off"; [ -f "$HOME/.cache/mpv/auto_enabled" ] && last_radio_state="on"
-                last_af="$curr_af"; last_fingerprint="$curr_fingerprint"
+                last_af="$curr_af"; last_fingerprint="$curr_fingerprint"; last_vid="$curr_vid"
                 sleep 0.5; continue
             fi
 
@@ -539,13 +553,14 @@ if [ -z "$1" ]; then
             fi
 
             # 2. Update Prompt icons if modes change
-            if [ "$curr_shuf" != "$last_shuf" ] || [ "$curr_lf" != "$last_lf" ] || [ "$curr_lp" != "$last_lp" ] || [ "$curr_radio" != "$last_radio_state" ] || [ "$curr_af" != "$last_af" ] || [ "$curr_count" != "$last_count" ]; then
+            if [ "$curr_shuf" != "$last_shuf" ] || [ "$curr_lf" != "$last_lf" ] || [ "$curr_lp" != "$last_lp" ] || [ "$curr_radio" != "$last_radio_state" ] || [ "$curr_af" != "$last_af" ] || [ "$curr_vid" != "$last_vid" ] || [ "$curr_count" != "$last_count" ]; then
                 NEW_ICONS=""
                 [ "$curr_shuf" == "true" ] && NEW_ICONS="${NEW_ICONS}${P_DEEP_PINK} ><${P_RESET}"
                 [ "$curr_lf" == "inf" ] && NEW_ICONS="${NEW_ICONS}${P_DEEP_PINK} ⟳1${P_RESET}"
                 [ "$curr_lp" == "inf" ] && NEW_ICONS="${NEW_ICONS}${P_DEEP_PINK} ⟳${P_RESET}"
                 [ "$curr_af" == "on" ] && NEW_ICONS="${NEW_ICONS}${P_DEEP_PINK} Ꭰᗡ${P_RESET}"
                 [ "$curr_radio" == "on" ] && NEW_ICONS="${NEW_ICONS}${P_DEEP_PINK} ◖∞◗${P_RESET}"
+                [ "$curr_vid" == "on" ] && NEW_ICONS="${NEW_ICONS}${P_DEEP_PINK} <|V|>${P_RESET}"
 
                 if [ "$curr_count" == "0" ]; then
                     new_p=$(printf "🎵 ${P_TEAL}Queue List ${P_YELLOW}(${P_PURPLE}Empty${P_YELLOW})${NEW_ICONS}${P_RESET} > ")
@@ -573,6 +588,7 @@ if [ -z "$1" ]; then
             last_radio_state="$curr_radio"
             last_af="$curr_af"
             last_fingerprint="$curr_fingerprint"
+            last_vid="$curr_vid"
 
             sleep 0.5
         done
@@ -612,7 +628,7 @@ if [ -z "$1" ]; then
         track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
         
         if [ "$count" -gt 1 ] || [ -f "$SELECTION_MODE_FILE" ]; then
-             action=$(echo -e "  |>  Play Selected\n  ✨  New Queue from Selected & Play\n  📥  Download Selected\n  👎  Dislike Track\n  👎✖ Dislike & Remove\n  ✖  Remove from Queue\n  ✚  Save to Playlist" | \
+             action=$(echo -e "  |>  Play Selected\n  📺  Watch Video Window\n  ✨  New Queue from Selected & Play\n  📥  Download Selected\n  👎  Dislike Track\n  👎✖ Dislike & Remove\n  ✖  Remove from Queue\n  ✚  Save to Playlist" | \
                  fzf --height=100% --layout=reverse --border --info=inline-right \
                  $FZF_COLOR_OPTS \
                  --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \
@@ -620,6 +636,13 @@ if [ -z "$1" ]; then
                  --prompt="Choose > ")
              
              if [ -z "$action" ]; then exit 0; fi
+
+             # Watch Video Window
+             if echo "$action" | grep -q "Watch Video"; then
+                 first=$(echo "$selection" | head -n1)
+                 cmd_video_toggle "$first"
+                 exit 0
+             fi
 
              # 1. Download Selected
              if echo "$action" | grep -q "Download"; then
@@ -825,7 +848,7 @@ declare -a PLAYLIST_DURATIONS
 
 IS_BATCH=false
 for arg in "$@"; do
-    if [[ "$arg" =~ ^http.* ]] || [ -f "$arg" ] || [ -d "$arg" ]; then
+    if [[ "$arg" =~ ^http.* ]] || [[ "$arg" =~ ^spotify:.* ]] || [ -f "$arg" ] || [ -d "$arg" ]; then
         IS_BATCH=true
         break
     fi
@@ -861,6 +884,8 @@ if [ "$IS_BATCH" = true ]; then
             TARGET=$(realpath -- "$input"); NAME=$(basename -- "$input")
             PLAYLIST_URLS+=("$TARGET"); PLAYLIST_TITLES+=("$NAME")
             PLAYLIST_ARTISTS+=(""); PLAYLIST_DURATIONS+=("")
+        elif is_spotify_url "$input"; then
+            resolve_spotify_to_youtube "$input"
         elif [[ "$input" =~ ^http.* ]]; then
             if [[ "$input" == *"list=RD"* ]] && [[ "$input" != *"v="* ]]; then
                 if [[ "$input" =~ list=RD([^&]+) ]]; then

@@ -190,13 +190,15 @@ fetch_and_display_url_info() {
         echo -e "${C_PURPLE}${B_LINE}${C_RESET}"
 
         if [ -t 0 ] && [ -t 1 ]; then
-            echo -ne "${C_PINK}>>> Press 'd' to download, 'x' to dislike, or ENTER to return: ${C_RESET}"
+            echo -ne "${C_PINK}>>> Press 'd' to download, 'x' to dislike, 'v' for video, or ENTER to return: ${C_RESET}"
             read -r -n 1 user_key < /dev/tty 2>/dev/null || read -r -n 1 user_key
             echo ""
             if [[ "$user_key" =~ ^[dD]$ ]]; then
                 cmd_download "$clean_url"
             elif [[ "$user_key" =~ ^[xX]$ ]]; then
                 cmd_dislike "$clean_url"
+            elif [[ "$user_key" =~ ^[vV]$ ]]; then
+                cmd_video_toggle "$index"
             fi
         fi
     fi
@@ -561,10 +563,17 @@ cmd_stop() {
     pkill -u "$(whoami)" -f "auto_queue_related" >/dev/null 2>&1
     rm -f "$HOME/.cache/mpv/auto.lock" "$HOME/.cache/mpv/auto_cooldown"
 
-    # 3. Cleanup any remaining mpv instances
+    # 3. Cleanup video window if running
+    if [ -f "$HOME/.cache/mpv/video_window.pid" ]; then
+        local v_pid=$(cat "$HOME/.cache/mpv/video_window.pid" 2>/dev/null)
+        [ -n "$v_pid" ] && kill "$v_pid" >/dev/null 2>&1
+        rm -f "$HOME/.cache/mpv/video_window.pid" "$HOME/.cache/mpv/video_window.sock"
+    fi
+
+    # 4. Cleanup any remaining mpv instances
     pkill -u "$(whoami)" -f "mpv --idle" >/dev/null 2>&1
     
-    # 4. Remove socket and reset state
+    # 5. Remove socket and reset state
     rm -f "$SOCKET"
     if command -v termux-wake-unlock >/dev/null 2>&1; then termux-wake-unlock; fi
     MPV_RUNNING=false
@@ -629,6 +638,116 @@ cmd_audio_fx() {
             fi
             ;;
     esac
+}
+
+VIDEO_SOCKET="$HOME/.cache/mpv/video_window.sock"
+VIDEO_PID_FILE="$HOME/.cache/mpv/video_window.pid"
+
+is_video_window_open() {
+    [ "$MPV_RUNNING" = false ] && return 1
+    [ ! -S "$SOCKET" ] && return 1
+
+    local raw
+    raw=$(echo -e '{"command":["get_property","vo"]}\n{"command":["get_property","vid"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" 2>/dev/null)
+    [ -z "$raw" ] && return 1
+
+    local vo_name vid_val
+    vo_name=$(echo "$raw" | jq -s -r 'map(select(.event == null)) | .[0].data[0].name // "null"' 2>/dev/null)
+    vid_val=$(echo "$raw" | jq -s -r 'map(select(.event == null)) | .[1].data // false' 2>/dev/null)
+
+    if [ "$vo_name" != "null" ] && [ -n "$vo_name" ] && [ "$vid_val" != "false" ] && [ "$vid_val" != "no" ]; then
+        return 0
+    fi
+    return 1
+}
+
+cmd_video_toggle() {
+    local target_idx="$1"
+
+    # --- TOGGLE OFF: If video window is currently open and no target specified ---
+    if is_video_window_open && [ -z "$target_idx" ]; then
+        echo -e "${C_CYAN}📺 Hiding desktop video window...${C_RESET}"
+        echo -e '{"command":["set_property","vid","no"]}\n{"command":["set_property","vo","null"]}\n{"command":["set_property","force-window","no"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
+        echo -e "🎧 ${C_PINK}Returned to background audio mode (video hidden)${C_RESET}"
+        return 0
+    fi
+
+    # Ensure display environment (WSLg handles DISPLAY=:0 / WAYLAND_DISPLAY=wayland-0 natively)
+    if [ -z "$DISPLAY" ] && [ -z "$WAYLAND_DISPLAY" ]; then
+        if [ -d "/mnt/wslg" ] || [ -S "/tmp/.X11-unix/X0" ]; then
+            export DISPLAY=":0"
+            export WAYLAND_DISPLAY="wayland-0"
+        else
+            echo -e "${C_PINK}🚫 No graphical display found. Desktop video requires an active display (X11 / Wayland / WSLg).${C_RESET}"
+            return 1
+        fi
+    fi
+
+    # Fix tiny cursor on Windows 11 high-DPI displays in WSLg
+    export XCURSOR_THEME="${XCURSOR_THEME:-Adwaita}"
+    export XCURSOR_SIZE="${XCURSOR_SIZE:-24}"
+    if [ -n "$DISPLAY" ] && command -v xrdb >/dev/null 2>&1 && [ -f "$HOME/.Xresources" ]; then
+        xrdb -merge "$HOME/.Xresources" 2>/dev/null
+    fi
+
+    ensure_mpv_running
+
+    if [ "$MPV_RUNNING" = false ] || [ ! -S "$SOCKET" ]; then
+        echo -e "${C_PINK}🔇 MPV player is not active.${C_RESET}"
+        return 1
+    fi
+
+    # Determine VO: In WSLg, x11 is robust and prevents libplacebo crashes. Native: gpu,x11,wlshm
+    local vo_opt="gpu,x11,wlshm"
+    if grep -qi "microsoft" /proc/version 2>/dev/null; then
+        vo_opt="x11"
+    fi
+
+    # Ensure MPV input configuration & keybindings are active
+    if [ -f "$HOME/.config/mpv/input.conf" ]; then
+        echo "{\"command\":[\"load-input-conf\",\"$HOME/.config/mpv/input.conf\"]}" | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
+    fi
+    echo '{"command":["keybind","F11","cycle fullscreen"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
+    echo '{"command":["keybind","f","cycle fullscreen"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
+    echo '{"command":["keybind","CLOSE_WIN","set vid no ; set vo null ; set force-window no"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
+    echo '{"command":["keybind","q","set vid no ; set vo null ; set force-window no"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
+    echo '{"command":["keybind","Ctrl+s","cycle shuffle"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
+    echo '{"command":["keybind","r","playlist-shuffle"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
+
+    # If target index or URL is passed
+    if [ -n "$target_idx" ]; then
+        if [[ "$target_idx" =~ ^http.* ]]; then
+            # Direct URL passed: queue and play it
+            echo "{\"command\":[\"loadfile\",\"$target_idx\",\"replace\"]}" | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
+        elif [[ "$target_idx" =~ ^[0-9]+$ ]]; then
+            # Specific track index requested
+            local pl_count
+            pl_count=$(echo '{"command":["get_property","playlist-count"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // 0')
+            if [ "$target_idx" -lt 1 ] || [ "$target_idx" -gt "$pl_count" ]; then
+                echo -e "${C_PINK}🚫 Track [${C_ORANGE}${target_idx}${C_PINK}] does not exist. Max tracks: ${C_WHITE}[${C_ORANGE}${pl_count}${C_WHITE}]${C_RESET}"
+                return 1
+            fi
+            echo "{\"command\":[\"set_property\",\"playlist-pos\",$((target_idx - 1))]}" | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
+        fi
+    fi
+
+    # Ensure ytdl-format allows up to 1080p video
+    echo '{"command":["set_property","ytdl-format","bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
+
+    # Enable video window directly on the active MPV player:
+    # 1. auto-window-resize=false -> Prevents window size from changing when track changes
+    # 2. keepaspect-window=false -> Allows dragging and resizing window freely to any dimensions
+    # 3. vo=$vo_opt -> X11 driver in WSLg, gpu on native
+    # 4. video=auto & vid=auto -> Demux & render video stream
+    # 5. force-window=yes -> Keep window persistent across playlist transitions
+    # 6. pause=false -> Resume/continue playback
+    echo -e "{\"command\":[\"set_property\",\"auto-window-resize\",false]}\n{\"command\":[\"set_property\",\"keepaspect-window\",false]}\n{\"command\":[\"set_property\",\"vo\",\"$vo_opt\"]}\n{\"command\":[\"set_property\",\"video\",\"auto\"]}\n{\"command\":[\"set_property\",\"vid\",\"auto\"]}\n{\"command\":[\"set_property\",\"fullscreen\",false]}\n{\"command\":[\"set_property\",\"force-window\",\"yes\"]}\n{\"command\":[\"set_property\",\"pause\",false]}" | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
+
+    # Fetch track title and format notification
+    local title
+    title=$(echo '{"command":["get_property","media-title"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // "Queue Video"')
+    echo -e "📺 ${C_PINK}Desktop Video Window Active:${C_RESET} ${C_CYAN}${title}${C_RESET}"
+    echo -e "${C_GRAY}💡 Resizable window. Press ${C_WHITE}F11${C_GRAY} for fullscreen, ${C_WHITE}q${C_GRAY} or 'q -vid' to return to audio.${C_RESET}"
 }
 
 cmd_loop() {

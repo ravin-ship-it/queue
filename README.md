@@ -23,6 +23,8 @@
   <a href="#-interactive-tui-preview"><b>TUI Showcase</b></a> •
   <a href="#-quick-start"><b>Quick Start</b></a> •
   <a href="#-cheat-sheet"><b>Commands</b></a> •
+  <a href="#-spotify-track-resolver-q-spotify_url"><b>Spotify Resolver</b></a> •
+  <a href="#-desktop-video-window-q--vid--q--video"><b>Desktop Video Window</b></a> •
   <a href="#-unlocking-studio-audio-quality-youtube-cookies-setup"><b>Audio Quality & Cookies</b></a> •
   <a href="#-smart-auto-mode-q--auto"><b>Auto-Mode</b></a> •
   <a href="#-why-queue-vs-standard-players"><b>Why Queue?</b></a> •
@@ -101,6 +103,8 @@ Launch the full-screen interactive queue simply by typing `q`:
 | **RAM Usage** | **< 15 MB** | 500 MB – 1.2 GB (Electron) | ~15 MB |
 | **24/7 Smart Auto-Discovery** | ✅ (`q -auto` Zero-Gap) | ✅ (Algorithm) | ❌ |
 | **YouTube & SoundCloud Streaming** | ✅ Zero local storage | ❌ Spotify catalog only | ⚠️ Single URLs only |
+| **Spotify Track Resolver** | ✅ Auto-matches studio audio on YouTube | ❌ Spotify catalog only (requires app/login) | ❌ None |
+| **On-Demand Desktop Video Window** | ✅ `q -vid` (WSLg / X11 / Resizable / F11) | ⚠️ Fixed heavy desktop GUI | ⚠️ Separate window or terminal only |
 | **Headless Background Daemon** | ✅ Continuous (`setsid`) | ❌ Window required | ❌ Blocks terminal |
 | **Interactive Fuzzy Search (FZF)** | ✅ Instant (0ms) | ⚠️ Slower GUI search | ❌ None |
 | **Zero-Flicker Live Auto-Sync** | ✅ Atomic `reload-sync` (Virtual DOM)| ⚠️ Cloud polling delay | ❌ None |
@@ -167,10 +171,16 @@ q sc "lofi chill beats"
 # 3. Queue a direct YouTube video or entire playlist
 q "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
-# 4. Queue a local folder or file
+# 4. Queue a direct Spotify track (auto-matches official audio on YouTube)
+q "https://open.spotify.com/track/5PKvWxm8RCfgVE2A1cLP7u"
+
+# 5. Toggle Desktop Video Window directly on your desktop
+q -vid       # or: q vid / q video
+
+# 6. Queue a local folder or file
 q ~/Music/favorite_song.mp3
 
-# 5. Pipe tracks or text lists directly
+# 7. Pipe tracks or text lists directly
 cat playlist_urls.txt | q
 ```
 
@@ -222,6 +232,7 @@ You can use standard short flags (`q -p`) or clean smart commands (`q play`).
 | `q next` | `q -next` | Skip to next track |
 | `q prev` | `q -prev` | Return to previous track |
 | `q stop` | `q -stop` | Gracefully quit MPV and unhook audio |
+| `q vid [N\|url]`| `q -vid` / `q -video` | **Toggle Desktop Video Window** *(WSLg / X11 / Wayland, Resizable, F11)* |
 | `q vol [0-130]` | `q -v [N]` | View or set playback volume |
 | `q fx [on\|off]`| `q -fx` | Toggle spatial Dolby-like audio profile |
 | `q shuffle` | `q -shuf [list]` | Toggle shuffle mode *(or randomize queue entries)* |
@@ -282,6 +293,7 @@ When navigating the interactive queue (`q`) or interactive search (`q <query>`):
 | <kbd>Tab</kbd> | Queue / Playlist | **Select / Mark track** *(Triggers Action Menu: Move, Remove, Dislike, Export)* |
 | <kbd>Ctrl</kbd> + <kbd>D</kbd> | Search Mode | **Dislike & Blacklist** selected track directly without playing or queuing |
 | <kbd>x</kbd> | Inspector (`q -i`) | **Blacklist inspected track** instantly |
+| <kbd>v</kbd> | Inspector (`q -i`) | **Watch Desktop Video Window** for inspected track |
 | <kbd>Alt</kbd> + <kbd>A</kbd> | Queue | **Invert selection** (toggle all tracks) |
 | <kbd>Insert</kbd> / <kbd>Delete</kbd> | Queue | Select All / Deselect All |
 | <kbd>Ctrl</kbd> + <kbd>V</kbd> | Queue | **Paste URL from clipboard** directly into the queue |
@@ -289,7 +301,71 @@ When navigating the interactive queue (`q`) or interactive search (`q <query>`):
 
 > ⚡ **Zero-Flicker Virtual DOM Live Auto-Sync (`reload-sync`)**: The interactive queue uses full queue fingerprinting and modern atomic frame swapping (`reload-sync`). When songs change, pause, or are modified from any terminal (`q -mv`, `q -sw`, `q -rm`, `q -shuf`), the list updates seamlessly with **zero screen-clearing flicker**, even across 1,000+ tracks.
 >
-> 🪷 **Live Dynamic Player Indicators**: Active tracks feature left-aligned **`|>`** (Playing) or **`||`** (Paused) indicators in **Deep Pink**, with the **playing song title highlighted in Deep Pink** alongside Orange track numbers, Light Pink artists, and Orange duration badges.
+> 🪷 **Live Dynamic Player Indicators**: Active tracks feature left-aligned **`|>`** (Playing) or **`||`** (Paused) indicators in **Deep Pink**, with the **playing song title highlighted in Deep Pink** alongside Orange track numbers, Light Pink artists, and Orange duration badges. The prompt section dynamically reflects mode icons: `><` (Shuffle), `⟳` / `⟳1` (Loop), `Ꭰᗡ` (Dolby FX), `◖∞◗` (Auto-Discovery Radio), and **`<|V|>`** (Desktop Video Window Active).
+
+---
+
+## 🎧 Spotify Track Resolver (`q <spotify_url>`)
+
+Queue and stream Spotify tracks instantly right from your terminal without requiring a Spotify Premium subscription, proprietary desktop client, or API authentication keys!
+
+```bash
+q "https://open.spotify.com/track/5PKvWxm8RCfgVE2A1cLP7u"
+```
+
+### ⚡ Multi-Factor Intelligent Matching Engine
+When a Spotify track URL is passed to `q`, the embedded resolver dynamically pairs Spotify's public metadata with YouTube's audio catalog:
+1. **Lightweight Metadata Scraper**: Extracts authentic track metadata (Title, Artists, Studio Duration) via Spotify's public embed JSON API.
+2. **Sanitized Search Querying**: Automatically strips hyphens and special punctuation (`-`, `_`, `~`, `/`, `|`) from the search query, preventing YouTube's search engine from mistakenly treating hyphens as exclusion `-word` filters (e.g. searching `METEOR -keisei REMIX-` won't exclude `keisei`).
+3. **Multi-Factor Python Scorer**:
+   - **Duration Accuracy**: Scores candidates with strict duration tolerances ($\pm 2\text{s}$ bonus, massive penalties for deviations $>35\text{s}$).
+   - **Remixer & Subtitle Verification**: Identifies modifiers in brackets and dashes (e.g. `keisei REMIX`, `Japanese.ver`, `Radio Edit`, `Acoustic`), rejecting mismatching fan bootlegs and covers.
+   - **Official Studio Audio Preference**: Prioritizes official distributor topic channels (`- Topic`) and verified studio uploads (`Official Audio`, `Lyric Video`).
+   - **Fan Bootleg Penalty**: Aggressively penalizes third-party re-uploads, live phone recordings, nightcore, and reaction clips.
+4. **Clean Terminal Feedback**: Outputs a concise 2-line resolution notification:
+   ```text
+   🎧 Resolving Spotify: METEOR -keisei REMIX- (DIVELA)...
+   ✅ Queued [11] 初音ミクカバー曲「METEOR (keisei's binary star remix)」 by keisei [4:43]
+   ```
+
+---
+
+## 📺 Desktop Video Window (`q -vid` / `q -video`)
+
+Watch high-definition music videos on demand with a floating, hardware-accelerated GUI window directly from your terminal!
+
+```bash
+# Toggle video window for active track
+q -vid       # or: q vid / q video / q watch
+
+# Open video window directly for track 5
+q -vid 5
+```
+
+### 🚀 Key Features
+
+- **100% Terminal Independent (Zero Desktop Session Needed)**:
+  - Works seamlessly from Windows Terminal / WSL2 Ubuntu via **WSLg** directly onto Windows 11, or native Linux (Wayland / X11).
+  - No desktop environments (GNOME, XFCE, or RDP) required!
+- **Continuous Queue Playback**:
+  - Toggles video directly on the primary player daemon. When a track ends, the window stays open and automatically transitions to the next track in sequence—never freezing or pausing.
+- **Freely Resizable to Any Size (`no-keepaspect-window`)**:
+  - The window is never locked to aspect ratio constraints. Drag any edge or corner to resize it freely to any dimension you want.
+- **Persistent Window Dimensions (`no-auto-window-resize`)**:
+  - When the song changes, the window will **never** resize automatically. Your chosen window size is preserved across all playlist transitions.
+- **Full Player & Keyboard Controls**:
+  - **OSC Controller**: Hover your mouse for the full interactive progress bar, seek, volume, and playlist navigation.
+  - <kbd>F11</kbd> or <kbd>f</kbd>: Toggle full screen.
+  - <kbd>Space</kbd>: Pause / Resume playback.
+  - <kbd>&gt;</kbd> / <kbd>&lt;</kbd>: Skip to next / previous song in queue.
+  - <kbd>Ctrl</kbd> + <kbd>s</kbd> / <kbd>r</kbd>: Cycle shuffle mode.
+- **Non-Destructive Return to Audio Mode**:
+  - Pressing <kbd>q</kbd> or clicking the Windows <kbd>X</kbd> close button hides the video window while letting your background music continue playing uninterrupted!
+  - Run `q -vid` from any terminal to toggle the window back on.
+- **Dynamic `<|V|>` Status Indicator**:
+  - Whenever video mode is active, the `<|V|>` badge appears in deep pink alongside the loop (`⟳`) and shuffle (`><`) indicators in the `q` prompt.
+- **WSLg High-DPI Cursor Scaling**:
+  - Automatically configures X11 cursor properties (`Xcursor.theme: Adwaita`, `Xcursor.size: 24`), preventing tiny microscopic cursor sizing on Windows 11 high-resolution displays.
 
 ---
 

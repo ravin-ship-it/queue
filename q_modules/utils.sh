@@ -90,11 +90,33 @@ ensure_mpv_running() {
             initial_pl=("--playlist=$pl_arg")
         fi
 
+        # Ensure graphical display connection is available for on-demand video window
+        if [ -z "$DISPLAY" ] && [ -z "$WAYLAND_DISPLAY" ]; then
+            if [ -d "/mnt/wslg" ] || [ -S "/tmp/.X11-unix/X0" ]; then
+                export DISPLAY=":0"
+                export WAYLAND_DISPLAY="wayland-0"
+            fi
+        fi
+
+        # Ensure normal cursor size in WSLg / X11
+        export XCURSOR_THEME="${XCURSOR_THEME:-Adwaita}"
+        export XCURSOR_SIZE="${XCURSOR_SIZE:-24}"
+        if [ -n "$DISPLAY" ] && command -v xrdb >/dev/null 2>&1 && [ -f "$HOME/.Xresources" ]; then
+            xrdb -merge "$HOME/.Xresources" 2>/dev/null
+        fi
+
+        local input_conf_opt=()
+        if [ -f "$HOME/.config/mpv/input.conf" ]; then
+            input_conf_opt=("--input-conf=$HOME/.config/mpv/input.conf")
+        fi
+
         if command -v setsid >/dev/null 2>&1; then
             setsid mpv --idle --keep-open=yes --no-terminal --vo=null \
+                "${input_conf_opt[@]}" \
                 --input-ipc-server="$SOCKET" "${initial_pl[@]}" </dev/null >/dev/null 2>&1 &
         else
             nohup mpv --idle --keep-open=yes --no-terminal --vo=null \
+                "${input_conf_opt[@]}" \
                 --input-ipc-server="$SOCKET" "${initial_pl[@]}" </dev/null >/dev/null 2>&1 &
         fi
         disown
