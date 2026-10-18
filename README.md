@@ -313,6 +313,16 @@ Queue and stream Spotify tracks instantly right from your terminal without requi
 q "https://open.spotify.com/track/5PKvWxm8RCfgVE2A1cLP7u"
 ```
 
+### 🤔 Why Can't Spotify Audio Be Streamed Directly?
+1. **Widevine DRM & Encryption**: Spotify locks all of its raw audio streams behind proprietary Digital Rights Management (DRM) encryption. Command-line media tools like MPV cannot legally or technically decrypt these streams without closed-source browser components.
+2. **Walled-Garden & Premium Gate**: Spotify's playback API strictly prohibits third-party terminal playback, requiring official closed-source SDKs, continuous OAuth authentication, and an active paid Premium subscription.
+
+### 💡 How Queue Solves This: The Zero-DRM YouTube Bridge
+Instead of forcing you to run bloated Electron desktop apps or pay for API tokens, `q` acts as a seamless bridge:
+- It instantly scrapes the authentic track title, artist names, and exact studio duration from Spotify's open web endpoints.
+- It passes this canonical metadata into Queue's multi-factor scoring engine, which finds and streams the **exact official audio release on YouTube** (such as official distributor `- Topic` channels and verified studio uploads) in crystal-clear **Opus/AAC audio**.
+- You get the exact same track you wanted to hear on Spotify, with zero DRM hurdles, zero ads, and zero account logins.
+
 ### ⚡ Multi-Factor Intelligent Matching Engine
 When a Spotify track URL is passed to `q`, the embedded resolver dynamically pairs Spotify's public metadata with YouTube's audio catalog:
 1. **Lightweight Metadata Scraper**: Extracts authentic track metadata (Title, Artists, Studio Duration) via Spotify's public embed JSON API.
