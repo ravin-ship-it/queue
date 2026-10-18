@@ -254,6 +254,7 @@ show_help() {
     print_boxed_line "${C_YELLOW}Commands:${C_RESET}"
     print_boxed_line "  -i [N|url]      Metadata & Track Inspector (Synced Resolution)"
     print_boxed_line "  -vid / -video   Toggle Desktop Video Window ${C_GRAY}(WSLg/GUI, Resizable, F11)${C_RESET}"
+    print_boxed_line "  -res [val]      Set/Check Video Quality ${C_GRAY}(720|1080|1440|4k|auto)${C_RESET}"
     print_boxed_line "  -d / -dl [N|u]  Interactive Downloader Hub (Format & Dir Wizard)"
     print_boxed_line "  -p [N]          Play/Pause or Jump to track N ${C_GRAY}(Supports: 10+5)${C_RESET}"
     print_boxed_line "  -next / -prev   Next/Prev track ${C_GRAY}(Synced Logs)${C_RESET}"

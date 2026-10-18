@@ -17,16 +17,16 @@ audio-pitch-correction=yes
 # Network & Streaming Reconnect Resilience
 network-timeout=30
 stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5
-demuxer-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5
 cache=yes
-cache-secs=300
-demuxer-max-bytes=256MiB
-demuxer-max-back-bytes=128MiB
-demuxer-readahead-secs=300
+cache-secs=60
+cache-pause=yes
+cache-pause-wait=2
+demuxer-max-bytes=150MiB
+demuxer-max-back-bytes=50MiB
+demuxer-readahead-secs=20
 ytdl=yes
-ytdl-format=bestaudio/best
+ytdl-format=bestvideo[height<=1440][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=1080][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=1440][format_note!*=Premium]+bestaudio/bestvideo[height<=1080][format_note!*=Premium]+bestaudio/bestvideo[fps>=50][format_note!*=Premium]+bestaudio/bestvideo[format_note!*=Premium]+bestaudio/best
 script-opts=ytdl_hook-ytdl_path=yt-dlp
-stream-buffer-size=16MiB
 tls-verify=no
 
 # Headless Audio

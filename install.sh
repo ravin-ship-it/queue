@@ -136,7 +136,6 @@ YTDLP_CONF_DIR="$HOME/.config/yt-dlp"
 mkdir -p "$YTDLP_CONF_DIR"
 cat << 'EOF' > "$YTDLP_CONF_DIR/config"
 --js-runtimes node
---extractor-args "youtube:player_client=android,web"
 --no-warnings
 EOF
 if [ -f "$YTDLP_CONF_DIR/cookies.txt" ]; then

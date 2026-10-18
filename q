@@ -92,7 +92,7 @@ fi
 # --- Command Parsing ---
 
 PROCESSED_ANY_FLAG=false
-SMART_CMDS="^(play|pause|stop|next|prev|vol|info|list|clear|shuffle|remove|move|swap|help|save|load|auto|fx|deps|up|download|dl|d|dislike|dis|disl|rmd|undis|undislike|like|vid|video|watch|version|ver)$"
+SMART_CMDS="^(play|pause|stop|next|prev|vol|info|list|clear|shuffle|remove|move|swap|help|save|load|auto|fx|deps|up|download|dl|d|dislike|dis|disl|rmd|undis|undislike|like|vid|video|watch|version|ver|res|quality)$"
 
 while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
     PROCESSED_ANY_FLAG=true
@@ -127,6 +127,7 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
             rmd) CMD="-rmd" ;;
             vid|video|watch) CMD="-vid" ;;
             version|ver) CMD="-version" ;;
+            res|quality) CMD="-res" ;;
         esac
     fi
 
@@ -415,6 +416,15 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
                 target=""
             fi
             cmd_download "$target"
+            ;;
+        -res|-quality)
+            shift
+            if [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]]; then
+                cmd_resolution "$1"
+                shift
+            else
+                cmd_resolution ""
+            fi
             ;;
         -version|--version|-V) show_version; shift ;;
         -h|--help) show_help; shift ;; 

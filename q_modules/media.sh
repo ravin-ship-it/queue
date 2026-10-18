@@ -714,25 +714,31 @@ cmd_video_toggle() {
     echo '{"command":["keybind","Ctrl+s","cycle shuffle"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
     echo '{"command":["keybind","r","playlist-shuffle"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
 
+    echo '{"command":["keybind","1","set ytdl-format \"bestvideo[height<=720][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=720][format_note!*=Premium]+bestaudio/best[height<=720]\" ; playlist-play-index current ; show-text \"Quality: 720p HD (60fps)\" 2500"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo '{"command":["keybind","2","set ytdl-format \"bestvideo[height<=1080][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=1080][format_note!*=Premium]+bestaudio/best\" ; playlist-play-index current ; show-text \"Quality: 1080p Full HD (60fps)\" 2500"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo '{"command":["keybind","3","set ytdl-format \"bestvideo[height<=1440][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=1440][format_note!*=Premium]+bestaudio/best\" ; playlist-play-index current ; show-text \"Quality: 1440p 2K QHD (60fps)\" 2500"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo '{"command":["keybind","4","set ytdl-format \"bestvideo[format_note!*=Premium]+bestaudio/best\" ; playlist-play-index current ; show-text \"Quality: Max / 4K UHD\" 2500"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+
     # If target index or URL is passed
     if [ -n "$target_idx" ]; then
         if [[ "$target_idx" =~ ^http.* ]]; then
             # Direct URL passed: queue and play it
-            echo "{\"command\":[\"loadfile\",\"$target_idx\",\"replace\"]}" | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
+            echo "{\"command\":[\"loadfile\",\"$target_idx\",\"replace\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
         elif [[ "$target_idx" =~ ^[0-9]+$ ]]; then
             # Specific track index requested
             local pl_count
-            pl_count=$(echo '{"command":["get_property","playlist-count"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // 0')
+            pl_count=$(echo '{"command":["get_property","playlist-count"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // 0')
             if [ "$target_idx" -lt 1 ] || [ "$target_idx" -gt "$pl_count" ]; then
                 echo -e "${C_PINK}🚫 Track [${C_ORANGE}${target_idx}${C_PINK}] does not exist. Max tracks: ${C_WHITE}[${C_ORANGE}${pl_count}${C_WHITE}]${C_RESET}"
                 return 1
             fi
-            echo "{\"command\":[\"set_property\",\"playlist-pos\",$((target_idx - 1))]}" | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
+            echo "{\"command\":[\"set_property\",\"playlist-pos\",$((target_idx - 1))]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
         fi
     fi
 
-    # Ensure ytdl-format allows up to 1080p video
-    echo '{"command":["set_property","ytdl-format","bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
+    # Smart video format: 60 FPS prioritized, crisp Full HD / 2K, never blurry, never locked behind Premium
+    local smart_fmt="bestvideo[height<=1440][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=1080][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=1440][format_note!*=Premium]+bestaudio/bestvideo[height<=1080][format_note!*=Premium]+bestaudio/bestvideo[fps>=50][format_note!*=Premium]+bestaudio/bestvideo[format_note!*=Premium]+bestaudio/best"
+    echo "{\"command\":[\"set_property\",\"ytdl-format\",\"$smart_fmt\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
 
     # Enable video window directly on the active MPV player:
     # 1. auto-window-resize=false -> Prevents window size from changing when track changes
@@ -741,13 +747,86 @@ cmd_video_toggle() {
     # 4. video=auto & vid=auto -> Demux & render video stream
     # 5. force-window=yes -> Keep window persistent across playlist transitions
     # 6. pause=false -> Resume/continue playback
-    echo -e "{\"command\":[\"set_property\",\"auto-window-resize\",false]}\n{\"command\":[\"set_property\",\"keepaspect-window\",false]}\n{\"command\":[\"set_property\",\"vo\",\"$vo_opt\"]}\n{\"command\":[\"set_property\",\"video\",\"auto\"]}\n{\"command\":[\"set_property\",\"vid\",\"auto\"]}\n{\"command\":[\"set_property\",\"fullscreen\",false]}\n{\"command\":[\"set_property\",\"force-window\",\"yes\"]}\n{\"command\":[\"set_property\",\"pause\",false]}" | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
+    echo -e "{\"command\":[\"set_property\",\"auto-window-resize\",false]}\n{\"command\":[\"set_property\",\"keepaspect-window\",false]}\n{\"command\":[\"set_property\",\"vo\",\"$vo_opt\"]}\n{\"command\":[\"set_property\",\"video\",\"auto\"]}\n{\"command\":[\"set_property\",\"vid\",\"auto\"]}\n{\"command\":[\"set_property\",\"fullscreen\",false]}\n{\"command\":[\"set_property\",\"force-window\",\"yes\"]}\n{\"command\":[\"set_property\",\"pause\",false]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
 
     # Fetch track title and format notification
     local title
-    title=$(echo '{"command":["get_property","media-title"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // "Queue Video"')
+    title=$(echo '{"command":["get_property","media-title"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // "Queue Video"')
     echo -e "📺 ${C_PINK}Desktop Video Window Active:${C_RESET} ${C_CYAN}${title}${C_RESET}"
-    echo -e "${C_GRAY}💡 Resizable window. Press ${C_WHITE}F11${C_GRAY} for fullscreen, ${C_WHITE}q${C_GRAY} or 'q -vid' to return to audio.${C_RESET}"
+    echo -e "${C_GRAY}💡 Resizable window. Press ${C_WHITE}F11${C_GRAY} fullscreen, ${C_WHITE}1${C_GRAY}-${C_WHITE}4${C_GRAY} switch quality (720p/1080p60/2K/4K), ${C_WHITE}q${C_GRAY} or 'q -vid' to return to audio.${C_RESET}"
+}
+
+cmd_resolution() {
+    local target="$1"
+    target=$(echo "$target" | tr '[:upper:]' '[:lower:]')
+
+    ensure_mpv_running
+    if [ "$MPV_RUNNING" = false ] || [ ! -S "$SOCKET" ]; then
+        echo -e "${C_PINK}🔇 MPV player is not active.${C_RESET}"
+        return 1
+    fi
+
+    local ytdl_fmt=""
+    local label=""
+
+    case "$target" in
+        720|720p|hd)
+            ytdl_fmt="bestvideo[height<=720][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=720][format_note!*=Premium]+bestaudio/best[height<=720]"
+            label="720p HD (60 FPS fluid / bandwidth saver)"
+            ;;
+        1080|1080p|fhd)
+            ytdl_fmt="bestvideo[height<=1080][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=1080][format_note!*=Premium]+bestaudio/best"
+            label="1080p Full HD (60 FPS crisp)"
+            ;;
+        1440|1440p|2k|qhd)
+            ytdl_fmt="bestvideo[height<=1440][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=1440][format_note!*=Premium]+bestaudio/best"
+            label="1440p 2K QHD (60 FPS ultra-crisp)"
+            ;;
+        2160|2160p|4k|uhd|max)
+            ytdl_fmt="bestvideo[format_note!*=Premium]+bestaudio/best"
+            label="Max / 4K UHD (Uncapped highest quality)"
+            ;;
+        auto|smart|"")
+            if [ -z "$target" ]; then
+                local cur_w cur_h cur_fps cur_codec
+                local res_info
+                res_info=$(echo -e '{"command":["get_property","video-params"]}\n{"command":["get_property","track-list"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
+                cur_w=$(echo "$res_info" | jq -s -r 'map(select(.event == null)) | .[0].data.w // "N/A"' 2>/dev/null)
+                cur_h=$(echo "$res_info" | jq -s -r 'map(select(.event == null)) | .[0].data.h // "N/A"' 2>/dev/null)
+                cur_fps=$(echo "$res_info" | jq -s -r 'map(select(.event == null)) | (.[1].data[]? | select(.type=="video" and .selected==true) | .["demux-fps"]) // "N/A"' 2>/dev/null)
+                cur_codec=$(echo "$res_info" | jq -s -r 'map(select(.event == null)) | (.[1].data[]? | select(.type=="video" and .selected==true) | .codec) // "N/A"' 2>/dev/null)
+                [[ "$cur_fps" =~ ^[0-9]+(\.[0-9]+)?$ ]] && printf -v cur_fps "%.0f" "$cur_fps"
+
+                if [ "$cur_w" == "N/A" ] || [ -z "$cur_w" ]; then
+                    local current_fmt
+                    current_fmt=$(echo '{"command":["get_property","ytdl-format"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // "Default"')
+                    echo -e "${C_CYAN}📺 Video Stream:${C_RESET} ${C_GRAY}Idle (No video actively rendering)${C_RESET}"
+                    echo -e "   ${C_PINK}Active Quality Profile:${C_RESET} ${C_WHITE}${current_fmt:0:60}...${C_RESET}"
+                else
+                    echo -e "${C_CYAN}📺 Active Video Quality:${C_RESET} ${C_WHITE}${cur_w}x${cur_h}${C_RESET} @ ${C_PINK}${cur_fps} FPS${C_RESET} (${C_GRAY}codec: ${cur_codec}${C_RESET})"
+                fi
+                echo -e "${C_GRAY}💡 Quick Switch: 'q -res 720' | 'q -res 1080' | 'q -res 1440' | 'q -res 4k' | 'q -res auto'${C_RESET}"
+                echo -e "${C_GRAY}   Or inside video window press keys: ${C_WHITE}1${C_GRAY} (720p) | ${C_WHITE}2${C_GRAY} (1080p60) | ${C_WHITE}3${C_GRAY} (2K) | ${C_WHITE}4${C_GRAY} (4K)${C_RESET}"
+                return 0
+            fi
+            ytdl_fmt="bestvideo[height<=1440][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=1080][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=1440][format_note!*=Premium]+bestaudio/bestvideo[height<=1080][format_note!*=Premium]+bestaudio/bestvideo[fps>=50][format_note!*=Premium]+bestaudio/bestvideo[format_note!*=Premium]+bestaudio/best"
+            label="Auto / Smart 60FPS (Adapts to internet, max 1440p60, never blurry)"
+            ;;
+        *)
+            echo -e "${C_PINK}❓ Unknown resolution: '$target'. Use: 720, 1080, 1440, 4k, or auto.${C_RESET}"
+            return 1
+            ;;
+    esac
+
+    # Apply ytdl-format to MPV
+    echo "{\"command\":[\"set_property\",\"ytdl-format\",\"$ytdl_fmt\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+
+    # Reload current track to apply new stream format while keeping position
+    echo '{"command":["playlist-play-index","current"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo "{\"command\":[\"show-text\",\"Quality: $label\",2500]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+
+    echo -e "${C_CYAN}📺 Video Quality set to:${C_RESET} ${C_PINK}${label}${C_RESET}"
+    echo -e "${C_GRAY}   Reloaded stream with high-framerate matching.${C_RESET}"
 }
 
 cmd_loop() {
