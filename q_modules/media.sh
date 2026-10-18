@@ -564,6 +564,7 @@ cmd_stop() {
     rm -f "$HOME/.cache/mpv/auto.lock" "$HOME/.cache/mpv/auto_cooldown"
 
     # 3. Cleanup video window if running
+    rm -f "$HOME/.cache/mpv/video_active"
     if [ -f "$HOME/.cache/mpv/video_window.pid" ]; then
         local v_pid=$(cat "$HOME/.cache/mpv/video_window.pid" 2>/dev/null)
         [ -n "$v_pid" ] && kill "$v_pid" >/dev/null 2>&1
@@ -646,6 +647,7 @@ VIDEO_PID_FILE="$HOME/.cache/mpv/video_window.pid"
 is_video_window_open() {
     [ "$MPV_RUNNING" = false ] && return 1
     [ ! -S "$SOCKET" ] && return 1
+    [ -f "$HOME/.cache/mpv/video_active" ] && return 0
 
     local raw
     raw=$(echo -e '{"command":["get_property","vo"]}\n{"command":["get_property","vid"]}\n{"command":["get_property","window-minimized"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" 2>/dev/null)
@@ -668,6 +670,7 @@ cmd_video_toggle() {
     # --- TOGGLE OFF: If video window is currently open and no target specified ---
     if is_video_window_open && [ -z "$target_idx" ]; then
         echo -e "${C_CYAN}📺 Hiding desktop video window...${C_RESET}"
+        rm -f "$HOME/.cache/mpv/video_active"
         echo -e '{"command":["script-message","safe-hide-video"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
         echo -e "🎧 ${C_PINK}Returned to background audio mode (video hidden)${C_RESET}"
         return 0
@@ -797,6 +800,7 @@ cmd_video_toggle() {
     # 13. force-window=yes -> Keep window persistent across playlist transitions
     # 14. pause=false -> Resume/continue playback
     echo -e "{\"command\":[\"set_property\",\"window-minimized\",false]}\n{\"command\":[\"set_property\",\"autofit\",\"$target_autofit\"]}\n{\"command\":[\"set_property\",\"window-scale\",$target_scale]}\n{\"command\":[\"set_property\",\"geometry\",\"50%:50%\"]}\n{\"command\":[\"set_property\",\"auto-window-resize\",false]}\n{\"command\":[\"set_property\",\"keepaspect-window\",false]}\n{\"command\":[\"apply-profile\",\"fast\"]}\n{\"command\":[\"set_property\",\"hwdec\",\"auto-safe\"]}\n{\"command\":[\"set_property\",\"opengl-pbo\",true]}\n{\"command\":[\"set_property\",\"swapchain-depth\",3]}\n{\"command\":[\"set_property\",\"video-sync\",\"audio\"]}\n{\"command\":[\"set_property\",\"gpu-context\",\"$gpu_ctx\"]}\n{\"command\":[\"set_property\",\"vo\",\"$vo_opt\"]}\n{\"command\":[\"set_property\",\"video\",\"auto\"]}\n{\"command\":[\"set_property\",\"vid\",\"auto\"]}\n{\"command\":[\"set_property\",\"fullscreen\",$target_fs]}\n{\"command\":[\"set_property\",\"force-window\",\"yes\"]}\n{\"command\":[\"set_property\",\"pause\",false]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    touch "$HOME/.cache/mpv/video_active"
 
     # Fetch track title and format notification
     local title

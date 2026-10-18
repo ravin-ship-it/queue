@@ -100,8 +100,8 @@ mkdir -p "$HOME/.local/bin"
 
 echo -e "${CYAN}📦 Installing Queue engine into $DEST_DIR...${NC}"
 # Clean existing symlinks/files in destination before copying permanent files
-rm -rf "$DEST_DIR/q" "$DEST_DIR/q_modules"
-cp -r "$REPO_DIR/q" "$REPO_DIR/q_modules" "$DEST_DIR/"
+rm -rf "$DEST_DIR/q" "$DEST_DIR/q_modules" "$DEST_DIR/scripts"
+cp -r "$REPO_DIR/q" "$REPO_DIR/q_modules" "$REPO_DIR/scripts" "$DEST_DIR/"
 chmod +x "$DEST_DIR/q"
 
 # Link to user and system bin paths for instant zero-restart availability
