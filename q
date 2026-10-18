@@ -92,7 +92,7 @@ fi
 # --- Command Parsing ---
 
 PROCESSED_ANY_FLAG=false
-SMART_CMDS="^(play|pause|stop|next|prev|vol|info|list|clear|shuffle|remove|move|swap|help|save|load|auto|fx|deps|up|download|dl|d|dislike|dis|disl|rmd|undis|undislike|like|vid|video|watch)$"
+SMART_CMDS="^(play|pause|stop|next|prev|vol|info|list|clear|shuffle|remove|move|swap|help|save|load|auto|fx|deps|up|download|dl|d|dislike|dis|disl|rmd|undis|undislike|like|vid|video|watch|version|ver)$"
 
 while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
     PROCESSED_ANY_FLAG=true
@@ -126,6 +126,7 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
             undis|undislike|like) CMD="-undis" ;;
             rmd) CMD="-rmd" ;;
             vid|video|watch) CMD="-vid" ;;
+            version|ver) CMD="-version" ;;
         esac
     fi
 
@@ -415,6 +416,7 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
             fi
             cmd_download "$target"
             ;;
+        -version|--version|-V) show_version; shift ;;
         -h|--help) show_help; shift ;; 
         *) 
             echo -e "${C_PINK}🧐 I don't know what \"$1\" is 🔫... is it your distant cousin 👀❔${C_RESET}"

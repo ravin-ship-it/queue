@@ -240,6 +240,10 @@ get_input() {
     sleep 0.1
 }
 
+show_version() {
+    echo -e "${C_CYAN}🎵 Queue (q)${C_RESET} ${C_BOLD}v${QUEUE_VERSION}${C_RESET} ${C_GRAY}— The Ultimate MPV Music Engine${C_RESET}"
+}
+
 show_help() {
     print_header_box "${C_CYAN}🎵 MPV Queue Manager Help${C_RESET}"
     print_boxed_line "${C_BOLD}Usage:${C_RESET}"
@@ -272,6 +276,7 @@ show_help() {
     print_boxed_line "  -auto           Toggle Auto-Discovery (24/7 Related Hits)"
     print_boxed_line "  -deps           Check dependencies (WSL/Android)"
     print_boxed_line "  -up             Update yt-dlp"
+    print_boxed_line "  -version / -V   Display version information"
     print_boxed_line "  -raw            Raw Queue output (for scripts)"
     print_boxed_line ""
     print_boxed_line "${C_YELLOW}Custom Playlists:${C_RESET}"
