@@ -684,7 +684,7 @@ ensure_mpv_running() {
 
             ensure_windows_ytdlp_configured
 
-            powershell.exe -NoProfile -Command "Start-Process -FilePath '$win_mpv_native' -ArgumentList '--idle=yes','--keep-open=yes','--vo=null','--video=no',${ytdl_arg}${script_arg}'--input-ipc-server=\\\\.\\pipe\\$pipe_name' -WindowStyle Hidden" </dev/null >/dev/null 2>&1
+            powershell.exe -NoProfile -Command "Start-Process -FilePath '$win_mpv_native' -ArgumentList '--idle=yes','--keep-open=yes','--vo=gpu','--video=auto','--force-window=immediate','--window-minimized=yes',${ytdl_arg}${script_arg}'--input-ipc-server=\\\\.\\pipe\\$pipe_name' -WindowStyle Hidden" </dev/null >/dev/null 2>&1
 
             local bridge_script="$MODULE_DIR/hybrid_bridge.py"
             [ ! -f "$bridge_script" ] && bridge_script="$SCRIPT_DIR/q_modules/hybrid_bridge.py"

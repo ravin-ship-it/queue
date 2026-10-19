@@ -972,7 +972,7 @@ cmd_video_toggle() {
     if is_video_window_open && [ -z "$target_idx" ]; then
         echo -e "${C_CYAN}📺 Hiding desktop video window...${C_RESET}"
         rm -f "$HOME/.cache/mpv/video_active"
-        echo -e '{"command":["script-message","safe-hide-video"]}\n{"command":["set_property","window-minimized",true]}\n{"command":["set_property","vid","no"]}\n{"command":["set_property","vo","null"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
+        echo -e '{"command":["script-message","safe-hide-video"]}\n{"command":["set_property","window-minimized",true]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
         echo -e "🎧 ${C_PINK}Returned to background audio mode (video hidden)${C_RESET}"
         return 0
     fi
@@ -1147,7 +1147,13 @@ cmd_video_toggle() {
     touch "$HOME/.cache/mpv/video_active"
     local cur_vid=$(echo '{"command":["get_property","vid"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // false')
     if [ "$cur_vid" == "false" ] || [ "$cur_vid" == "no" ]; then
+        local cur_time
+        cur_time=$(echo '{"command":["get_property","time-pos"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // 0')
+        if (( $(echo "$cur_time > 1" | bc -l 2>/dev/null || echo 0) )); then
+            echo "{\"command\":[\"set_property\",\"start\",\"$cur_time\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+        fi
         echo '{"command":["playlist-play-index","current"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+        echo '{"command":["set_property","start","none"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
     fi
 
     # Fetch track title and format notification
