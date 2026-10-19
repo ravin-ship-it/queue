@@ -1,4 +1,32 @@
 QUEUE_VERSION="1.1.0"
+
+# Platform Detection (Universal for WSL2, Bare-Metal Linux, macOS, and Android/Termux)
+if [ -z "$IS_WSL" ] || [ -z "$IS_LINUX" ] || [ -z "$IS_MACOS" ] || [ -z "$IS_ANDROID" ]; then
+    IS_WSL=false
+    IS_MACOS=false
+    IS_LINUX=false
+    IS_ANDROID=false
+
+    if [[ "$OSTYPE" == "darwin"* ]] || [ "$(uname -s 2>/dev/null)" = "Darwin" ]; then
+        IS_MACOS=true
+    elif [ -n "$PREFIX" ] && [[ "$PREFIX" == *"com.termux"* ]]; then
+        IS_ANDROID=true
+    elif grep -qi "microsoft" /proc/version 2>/dev/null || [ -d "/usr/lib/wsl" ] || [ -d "/mnt/wslg" ]; then
+        IS_WSL=true
+        IS_LINUX=true
+    elif [ "$(uname -s 2>/dev/null)" = "Linux" ]; then
+        IS_LINUX=true
+    fi
+    export IS_WSL IS_MACOS IS_LINUX IS_ANDROID
+fi
+
+if [ -z "$MODULE_DIR" ]; then
+    MODULE_DIR="$(cd "$(dirname "$(realpath "${BASH_SOURCE[0]}")")" && pwd)"
+fi
+if [ -z "$SCRIPT_DIR" ]; then
+    SCRIPT_DIR="$(dirname "$MODULE_DIR")"
+fi
+
 CACHE_FILE="$HOME/.cache/mpv/titles.txt"
 LAST_PLAYLIST_FILE="$HOME/.cache/mpv/last_playlist.txt"
 PLAYLIST_DIR="$HOME/.local/share/mpv/playlists"
@@ -152,10 +180,10 @@ get_windows_user() {
 }
 
 find_windows_mpv() {
-    if [ -f "/mnt/c/Program Files/MPV Player/mpv.com" ]; then
-        echo "/mnt/c/Program Files/MPV Player/mpv.com"
-    elif [ -f "/mnt/c/Program Files/MPV Player/mpv.exe" ]; then
+    if [ -f "/mnt/c/Program Files/MPV Player/mpv.exe" ]; then
         echo "/mnt/c/Program Files/MPV Player/mpv.exe"
+    elif [ -f "/mnt/c/Program Files/MPV Player/mpv.com" ]; then
+        echo "/mnt/c/Program Files/MPV Player/mpv.com"
     elif command -v mpv.exe >/dev/null 2>&1; then
         command -v mpv.exe
     elif [ -f "/mnt/c/Users/$(get_windows_user)/AppData/Local/Microsoft/WinGet/Links/mpv.exe" ]; then
@@ -255,6 +283,20 @@ load_playlist_file_to_mpv() {
         fi
         sleep 0.05
     done
+
+    # Resilient fallback: If loadlist fails (e.g. UNC path permissions), batch load entries
+    local first=true
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        local t_path
+        t_path=$(format_path_for_mpv "$line")
+        if [ "$first" = true ] && [ "$replace_mode" == "replace" ]; then
+            echo "{\"command\":[\"loadfile\",\"$t_path\",\"replace\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+            first=false
+        else
+            echo "{\"command\":[\"loadfile\",\"$t_path\",\"append\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+        fi
+    done < "$file"
     return 0
 }
 
@@ -601,75 +643,88 @@ ensure_mpv_running() {
 
         # --- HYBRID WINDOWS ENGINE STARTUP (WSL2 Host Delegation) ---
         if [ "$mode" == "hybrid" ] && [ "$IS_WSL" = true ]; then
+            # Strictly eliminate any lingering Ubuntu/WSL MPV daemon so only Windows MPV runs
+            pkill -u "$(whoami)" -f "mpv --idle" 2>/dev/null || true
+
             local win_mpv
             win_mpv=$(find_windows_mpv)
             local relay_bin
             relay_bin=$(ensure_piperelay_compiled)
 
-            if [ -n "$win_mpv" ] && [ -n "$relay_bin" ]; then
-                taskkill.exe /F /IM mpv.exe </dev/null 2>/dev/null || true
-                taskkill.exe /F /IM mpv.com </dev/null 2>/dev/null || true
-                taskkill.exe /F /IM PipeRelay.exe </dev/null 2>/dev/null || true
-                pkill -f "hybrid_bridge.py" 2>/dev/null || true
+            if [ -z "$win_mpv" ] || [ -z "$relay_bin" ]; then
+                echo -e "${C_PINK}❌ Windows Hybrid prerequisites not met (win_mpv='$win_mpv', relay='$relay_bin').${C_RESET}"
+                echo -e "${C_CYAN}👉 Run 'q -hybrid off' to switch to Standalone WSL MPV or ensure Windows MPV is installed.${C_RESET}"
+                return 1
+            fi
 
-                local pipe_name="mpv-q-pipe"
-                local win_ytdlp
-                win_ytdlp=$(find_windows_ytdlp)
-                local ytdl_arg=""
-                [ -n "$win_ytdlp" ] && ytdl_arg="'--script-opts=ytdl_hook-ytdl_path=$win_ytdlp',"
+            taskkill.exe /F /IM mpv.exe </dev/null 2>/dev/null || true
+            taskkill.exe /F /IM mpv.com </dev/null 2>/dev/null || true
+            taskkill.exe /F /IM PipeRelay.exe </dev/null 2>/dev/null || true
+            pkill -f "hybrid_bridge.py" 2>/dev/null || true
 
-                local script_arg=""
-                local script_path="$SCRIPT_DIR/scripts/queue_video.lua"
-                [ ! -f "$script_path" ] && script_path="$HOME/.config/mpv/scripts/queue_video.lua"
-                [ ! -f "$script_path" ] && script_path="$(dirname "$MODULE_DIR")/scripts/queue_video.lua"
-                if [ -f "$script_path" ]; then
-                    local win_script
-                    win_script=$(wslpath -w "$script_path" 2>/dev/null)
-                    [ -n "$win_script" ] && script_arg="'--script=$win_script',"
-                fi
+            local pipe_name="mpv-q-pipe"
+            local win_ytdlp
+            win_ytdlp=$(find_windows_ytdlp)
+            local ytdl_arg=""
+            [ -n "$win_ytdlp" ] && ytdl_arg="'--script-opts=ytdl_hook-ytdl_path=$win_ytdlp',"
 
-                local win_mpv_native
-                win_mpv_native=$(wslpath -w "$win_mpv" 2>/dev/null)
-                [ -z "$win_mpv_native" ] && win_mpv_native="$win_mpv"
+            local script_arg=""
+            local script_path="$SCRIPT_DIR/scripts/queue_video.lua"
+            [ ! -f "$script_path" ] && script_path="$HOME/.config/mpv/scripts/queue_video.lua"
+            [ ! -f "$script_path" ] && script_path="$(dirname "$MODULE_DIR")/scripts/queue_video.lua"
+            if [ -f "$script_path" ]; then
+                local win_script
+                win_script=$(wslpath -w "$script_path" 2>/dev/null)
+                [ -n "$win_script" ] && script_arg="'--script=$win_script',"
+            fi
 
-                ensure_windows_ytdlp_configured
+            local win_mpv_native
+            win_mpv_native=$(wslpath -w "$win_mpv" 2>/dev/null)
+            [ -z "$win_mpv_native" ] && win_mpv_native="$win_mpv"
 
-                powershell.exe -NoProfile -Command "Start-Process -FilePath '$win_mpv_native' -ArgumentList '--idle=yes','--keep-open=yes','--vo=null','--video=no',${ytdl_arg}${script_arg}'--input-ipc-server=\\\\.\\pipe\\$pipe_name' -WindowStyle Hidden" </dev/null >/dev/null 2>&1
+            ensure_windows_ytdlp_configured
 
-                local bridge_script="$MODULE_DIR/hybrid_bridge.py"
-                [ ! -f "$bridge_script" ] && bridge_script="$SCRIPT_DIR/q_modules/hybrid_bridge.py"
+            powershell.exe -NoProfile -Command "Start-Process -FilePath '$win_mpv_native' -ArgumentList '--idle=yes','--keep-open=yes','--vo=null','--video=no',${ytdl_arg}${script_arg}'--input-ipc-server=\\\\.\\pipe\\$pipe_name' -WindowStyle Hidden" </dev/null >/dev/null 2>&1
 
-                if command -v setsid >/dev/null 2>&1; then
-                    setsid python3 "$bridge_script" "$SOCKET" "$pipe_name" "$relay_bin" </dev/null >/dev/null 2>&1 &
-                else
-                    nohup python3 "$bridge_script" "$SOCKET" "$pipe_name" "$relay_bin" </dev/null >/dev/null 2>&1 &
-                fi
-                disown
+            local bridge_script="$MODULE_DIR/hybrid_bridge.py"
+            [ ! -f "$bridge_script" ] && bridge_script="$SCRIPT_DIR/q_modules/hybrid_bridge.py"
 
-                for i in {1..30}; do
-                    [ -S "$SOCKET" ] && break
+            if command -v setsid >/dev/null 2>&1; then
+                setsid python3 "$bridge_script" "$SOCKET" "$pipe_name" "$relay_bin" </dev/null >/dev/null 2>&1 &
+            else
+                nohup python3 "$bridge_script" "$SOCKET" "$pipe_name" "$relay_bin" </dev/null >/dev/null 2>&1 &
+            fi
+            disown
+
+            for i in {1..40}; do
+                [ -S "$SOCKET" ] && break
+                sleep 0.1
+            done
+
+            if [ -S "$SOCKET" ]; then
+                # Verify IPC responsiveness (wait up to 5s for Windows MPV to initialize IPC)
+                for attempt in {1..50}; do
+                    if echo '{"command":["get_property","idle-active"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | grep -q "data"; then
+                        break
+                    fi
                     sleep 0.1
                 done
 
-                if [ -S "$SOCKET" ]; then
-                    # Verify IPC responsiveness (wait up to 3s for MPV to initialize IPC)
-                    for attempt in {1..30}; do
-                        if echo '{"command":["get_property","idle-active"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | grep -q "data"; then
-                            break
-                        fi
-                        sleep 0.1
-                    done
-
-                    MPV_RUNNING=true
-                    start_idle_monitor
-                    if [ -n "$pl_arg" ] && [ -f "$pl_arg" ] && [ -s "$pl_arg" ]; then
-                        load_playlist_file_to_mpv "$pl_arg" "replace"
-                    fi
-                    restore_state_properties
-                    return 0
+                MPV_RUNNING=true
+                start_idle_monitor
+                if [ -n "$pl_arg" ] && [ -f "$pl_arg" ] && [ -s "$pl_arg" ]; then
+                    load_playlist_file_to_mpv "$pl_arg" "replace"
                 fi
+                restore_state_properties
+                return 0
+            else
+                echo -e "${C_PINK}⚠️ Timed out waiting for Windows MPV IPC socket bridge.${C_RESET}"
+                pkill -f "hybrid_bridge.py" 2>/dev/null || true
+                taskkill.exe /F /IM mpv.exe </dev/null 2>/dev/null || true
+                taskkill.exe /F /IM PipeRelay.exe </dev/null 2>/dev/null || true
+                rm -f "$SOCKET"
+                return 1
             fi
-            # If hybrid startup encountered issues, cleanly fall back to standalone
         fi
 
         # --- STANDALONE ENGINE (WSLg, Bare-Metal Linux, or macOS) ---

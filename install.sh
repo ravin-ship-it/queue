@@ -476,6 +476,10 @@ if [ -n "$SHELL_RC" ]; then
 # --- Q MPV WRAPPER START ---
 function mpv() {
     SOCKET="$HOME/.mpv-socket"
+    if [ -f "$HOME/.config/mpv/queue_mode" ] && [ "$(cat "$HOME/.config/mpv/queue_mode" 2>/dev/null | tr -d '[:space:]')" == "hybrid" ]; then
+        command mpv "$@"
+        return
+    fi
     if [ -e "$SOCKET" ]; then rm "$SOCKET"; fi
     command mpv --idle --input-ipc-server="$SOCKET" "$@"
     rm -f "$SOCKET"

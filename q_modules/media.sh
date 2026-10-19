@@ -972,7 +972,7 @@ cmd_video_toggle() {
     if is_video_window_open && [ -z "$target_idx" ]; then
         echo -e "${C_CYAN}📺 Hiding desktop video window...${C_RESET}"
         rm -f "$HOME/.cache/mpv/video_active"
-        echo -e '{"command":["script-message","safe-hide-video"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
+        echo -e '{"command":["script-message","safe-hide-video"]}\n{"command":["set_property","window-minimized",true]}\n{"command":["set_property","vid","no"]}\n{"command":["set_property","vo","null"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
         echo -e "🎧 ${C_PINK}Returned to background audio mode (video hidden)${C_RESET}"
         return 0
     fi
