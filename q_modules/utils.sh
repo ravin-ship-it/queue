@@ -212,37 +212,95 @@ load_playlist_file_to_mpv() {
     local replace_mode="${2:-replace}"
     [ ! -f "$file" ] || [ ! -s "$file" ] && return 1
 
-    local is_first=true
-    local batch=""
-    while IFS= read -r line; do
-        [ -z "$line" ] && continue
-        local clean_url="$line"
-        if [[ "$line" =~ ^http ]]; then
-            clean_url="${line%%\\t*}"
-            clean_url="${clean_url%%[[:space:]]*}"
-            clean_url=$(echo "$clean_url" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
-        fi
-        local target_path=$(format_path_for_mpv "$clean_url")
-        local m="append-play"
-        if [ "$is_first" = true ] && [ "$replace_mode" == "replace" ]; then
-            m="replace"
-            is_first=false
-        fi
-        local cmd_json=$(jq -nc --arg path "$target_path" --arg m "$m" '{"command":["loadfile",$path,$m]}')
-        batch+="${cmd_json}\n"
-    done < "$file"
+    local target_path
+    target_path=$(format_path_for_mpv "$file")
 
-    if [ -n "$batch" ]; then
-        echo -e "$batch" | nc $NC_OPTS -w 2 "$SOCKET" >/dev/null 2>&1
-        for i in {1..20}; do
-            local cnt=$(echo '{"command":["get_property","playlist-count"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0' 2>/dev/null)
-            if [[ "$cnt" =~ ^[0-9]+$ ]] && [ "$cnt" -gt 0 ]; then
-                return 0
-            fi
-            sleep 0.1
-        done
-    fi
+    # High-speed path: MPV native loadlist loads thousands of tracks instantaneously
+    local cmd_json
+    cmd_json=$(jq -nc --arg path "$target_path" --arg m "$replace_mode" '{"command":["loadlist",$path,$m]}')
+    echo "$cmd_json" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+
+    for i in {1..20}; do
+        local cnt
+        cnt=$(echo '{"command":["get_property","playlist-count"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // 0' 2>/dev/null)
+        if [[ "$cnt" =~ ^[0-9]+$ ]] && [ "$cnt" -gt 0 ]; then
+            return 0
+        fi
+        sleep 0.05
+    done
     return 0
+}
+
+ensure_windows_ytdlp_configured() {
+    local win_dir
+    win_dir=$(get_windows_user_dir)
+    [ -z "$win_dir" ] && win_dir="/mnt/c/Users/HP"
+    local win_user="${win_dir##*/}"
+
+    local win_ytdlp_dir="$win_dir/AppData/Roaming/yt-dlp"
+    mkdir -p "$win_ytdlp_dir" 2>/dev/null
+
+    local cookie_src=""
+    if [ -f "$HOME/.config/yt-dlp/cookies.txt" ]; then
+        cookie_src="$HOME/.config/yt-dlp/cookies.txt"
+    elif [ -f "$HOME/.cache/yt-dlp/cookies.txt" ]; then
+        cookie_src="$HOME/.cache/yt-dlp/cookies.txt"
+    elif [ -f "$HOME/.config/mpv/cookies.txt" ]; then
+        cookie_src="$HOME/.config/mpv/cookies.txt"
+    fi
+
+    local win_cookies_txt="$win_ytdlp_dir/cookies.txt"
+    if [ -n "$cookie_src" ] && [ ! -f "$win_cookies_txt" ]; then
+        cp "$cookie_src" "$win_cookies_txt" 2>/dev/null
+    fi
+
+    local win_conf="$win_ytdlp_dir/config"
+    if [ ! -f "$win_conf" ]; then
+        cat <<EOF > "$win_conf"
+--extractor-args "youtube:player_client=android,web"
+--no-warnings
+EOF
+        if [ -f "$win_cookies_txt" ]; then
+            echo "--cookies \"C:\\Users\\$win_user\\AppData\\Roaming\\yt-dlp\\cookies.txt\"" >> "$win_conf"
+        fi
+    fi
+
+    if [ ! -f "$win_dir/yt-dlp.conf" ] && [ -f "$win_conf" ]; then
+        cp "$win_conf" "$win_dir/yt-dlp.conf" 2>/dev/null
+    fi
+
+    local win_mpv_dir="$win_dir/AppData/Roaming/mpv"
+    mkdir -p "$win_mpv_dir" 2>/dev/null
+    if [ ! -f "$win_mpv_dir/mpv.conf" ] || grep -q "pulse" "$win_mpv_dir/mpv.conf" 2>/dev/null; then
+        cat << 'EOF' > "$win_mpv_dir/mpv.conf"
+# MPV Native Windows Configuration (Queue Engine)
+vo=gpu
+gpu-context=auto
+hwdec=auto-safe
+ao=wasapi
+audio-channels=stereo
+
+# Smooth Caching & Performance
+cache=yes
+demuxer-max-bytes=256MiB
+demuxer-max-back-bytes=64MiB
+demuxer-readahead-secs=60
+
+# YouTube / Streaming
+ytdl=yes
+ytdl-format=bestvideo[height<=1440][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo+bestaudio/best
+script-opts=ytdl_hook-ytdl_path=yt-dlp
+ytdl-raw-options=extractor-args="youtube:player_client=android,web"
+tls-verify=no
+
+# Desktop Video & Window Behavior
+autofit=50%x50%
+geometry=50%:50%
+force-window=immediate
+keep-open=yes
+title="Queue (Direct3D 11/12 Host)"
+EOF
+    fi
 }
 
 ensure_mpv_running() {
@@ -289,6 +347,8 @@ ensure_mpv_running() {
                 local win_mpv_native
                 win_mpv_native=$(wslpath -w "$win_mpv" 2>/dev/null)
                 [ -z "$win_mpv_native" ] && win_mpv_native="$win_mpv"
+
+                ensure_windows_ytdlp_configured
 
                 powershell.exe -NoProfile -Command "Start-Process -FilePath '$win_mpv_native' -ArgumentList '--idle=yes','--keep-open=yes','--vo=null','--video=no',${ytdl_arg}${script_arg}'--input-ipc-server=\\\\.\\pipe\\$pipe_name' -WindowStyle Hidden" </dev/null >/dev/null 2>&1
 

@@ -329,12 +329,12 @@ log_now_playing() {
     local artist_tag=""
     local raw_live_dur=""
     for i in {1..30}; do
-        local raw=$(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","playlist-pos"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","playlist"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","pause"]}\n{"command":["get_property","metadata"]}\n{"command":["get_property","duration"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r '
+        local raw=$(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","playlist-pos"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","path"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","pause"]}\n{"command":["get_property","metadata"]}\n{"command":["get_property","duration"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r '
             map(select(.event == null)) |
             (.[0].data // 0), "\t",
             (if .[1].data == null then -1 else .[1].data end), "\t",
             (.[2].data // ""), "\t",
-            (if .[1].data != null and .[3].data != null then .[3].data[.[1].data].filename else "" end), "\t",
+            (.[3].data // ""), "\t",
             (.[4].data // "false"), "\t",
             (.[5].data // "false"), "\t",
             (.[6].data | if type == "object" then .artist // .ARTIST // .uploader // "" else "" end), "\t",
@@ -1428,12 +1428,12 @@ cmd_play() {
     fi
 
     # Validate Index
-    local count=$(echo '{"command":["get_property","playlist-count"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0' 2>/dev/null)
+    local count=$(echo '{"command":["get_property","playlist-count"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // 0' 2>/dev/null)
     if [[ ! "$count" =~ ^[0-9]+$ ]] || [ "$count" -le 0 ]; then
         if [ -f "$LAST_PLAYLIST_FILE" ] && [ -s "$LAST_PLAYLIST_FILE" ]; then
             load_playlist_file_to_mpv "$LAST_PLAYLIST_FILE" "replace"
             restore_state_properties
-            count=$(echo '{"command":["get_property","playlist-count"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0' 2>/dev/null)
+            count=$(echo '{"command":["get_property","playlist-count"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // 0' 2>/dev/null)
         fi
     fi
     if [[ ! "$count" =~ ^[0-9]+$ ]] || [ "$index" -lt 1 ] || [ "$index" -gt "$count" ]; then

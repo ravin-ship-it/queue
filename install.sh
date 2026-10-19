@@ -298,6 +298,46 @@ if [ "$IS_WSL" = true ]; then
             fi
         fi
     fi
+
+    # Sync yt-dlp anti-bot configuration, cookies, and MPV config for Windows host
+    win_user="${win_dir##*/}"
+    win_ytdlp_dir="$win_dir/AppData/Roaming/yt-dlp"
+    mkdir -p "$win_ytdlp_dir" 2>/dev/null
+
+    cookie_src=""
+    if [ -f "$HOME/.config/yt-dlp/cookies.txt" ]; then
+        cookie_src="$HOME/.config/yt-dlp/cookies.txt"
+    elif [ -f "$HOME/.cache/yt-dlp/cookies.txt" ]; then
+        cookie_src="$HOME/.cache/yt-dlp/cookies.txt"
+    elif [ -f "$HOME/.config/mpv/cookies.txt" ]; then
+        cookie_src="$HOME/.config/mpv/cookies.txt"
+    fi
+
+    win_cookies_txt="$win_ytdlp_dir/cookies.txt"
+    if [ -n "$cookie_src" ] && [ ! -f "$win_cookies_txt" ]; then
+        cp "$cookie_src" "$win_cookies_txt" 2>/dev/null
+    fi
+
+    win_conf="$win_ytdlp_dir/config"
+    if [ ! -f "$win_conf" ]; then
+        cat <<EOF > "$win_conf"
+--extractor-args "youtube:player_client=android,web"
+--no-warnings
+EOF
+        if [ -f "$win_cookies_txt" ]; then
+            echo "--cookies \"C:\\Users\\$win_user\\AppData\\Roaming\\yt-dlp\\cookies.txt\"" >> "$win_conf"
+        fi
+    fi
+
+    if [ ! -f "$win_dir/yt-dlp.conf" ] && [ -f "$win_conf" ]; then
+        cp "$win_conf" "$win_dir/yt-dlp.conf" 2>/dev/null
+    fi
+
+    win_mpv_dir="$win_dir/AppData/Roaming/mpv"
+    mkdir -p "$win_mpv_dir" 2>/dev/null
+    if [ ! -f "$win_mpv_dir/mpv.conf" ] && [ -f "$SCRIPT_DIR/mpv.conf.example" ]; then
+        cp "$SCRIPT_DIR/mpv.conf.example" "$win_mpv_dir/mpv.conf" 2>/dev/null
+    fi
 fi
 
 # --- Cross-Platform sed In-Place Deletion Helper ---

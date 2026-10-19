@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 hybrid_bridge.py: High-speed UNIX Domain Socket to Windows Named Pipe Bridge
-Connects WSL2 Queue (q) to native Windows mpv.exe with sub-millisecond latency.
+Connects WSL2 Queue (q) to native Windows mpv.exe with sub-millisecond latency
+and strict 1:1 request/response routing.
 """
 import os
 import sys
@@ -9,6 +10,7 @@ import socket
 import select
 import subprocess
 import signal
+import re
 
 def main():
     if len(sys.argv) < 3:
@@ -38,15 +40,49 @@ def main():
         sys.stderr.write(f"Failed to start PipeRelay: {e}\n")
         sys.exit(1)
 
-    def cleanup(*args):
+    os.set_blocking(proc.stdin.fileno(), False)
+    os.set_blocking(proc.stdout.fileno(), False)
+
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(socket_path)
+    server.listen(64)
+    server.setblocking(False)
+
+    clients = set()
+    client_buffers = {}
+    client_pending = {}
+    client_eof = {}
+    pending_requests = {}
+    next_req_id = 1
+
+    proc_stdin_buf = b''
+    proc_stdout_buf = b''
+
+    req_id_regex = re.compile(rb'\"request_id\":\s*(\d+)')
+
+    def close_client(c):
+        clients.discard(c)
+        client_buffers.pop(c, None)
+        client_pending.pop(c, None)
+        client_eof.pop(c, None)
+        for rid, sock in list(pending_requests.items()):
+            if sock is c:
+                del pending_requests[rid]
         try:
-            with open("/home/xen/.cache/mpv/bridge_debug.log", "a") as f:
-                f.write(f"Cleanup called with args: {args}, proc.poll(): {proc.poll()}\n")
-        except Exception:
+            c.close()
+        except OSError:
             pass
+
+    def cleanup(*args):
         try:
             proc.terminate()
             proc.kill()
+        except Exception:
+            pass
+        for c in list(clients):
+            close_client(c)
+        try:
+            server.close()
         except Exception:
             pass
         if os.path.exists(socket_path):
@@ -63,86 +99,99 @@ def main():
     signal.signal(signal.SIGINT, cleanup)
     signal.signal(signal.SIGTERM, cleanup)
 
-    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    server.bind(socket_path)
-    server.listen(16)
-    server.setblocking(False)
-
-    clients = set()
-    inputs = [server, proc.stdout]
-
     while proc.poll() is None:
+        inputs = [server, proc.stdout] + list(clients)
+        outputs = [proc.stdin] if proc_stdin_buf else []
         try:
-            readable, _, exceptional = select.select(inputs, [], inputs, 0.5)
-        except (select.error, OSError) as e:
-            try:
-                with open("/home/xen/.cache/mpv/bridge_debug.log", "a") as f:
-                    f.write(f"Select exception: {e}\n")
-            except Exception:
-                pass
+            readable, writable, exceptional = select.select(inputs, outputs, inputs, 0.05)
+        except (select.error, OSError):
             inputs = [s for s in inputs if hasattr(s, 'fileno') and s.fileno() != -1]
             continue
 
-        for s in readable:
-            if s is server:
-                try:
-                    client_sock, _ = server.accept()
-                    client_sock.setblocking(False)
-                    inputs.append(client_sock)
-                    clients.add(client_sock)
-                except OSError:
-                    pass
-            elif s is proc.stdout:
-                line = proc.stdout.readline()
-                if not line:
-                    cleanup()
-                for c in list(clients):
-                    try:
-                        c.sendall(line)
-                    except OSError:
-                        if c in clients:
-                            clients.remove(c)
-                        if c in inputs:
-                            inputs.remove(c)
-                        try:
-                            c.close()
-                        except OSError:
-                            pass
-            else:
-                try:
-                    data = s.recv(4096)
-                    if data:
-                        proc.stdin.write(data)
-                        proc.stdin.flush()
-                    else:
-                        # Client finished sending, stop reading but keep open for response
-                        if s in inputs:
-                            inputs.remove(s)
-                except OSError:
-                    if s in inputs:
-                        inputs.remove(s)
-                    if s in clients:
-                        clients.remove(s)
-                    try:
-                        s.close()
-                    except OSError:
-                        pass
-
-        for s in exceptional:
-            if s in inputs:
-                inputs.remove(s)
-            if s in clients:
-                clients.remove(s)
+        # 1. PipeRelay STDIN (write commands to Windows MPV)
+        if proc.stdin in writable and proc_stdin_buf:
             try:
-                s.close()
+                n = os.write(proc.stdin.fileno(), proc_stdin_buf[:65536])
+                proc_stdin_buf = proc_stdin_buf[n:]
             except OSError:
                 pass
 
-    try:
-        with open("/home/xen/.cache/mpv/bridge_debug.log", "a") as f:
-            f.write(f"While loop exited! proc.poll(): {proc.poll()}\n")
-    except Exception:
-        pass
+        # 2. PipeRelay STDOUT (read responses from Windows MPV)
+        if proc.stdout in readable:
+            try:
+                chunk = os.read(proc.stdout.fileno(), 65536)
+                if not chunk:
+                    break  # Relay closed
+                proc_stdout_buf += chunk
+                while b'\n' in proc_stdout_buf:
+                    line, proc_stdout_buf = proc_stdout_buf.split(b'\n', 1)
+                    line = line + b'\n'
+                    m = req_id_regex.search(line)
+                    if m:
+                        rid = int(m.group(1))
+                        csock = pending_requests.pop(rid, None)
+                        if csock and csock in clients:
+                            try:
+                                csock.sendall(line)
+                            except OSError:
+                                close_client(csock)
+                                continue
+                            client_pending[csock] = client_pending.get(csock, 1) - 1
+                            if client_pending[csock] <= 0 and client_eof.get(csock, False):
+                                close_client(csock)
+                    else:
+                        # Async event line - route only to long-lived interactive clients
+                        for csock in list(clients):
+                            if not client_eof.get(csock, False):
+                                try:
+                                    csock.sendall(line)
+                                except OSError:
+                                    close_client(csock)
+            except OSError:
+                pass
+
+        # 3. Server & Client UNIX Sockets
+        for s in readable:
+            if s is server:
+                try:
+                    csock, _ = server.accept()
+                    csock.settimeout(10.0)
+                    clients.add(csock)
+                    client_buffers[csock] = b''
+                    client_pending[csock] = 0
+                    client_eof[csock] = False
+                except OSError:
+                    pass
+            elif s in clients:
+                try:
+                    data = s.recv(65536)
+                    if not data:
+                        # Client write EOF (shutdown write side)
+                        client_eof[s] = True
+                        if client_pending.get(s, 0) <= 0:
+                            close_client(s)
+                    else:
+                        client_buffers[s] += data
+                        while b'\n' in client_buffers[s]:
+                            cmd, client_buffers[s] = client_buffers[s].split(b'\n', 1)
+                            cmd = cmd.strip()
+                            if not cmd:
+                                continue
+                            if cmd.startswith(b'{') and cmd.endswith(b'}'):
+                                rid = next_req_id
+                                next_req_id += 1
+                                tagged = cmd[:-1] + f',\"request_id\":{rid}}}\n'.encode()
+                                pending_requests[rid] = s
+                                client_pending[s] = client_pending.get(s, 0) + 1
+                                proc_stdin_buf += tagged
+                except OSError:
+                    close_client(s)
+
+        # 4. Handle any exceptional sockets
+        for s in exceptional:
+            if s in clients:
+                close_client(s)
+
     cleanup()
 
 if __name__ == "__main__":

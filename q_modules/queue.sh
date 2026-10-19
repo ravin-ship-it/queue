@@ -747,7 +747,7 @@ queue_item_ipc() {
     fi
     
     # Get current playlist size to determine new index efficiently
-    local count=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
+    local count=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // 0')
     local next_index=$((count + 1))
 
     if [ -n "$title" ] && [ "$title" != "$url" ]; then
