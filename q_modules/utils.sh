@@ -255,24 +255,19 @@ ensure_windows_ytdlp_configured() {
     fi
 
     local win_conf="$win_ytdlp_dir/config"
-    if [ ! -f "$win_conf" ]; then
-        cat <<EOF > "$win_conf"
---extractor-args "youtube:player_client=android,web"
+    cat <<EOF > "$win_conf"
+--extractor-args "youtube:player_client=visionos,android,web"
 --no-warnings
 EOF
-        if [ -f "$win_cookies_txt" ]; then
-            echo "--cookies \"C:\\Users\\$win_user\\AppData\\Roaming\\yt-dlp\\cookies.txt\"" >> "$win_conf"
-        fi
+    if [ -f "$win_cookies_txt" ]; then
+        echo "--cookies \"C:\\Users\\$win_user\\AppData\\Roaming\\yt-dlp\\cookies.txt\"" >> "$win_conf"
     fi
 
-    if [ ! -f "$win_dir/yt-dlp.conf" ] && [ -f "$win_conf" ]; then
-        cp "$win_conf" "$win_dir/yt-dlp.conf" 2>/dev/null
-    fi
+    cp "$win_conf" "$win_dir/yt-dlp.conf" 2>/dev/null
 
     local win_mpv_dir="$win_dir/AppData/Roaming/mpv"
     mkdir -p "$win_mpv_dir" 2>/dev/null
-    if [ ! -f "$win_mpv_dir/mpv.conf" ] || grep -q "pulse" "$win_mpv_dir/mpv.conf" 2>/dev/null; then
-        cat << 'EOF' > "$win_mpv_dir/mpv.conf"
+    cat << 'EOF' > "$win_mpv_dir/mpv.conf"
 # MPV Native Windows Configuration (Queue Engine)
 vo=gpu
 gpu-context=auto
@@ -288,9 +283,9 @@ demuxer-readahead-secs=60
 
 # YouTube / Streaming
 ytdl=yes
-ytdl-format=bestvideo[height<=1440][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo+bestaudio/best
+ytdl-format=bestvideo[height<=1440][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080]+bestaudio[acodec=opus]/bestvideo[height<=1080]+bestaudio/bestvideo[height<=720]+bestaudio/bestvideo+bestaudio/best
 script-opts=ytdl_hook-ytdl_path=yt-dlp
-ytdl-raw-options=extractor-args="youtube:player_client=android,web"
+ytdl-raw-options=extractor-args="youtube:player_client=visionos,android,web"
 tls-verify=no
 
 # Desktop Video & Window Behavior
@@ -300,7 +295,6 @@ force-window=immediate
 keep-open=yes
 title="Queue (Direct3D 11/12 Host)"
 EOF
-    fi
 }
 
 ensure_mpv_running() {

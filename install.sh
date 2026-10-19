@@ -321,7 +321,7 @@ if [ "$IS_WSL" = true ]; then
     win_conf="$win_ytdlp_dir/config"
     if [ ! -f "$win_conf" ]; then
         cat <<EOF > "$win_conf"
---extractor-args "youtube:player_client=android,web"
+--extractor-args "youtube:player_client=visionos,android,web"
 --no-warnings
 EOF
         if [ -f "$win_cookies_txt" ]; then
