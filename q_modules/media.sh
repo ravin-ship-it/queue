@@ -528,7 +528,11 @@ cmd_info() {
         elif [ "$IS_MACOS" = true ]; then
             engine_badge="${C_GREEN}Native macOS 🍏${C_GRAY} (Metal / Cocoa)${C_RESET}"
         elif [ "$IS_ANDROID" = true ]; then
-            engine_badge="${C_ORANGE}Android / Termux 🤖${C_GRAY} (Audio)${C_RESET}"
+            if [ "$(get_queue_mode)" == "hybrid" ]; then
+                engine_badge="${C_ORANGE}Android Hybrid Engine 🤖⚡${C_GRAY} (MPV App + Audio Tunnel)${C_RESET}"
+            else
+                engine_badge="${C_CYAN}Standalone Termux 🐧${C_GRAY} (Headless Audio + Wake-Lock)${C_RESET}"
+            fi
         else
             engine_badge="${C_GREEN}Native Linux 🐧${C_GRAY} (Mesa / DRM)${C_RESET}"
         fi
@@ -590,6 +594,8 @@ cmd_stop() {
     # 4. Cleanup any remaining mpv instances
     pkill -u "$(whoami)" -f "mpv --idle" >/dev/null 2>&1
     pkill -u "$(whoami)" -f "hybrid_bridge.py" >/dev/null 2>&1
+    stop_android_bridge >/dev/null 2>&1 || true
+    rm -f "$HOME/.cache/mpv/android_video_active"
     if [ "$IS_WSL" = true ]; then
         taskkill.exe /F /IM mpv.exe 2>/dev/null || true
         taskkill.exe /F /IM mpv.com 2>/dev/null || true
@@ -712,27 +718,38 @@ cmd_android_video_handoff() {
     local track_url=""
     local track_title="Queue Video"
     local time_pos="0"
+    local start_offset=0
+    local total_count=0
+
+    if [ "$MPV_RUNNING" = true ] && [ -S "$SOCKET" ]; then
+        total_count=$(echo '{"command":["get_property","playlist-count"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // 0')
+    fi
+    [[ ! "$total_count" =~ ^[0-9]+$ ]] && total_count=0
 
     if [[ "$target_idx" =~ ^https?:// ]]; then
         track_url="$target_idx"
         track_title="Queue Video"
         time_pos=0
+        start_offset=0
     elif [[ "$target_idx" =~ ^[0-9]+$ ]]; then
-        local total_count
-        total_count=$(echo '{"command":["get_property","playlist-count"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // 0')
-        if [ "$target_idx" -lt 1 ] || [ "$target_idx" -gt "$total_count" ]; then
+        if [ "$total_count" -gt 0 ] && { [ "$target_idx" -lt 1 ] || [ "$target_idx" -gt "$total_count" ]; }; then
             echo -e "${C_PINK}🚫 Track [${C_ORANGE}${target_idx}${C_PINK}] does not exist. Max tracks: ${C_WHITE}[${C_ORANGE}${total_count}${C_WHITE}]${C_RESET}"
             return 1
         fi
+        start_offset=$((target_idx - 1))
         local item_raw
-        item_raw=$(echo '{"command":["get_property","playlist"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r --argjson idx "$((target_idx - 1))" 'select(.event == null) | .data[$idx] | [(.filename // ""), (.title // "Queue Video")] | @tsv')
+        item_raw=$(echo '{"command":["get_property","playlist"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r --argjson idx "$start_offset" 'select(.event == null) | .data[$idx] | [(.filename // ""), (.title // "Queue Video")] | @tsv')
         IFS=$'\t' read -r track_url track_title <<< "$item_raw"
         time_pos=0
     else
         # Target is empty: query currently active playing track from socket
         local track_raw
-        track_raw=$(echo -e '{"command":["get_property","path"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","time-pos"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | [(.[0].data // ""), (.[1].data // "Queue Video"), (.[2].data // 0)] | @tsv')
-        IFS=$'\t' read -r track_url track_title time_pos <<< "$track_raw"
+        track_raw=$(echo -e '{"command":["get_property","path"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","time-pos"]}\n{"command":["get_property","playlist-pos"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | [(.[0].data // ""), (.[1].data // "Queue Video"), (.[2].data // 0), (.[3].data // 0)] | @tsv')
+        local cur_pos=0
+        IFS=$'\t' read -r track_url track_title time_pos cur_pos <<< "$track_raw"
+        if [[ "$cur_pos" =~ ^[0-9]+$ ]]; then
+            start_offset="$cur_pos"
+        fi
     fi
 
     if [ -z "$track_url" ] || [ "$track_url" = "null" ]; then
@@ -753,30 +770,45 @@ cmd_android_video_handoff() {
     fi
 
     local stream_url=""
+    local is_playlist=false
 
     # --- 4. Resolve stream target for mobile MPV ---
-    if [[ "$track_url" =~ ^https?:// ]]; then
-        echo -e "${C_CYAN}📱 Android Video Handoff: Resolving direct stream via yt-dlp...${C_RESET}"
-        stream_url=$(yt-dlp -g --no-warnings --extractor-args "youtube:player_client=android,web" -f "best[ext=mp4]/best" "$track_url" 2>/dev/null | head -n 1)
-        if [ -z "$stream_url" ]; then
-            stream_url=$(yt-dlp -g --no-warnings "$track_url" 2>/dev/null | head -n 1)
+    if [ "$total_count" -gt 1 ] && [[ ! "$target_idx" =~ ^https?:// ]]; then
+        echo -e "${C_CYAN}📱 Initializing Android Stream Bridge for continuous playback...${C_RESET}"
+        local bridge_port
+        bridge_port=$(ensure_android_bridge_running)
+        if [ -n "$bridge_port" ]; then
+            stream_url="http://127.0.0.1:${bridge_port}/playlist.m3u?start=${start_offset}"
+            # Pre-warm bridge to generate M3U and mirror to /sdcard/Download
+            curl -s -m 2 "$stream_url" >/dev/null 2>&1 || true
+            is_playlist=true
         fi
-        if [ -z "$stream_url" ]; then
-            echo -e "${C_PINK}❌ Failed to extract stream URL for mobile video player.${C_RESET}"
-            return 1
-        fi
-    else
-        # Local file handling: check shared storage vs Termux sandbox
-        if [[ "$track_url" =~ ^/sdcard/ ]] || [[ "$track_url" =~ ^/storage/ ]]; then
-            stream_url="file://$track_url"
+    fi
+
+    if [ -z "$stream_url" ]; then
+        if [[ "$track_url" =~ ^https?:// ]]; then
+            echo -e "${C_CYAN}📱 Android Video Handoff: Resolving direct stream via yt-dlp...${C_RESET}"
+            stream_url=$(yt-dlp -g --no-warnings --extractor-args "youtube:player_client=android,web" -f "best[ext=mp4]/b/best" "$track_url" 2>/dev/null | head -n 1)
+            if [ -z "$stream_url" ]; then
+                stream_url=$(yt-dlp -g --no-warnings "$track_url" 2>/dev/null | head -n 1)
+            fi
+            if [ -z "$stream_url" ]; then
+                echo -e "${C_PINK}❌ Failed to extract stream URL for mobile video player.${C_RESET}"
+                return 1
+            fi
         else
-            local shared_dir="/sdcard/Download/queue_handoff"
-            mkdir -p "$shared_dir" 2>/dev/null || true
-            local dest_file="$shared_dir/$(basename "$track_url")"
-            if cp "$track_url" "$dest_file" 2>/dev/null; then
-                stream_url="file://$dest_file"
-            else
+            # Local file handling: check shared storage vs Termux sandbox
+            if [[ "$track_url" =~ ^/sdcard/ ]] || [[ "$track_url" =~ ^/storage/ ]]; then
                 stream_url="file://$track_url"
+            else
+                local shared_dir="/sdcard/Download/queue_handoff"
+                mkdir -p "$shared_dir" 2>/dev/null || true
+                local dest_file="$shared_dir/$(basename "$track_url")"
+                if cp "$track_url" "$dest_file" 2>/dev/null; then
+                    stream_url="file://$dest_file"
+                else
+                    stream_url="file://$track_url"
+                fi
             fi
         fi
     fi
@@ -798,25 +830,38 @@ cmd_android_video_handoff() {
 
     local launched=false
     # Priority 1: Play Store MPV app (is.xyz.mpv/.MPVActivity) with position & title
-    if $am_bin start -a android.intent.action.VIEW -d "$stream_url" -t "video/*" -n "is.xyz.mpv/.MPVActivity" --ei "position" "$pos_ms" --es "title" "$track_title" >/dev/null 2>&1; then
+    if $am_bin start -a android.intent.action.VIEW -d "$stream_url" -n "is.xyz.mpv/.MPVActivity" --ei "position" "$pos_ms" --es "title" "$track_title" >/dev/null 2>&1; then
         launched=true
-        echo -e "${C_GREEN}✨ Video opened in Play Store MPV Android!${C_RESET}"
-    # Priority 2: Generic Android video intent (VLC, MX Player, system chooser)
+        echo -e "${C_GREEN}✨ Opened in Play Store MPV Android!${C_RESET}"
+    elif $am_bin start -a android.intent.action.VIEW -d "$stream_url" -t "video/*" -n "is.xyz.mpv/.MPVActivity" --ei "position" "$pos_ms" --es "title" "$track_title" >/dev/null 2>&1; then
+        launched=true
+        echo -e "${C_GREEN}✨ Opened in Play Store MPV Android!${C_RESET}"
+    # Priority 2: Shared storage playlist file fallback
+    elif [ "$is_playlist" = true ] && [ -f "/sdcard/Download/queue_playlist.m3u" ] && $am_bin start -a android.intent.action.VIEW -d "file:///sdcard/Download/queue_playlist.m3u" -n "is.xyz.mpv/.MPVActivity" --ei "position" "$pos_ms" --es "title" "$track_title" >/dev/null 2>&1; then
+        launched=true
+        echo -e "${C_GREEN}✨ Local playlist file opened in Play Store MPV Android!${C_RESET}"
+    # Priority 3: Generic Android media intent (VLC, MX Player, system chooser)
+    elif $am_bin start -a android.intent.action.VIEW -d "$stream_url" --ei "position" "$pos_ms" --es "title" "$track_title" >/dev/null 2>&1; then
+        launched=true
+        echo -e "${C_GREEN}✨ Media opened in Android player!${C_RESET}"
     elif $am_bin start -a android.intent.action.VIEW -d "$stream_url" -t "video/*" --ei "position" "$pos_ms" --es "title" "$track_title" >/dev/null 2>&1; then
         launched=true
-        echo -e "${C_GREEN}✨ Video opened in Android media player!${C_RESET}"
-    # Priority 3: Termux URL opening tools
+        echo -e "${C_GREEN}✨ Media opened in Android video player!${C_RESET}"
+    # Priority 4: Termux URL opening tools
     elif command -v termux-open-url >/dev/null 2>&1; then
         termux-open-url "$stream_url" >/dev/null 2>&1
         launched=true
-        echo -e "${C_GREEN}✨ Video stream sent via termux-open-url!${C_RESET}"
+        echo -e "${C_GREEN}✨ Stream sent via termux-open-url!${C_RESET}"
     elif command -v termux-open >/dev/null 2>&1; then
         termux-open "$stream_url" >/dev/null 2>&1
         launched=true
-        echo -e "${C_GREEN}✨ Video stream sent via termux-open!${C_RESET}"
+        echo -e "${C_GREEN}✨ Stream sent via termux-open!${C_RESET}"
     fi
 
     if [ "$launched" = true ]; then
+        if [ "$is_playlist" = true ]; then
+            echo -e "   ${C_TEAL}Queue:${C_WHITE} ${total_count} tracks connected ${C_GRAY}(Continuous background playback)${C_RESET}"
+        fi
         echo -e "${C_GRAY}💡 Termux background audio paused. Run ${C_WHITE}'q -vid'${C_GRAY} or ${C_WHITE}'q -p'${C_GRAY} to resume audio in Termux.${C_RESET}"
         return 0
     else
@@ -1040,13 +1085,148 @@ cmd_hybrid_toggle() {
             echo -e "${C_PINK}ℹ️  Hybrid Boost Mode is designed specifically for Windows + WSL2.${C_RESET}"
             echo -e "${C_CYAN}🍏 Your macOS system is already running native Metal/Cocoa with direct 120 FPS+ hardware acceleration!${C_RESET}"
         elif [ "$IS_ANDROID" = true ] || (command -v getprop >/dev/null 2>&1 && [ -d "/data/data/com.termux" ]); then
-            print_header_box "${C_PINK}📱 Queue Hybrid Engine (Android / Termux)${C_RESET}"
-            print_boxed_line "${C_TEAL}Audio Engine:  ${C_WHITE}Termux Headless MPV + CPU Wake-Lock (Screen-off battery saver)${C_RESET}"
-            print_boxed_line "${C_TEAL}Video Engine:  ${C_WHITE}Play Store MPV App ('is.xyz.mpv') via Android Intent Handoff${C_RESET}"
-            print_boxed_line "${C_TEAL}Video Handoff: ${C_ORANGE}Active (type 'q -vid' or press 'v' in 'q -i' to hand off)${C_RESET}"
-            printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
-            B_LINE=${B_LINE// /─}
-            echo -e "${C_GRAY}${B_LINE}${C_RESET}"
+            local cur_mode
+            cur_mode=$(get_queue_mode)
+
+            if [ "$action" == "config" ]; then
+                echo -e "${C_CYAN}⚙️ Configuring MPV Android hardware acceleration profile...${C_RESET}"
+                if ensure_android_mpv_config; then
+                    echo -e "${C_GREEN}✅ /sdcard/mpv/mpv.conf created and optimized:${C_RESET}"
+                    echo -e "   ${C_TEAL}• hwdec=mediacodec:${C_RESET} ${C_WHITE}Direct Qualcomm/Mali/MediaTek GPU video decoding${C_RESET}"
+                    echo -e "   ${C_TEAL}• vo=gpu-next:${C_RESET}      ${C_WHITE}libplacebo engine with HDR tone-mapping & 10-bit color${C_RESET}"
+                    echo -e "   ${C_TEAL}• audio-channels=stereo:${C_RESET} ${C_WHITE}Android AudioTrack / AAudio hardware audio tunneling${C_RESET}"
+                    echo -e "   ${C_TEAL}• demuxer-max-bytes=128MiB:${C_RESET} ${C_WHITE}High-speed readahead network buffer${C_RESET}"
+                    echo -e "   ${C_TEAL}• ytdl=no:${C_RESET}          ${C_WHITE}Direct streaming via Queue loopback bridge${C_RESET}"
+                    echo -e "${C_GRAY}💡 Tip: Inside MPV Android app settings, set 'Background play' to 'Always'.${C_RESET}"
+                else
+                    echo -e "${C_PINK}⚠️ Unable to write to /sdcard/mpv/mpv.conf.${C_RESET}"
+                    echo -e "${C_YELLOW}👉 Run 'termux-setup-storage' to grant Termux storage permissions, then try again.${C_RESET}"
+                fi
+                return 0
+            fi
+
+            if [ "$action" == "status" ]; then
+                local mpv_pkg=false
+                if command -v pm >/dev/null 2>&1 && pm list packages is.xyz.mpv 2>/dev/null | grep -q "is.xyz.mpv"; then
+                    mpv_pkg=true
+                elif command -v am >/dev/null 2>&1 || [ -x "/system/bin/am" ]; then
+                    mpv_pkg=true
+                fi
+
+                local bridge_alive=false
+                local bridge_port="8989"
+                if [ -f "$HOME/.cache/mpv/android_bridge.port" ]; then
+                    bridge_port=$(cat "$HOME/.cache/mpv/android_bridge.port" 2>/dev/null | tr -d '[:space:]')
+                    if curl -s -m 0.5 "http://127.0.0.1:${bridge_port}/status" >/dev/null 2>&1; then
+                        bridge_alive=true
+                    fi
+                fi
+
+                local conf_found=false
+                for cf in "/sdcard/mpv/mpv.conf" "/storage/emulated/0/mpv/mpv.conf" "$HOME/storage/shared/mpv/mpv.conf"; do
+                    [ -f "$cf" ] && conf_found=true && break
+                done
+
+                print_header_box "${C_PINK}📱 Queue Engine Status (Android / Termux)${C_RESET}"
+                if [ "$cur_mode" == "hybrid" ]; then
+                    print_boxed_line "${C_TEAL}Active Engine:  ${C_ORANGE}Hybrid Mobile Mode 🤖⚡${C_RESET}"
+                    print_boxed_line "${C_TEAL}Video Engine:   ${C_WHITE}Play Store MPV App ('is.xyz.mpv') via Android Intent${C_RESET}"
+                    print_boxed_line "${C_TEAL}Audio Pipeline: ${C_WHITE}Android AudioTrack / AAudio (Hardware Audio Tunneling)${C_RESET}"
+                    print_boxed_line "${C_TEAL}Acceleration:   ${C_WHITE}MediaCodec GPU + libplacebo (gpu-next, PiP, lock-screen)${C_RESET}"
+                else
+                    print_boxed_line "${C_TEAL}Active Engine:  ${C_CYAN}Standalone Termux Mode 🐧${C_RESET}"
+                    print_boxed_line "${C_TEAL}Playback:       ${C_WHITE}Headless Termux MPV + CPU Wake-Lock (Screen-off battery saver)${C_RESET}"
+                    print_boxed_line "${C_TEAL}Audio Pipeline: ${C_WHITE}Termux Audio Output (Zero GUI overhead)${C_RESET}"
+                    print_boxed_line "${C_TEAL}Video Handoff:  ${C_WHITE}On-Demand (type 'q -vid' or press 'v' in 'q -i')${C_RESET}"
+                fi
+                echo -e "${C_GRAY}${H_LINE}${C_RESET}"
+                if [ "$mpv_pkg" = true ]; then
+                    print_boxed_line "${C_TEAL}MPV Android:    ${C_GREEN}Available ✅${C_RESET} ${C_GRAY}(is.xyz.mpv package)${C_RESET}"
+                else
+                    print_boxed_line "${C_TEAL}MPV Android:    ${C_PINK}Not Detected ❌${C_RESET} ${C_GRAY}(Install from Play Store)${C_RESET}"
+                fi
+                if [ "$bridge_alive" = true ]; then
+                    print_boxed_line "${C_TEAL}Stream Bridge:  ${C_GREEN}Active ✅${C_RESET} ${C_GRAY}(127.0.0.1:${bridge_port})${C_RESET}"
+                else
+                    print_boxed_line "${C_TEAL}Stream Bridge:  ${C_GRAY}Standby 💤 (Auto-spawns on handoff)${C_RESET}"
+                fi
+                if [ "$conf_found" = true ]; then
+                    print_boxed_line "${C_TEAL}Config Profile: ${C_GREEN}Optimized ✅${C_RESET} ${C_GRAY}(/sdcard/mpv/mpv.conf)${C_RESET}"
+                else
+                    print_boxed_line "${C_TEAL}Config Profile: ${C_YELLOW}Missing ⚠️${C_RESET} ${C_GRAY}(Run: q -hybrid config)${C_RESET}"
+                fi
+                printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
+                B_LINE=${B_LINE// /─}
+                echo -e "${C_GRAY}${B_LINE}${C_RESET}"
+                echo -e "${C_GRAY}💡 Tip: Switch engines anytime with ${C_WHITE}q -hybrid on${C_GRAY} or ${C_WHITE}q -hybrid off${C_RESET}"
+                return 0
+            fi
+
+            local target_mode=""
+            if [ "$action" == "on" ] || [ "$action" == "enable" ] || [ "$action" == "1" ]; then
+                target_mode="hybrid"
+            elif [ "$action" == "off" ] || [ "$action" == "disable" ] || [ "$action" == "0" ]; then
+                target_mode="standalone"
+            elif [ -z "$action" ] || [ "$action" == "toggle" ]; then
+                if [ "$cur_mode" == "hybrid" ]; then
+                    target_mode="standalone"
+                else
+                    target_mode="hybrid"
+                fi
+            else
+                echo -e "${C_PINK}❓ Unknown hybrid command: \"$action\"${C_RESET}"
+                echo -e "${C_GRAY}Usage: ${C_WHITE}q -hybrid [on|off|status|config]${C_RESET}"
+                return 1
+            fi
+
+            if [ "$cur_mode" == "$target_mode" ]; then
+                if [ "$target_mode" == "hybrid" ]; then
+                    echo -e "⚡ ${C_ORANGE}Hybrid Mobile Mode is already active!${C_RESET} (Play Store MPV, Audio Tunneling, MediaCodec GPU)"
+                else
+                    echo -e "🐧 ${C_CYAN}Standalone Termux Mode is already active!${C_RESET} (Headless MPV daemon, CPU Wake-Lock)"
+                fi
+                return 0
+            fi
+
+            # Save new engine preference
+            mkdir -p "$HOME/.config/mpv"
+            echo "$target_mode" > "$HOME/.config/mpv/queue_mode"
+
+            if [ "$target_mode" == "hybrid" ]; then
+                echo -e "⚡ ${C_ORANGE}Switched to Android Hybrid Mode!${C_RESET}"
+                echo -e "   ${C_TEAL}Playback Engine:${C_RESET} ${C_WHITE}Play Store MPV App ('is.xyz.mpv')${C_RESET}"
+                echo -e "   ${C_TEAL}Video Pipeline:${C_RESET}  ${C_WHITE}MediaCodec GPU + libplacebo (gpu-next, PiP, Lockscreen)${C_RESET}"
+                echo -e "   ${C_TEAL}Audio Pipeline:${C_RESET}  ${C_WHITE}Android AudioTrack / AAudio (Hardware Audio Tunneling)${C_RESET}"
+                ensure_android_bridge_running >/dev/null 2>&1 || true
+                ensure_android_mpv_config >/dev/null 2>&1 || true
+                echo -e "   ${C_GRAY}💡 To switch back anytime: ${C_WHITE}q -hybrid off${C_RESET}"
+
+                # If audio was actively playing in Termux MPV, seamlessly hand off to Android MPV!
+                if [ "$MPV_RUNNING" = true ] && [ -S "$SOCKET" ]; then
+                    local is_paused
+                    is_paused=$(echo '{"command":["get_property","pause"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // false')
+                    if [ "$is_paused" != "true" ]; then
+                        echo -e "${C_PINK}🔄 Migrating active playback to Play Store MPV Android...${C_RESET}"
+                        cmd_android_video_handoff ""
+                    fi
+                fi
+            else
+                echo -e "🐧 ${C_CYAN}Switched to Standalone Termux Mode!${C_RESET}"
+                echo -e "   ${C_TEAL}Playback Engine:${C_RESET} ${C_WHITE}Headless Termux MPV + CPU Wake-Lock${C_RESET}"
+                echo -e "   ${C_TEAL}Battery Profile:${C_RESET} ${C_WHITE}Max battery saver (Screen-off background audio)${C_RESET}"
+                echo -e "   ${C_TEAL}Video Engine:${C_RESET}    ${C_WHITE}Accessible on-demand via 'q -vid'${C_RESET}"
+                stop_android_bridge >/dev/null 2>&1 || true
+                echo -e "   ${C_GRAY}💡 To switch to Hybrid Mobile mode anytime: ${C_WHITE}q -hybrid on${C_RESET}"
+
+                # If Android MPV was active, resume audio in Termux MPV!
+                if [ -f "$HOME/.cache/mpv/android_video_active" ]; then
+                    rm -f "$HOME/.cache/mpv/android_video_active"
+                    if [ "$MPV_RUNNING" = true ] && [ -S "$SOCKET" ]; then
+                        echo '{"command":["set_property","pause",false]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+                        echo -e "🎧 ${C_PINK}Resumed background audio in Termux MPV${C_RESET}"
+                    fi
+                fi
+            fi
             return 0
         else
             echo -e "${C_PINK}ℹ️  Hybrid Boost Mode is designed specifically for Windows + WSL2.${C_RESET}"
@@ -1540,6 +1720,9 @@ cmd_play() {
             echo '{ "command": ["set_property", "pause", false] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
             wait_for_playback_start
             log_now_playing "|> Restored & Playing: "
+            if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+                cmd_android_video_handoff ""
+            fi
         else
             # Single atomic IPC query to get pause, idle-active, eof-reached, playlist-pos, playlist-count
             local state_raw=$(echo -e '{"command":["get_property","pause"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","eof-reached"]}\n{"command":["get_property","playlist-pos"]}\n{"command":["get_property","playlist-count"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r 'map(select(.event == null)) | (.[0].data // false), "\t", (.[1].data // false), "\t", (.[2].data // false), "\t", (if .[3].data == null then -1 else .[3].data end), "\t", (.[4].data // 0)')
@@ -1556,6 +1739,9 @@ cmd_play() {
                     echo '{ "command": ["set_property", "pause", false] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
                     wait_for_playback_start
                     log_now_playing "|> Restored & Playing: "
+                    if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+                        cmd_android_video_handoff ""
+                    fi
                     return
                 fi
                 echo -e "${C_ORANGE}⚠️ Queue is empty.${C_RESET}"
@@ -1571,6 +1757,9 @@ cmd_play() {
                 echo '{ "command": ["set_property", "pause", false] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
                 wait_for_playback_start
                 log_now_playing "|> Playing: "
+                if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+                    cmd_android_video_handoff ""
+                fi
             elif [ "$cur_pause" == "true" ]; then
                 # Unpause
                 echo '{ "command": ["set_property", "pause", false] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
@@ -1586,6 +1775,9 @@ cmd_play() {
                 fi
                 wait_for_playback_start
                 log_now_playing "|> Playing: "
+                if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+                    cmd_android_video_handoff ""
+                fi
             else
                 # Pause
                 echo '{ "command": ["set_property", "pause", true] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
@@ -1633,4 +1825,7 @@ cmd_play() {
     wait_for_playback_start
     log_now_playing "|> Playing: "
 
+    if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+        cmd_android_video_handoff "$index"
+    fi
 }

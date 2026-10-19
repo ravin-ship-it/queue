@@ -83,7 +83,7 @@ check_and_resume() {
 }
 
 get_queue_mode() {
-    if [ "$IS_WSL" = true ] && [ -f "$HOME/.config/mpv/queue_mode" ]; then
+    if ([ "$IS_WSL" = true ] || [ "$IS_ANDROID" = true ]) && [ -f "$HOME/.config/mpv/queue_mode" ]; then
         local mode
         mode=$(cat "$HOME/.config/mpv/queue_mode" 2>/dev/null | tr -d '[:space:]')
         if [ "$mode" == "hybrid" ]; then
@@ -313,6 +313,146 @@ force-window=immediate
 keep-open=yes
 title="Queue (Direct3D 11/12 Host)"
 EOF
+}
+
+ensure_android_bridge_running() {
+    local cache_dir="$HOME/.cache/mpv"
+    local pid_file="$cache_dir/android_bridge.pid"
+    local port_file="$cache_dir/android_bridge.port"
+    local port=8989
+
+    if [ -f "$port_file" ]; then
+        port=$(cat "$port_file" 2>/dev/null | tr -d '[:space:]')
+        [[ ! "$port" =~ ^[0-9]+$ ]] && port=8989
+    fi
+
+    # Fast check: If process alive and responding to status ping
+    if [ -f "$pid_file" ]; then
+        local b_pid
+        b_pid=$(cat "$pid_file" 2>/dev/null | tr -d '[:space:]')
+        if [ -n "$b_pid" ] && kill -0 "$b_pid" 2>/dev/null; then
+            if curl -s -m 1 "http://127.0.0.1:${port}/status" >/dev/null 2>&1; then
+                echo "$port"
+                return 0
+            fi
+        fi
+    fi
+
+    # Clean stale runtime files
+    rm -f "$pid_file" "$port_file"
+    mkdir -p "$cache_dir"
+
+    # Locate bridge script
+    local bridge_script=""
+    local candidates=(
+        "${MODULE_DIR:-}/android_stream_bridge.py"
+        "${SCRIPT_DIR:-}/q_modules/android_stream_bridge.py"
+        "$HOME/.local/bin/mpv/q_modules/android_stream_bridge.py"
+    )
+    for c in "${candidates[@]}"; do
+        if [ -f "$c" ]; then
+            bridge_script="$c"
+            break
+        fi
+    done
+
+    if [ -z "$bridge_script" ]; then
+        echo ""
+        return 1
+    fi
+
+    # Launch daemon
+    if command -v setsid >/dev/null 2>&1; then
+        setsid python3 "$bridge_script" </dev/null >/dev/null 2>&1 &
+    else
+        nohup python3 "$bridge_script" </dev/null >/dev/null 2>&1 &
+    fi
+    disown
+
+    # Wait up to 3s for bridge to bind and write port
+    for _ in {1..15}; do
+        if [ -f "$port_file" ]; then
+            port=$(cat "$port_file" 2>/dev/null | tr -d '[:space:]')
+            if [[ "$port" =~ ^[0-9]+$ ]] && curl -s -m 0.5 "http://127.0.0.1:${port}/status" >/dev/null 2>&1; then
+                echo "$port"
+                return 0
+            fi
+        fi
+        sleep 0.2
+    done
+
+    if [ -f "$port_file" ]; then
+        port=$(cat "$port_file" 2>/dev/null | tr -d '[:space:]')
+        if [[ "$port" =~ ^[0-9]+$ ]]; then
+            echo "$port"
+            return 0
+        fi
+    fi
+
+    echo "8989"
+    return 0
+}
+
+stop_android_bridge() {
+    local cache_dir="$HOME/.cache/mpv"
+    local port_file="$cache_dir/android_bridge.port"
+    local pid_file="$cache_dir/android_bridge.pid"
+
+    if [ -f "$port_file" ]; then
+        local port
+        port=$(cat "$port_file" 2>/dev/null | tr -d '[:space:]')
+        if [[ "$port" =~ ^[0-9]+$ ]]; then
+            curl -s -m 0.5 "http://127.0.0.1:${port}/quit" >/dev/null 2>&1 || true
+        fi
+    fi
+
+    if [ -f "$pid_file" ]; then
+        local b_pid
+        b_pid=$(cat "$pid_file" 2>/dev/null | tr -d '[:space:]')
+        [ -n "$b_pid" ] && kill "$b_pid" 2>/dev/null || true
+    fi
+
+    pkill -f "android_stream_bridge.py" 2>/dev/null || true
+    rm -f "$pid_file" "$port_file"
+}
+
+ensure_android_mpv_config() {
+    local target_dir=""
+    for d in "/sdcard/mpv" "/storage/emulated/0/mpv" "$HOME/storage/shared/mpv"; do
+        if [ -d "$d" ] || mkdir -p "$d" 2>/dev/null; then
+            target_dir="$d"
+            break
+        fi
+    done
+
+    if [ -z "$target_dir" ]; then
+        return 1
+    fi
+
+    local conf_file="$target_dir/mpv.conf"
+    cat << 'CONF_EOF' > "$conf_file"
+# === MPV Android Configuration for Queue Hybrid Mode ===
+# Hardware video decoding via Android MediaCodec
+hwdec=mediacodec
+
+# Advanced video rendering backend (libplacebo for HDR & OLED color accuracy)
+vo=gpu-next
+
+# Android AudioTrack / AAudio output (Audio Tunneling)
+audio-channels=stereo
+
+# Network caching & fast playback start buffer
+demuxer-max-bytes=128MiB
+demuxer-readahead-secs=30
+
+# Seamless playlist queue persistence
+keep-open=yes
+save-position-on-quit=no
+
+# Direct streaming bypass (Queue bridge resolves streams)
+ytdl=no
+CONF_EOF
+    return 0
 }
 
 ensure_mpv_running() {

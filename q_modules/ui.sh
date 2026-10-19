@@ -123,6 +123,7 @@ cmd_update_ytdlp() {
         "q_modules/playlist.sh"
         "q_modules/download.sh"
         "q_modules/hybrid_bridge.py"
+        "q_modules/android_stream_bridge.py"
         "scripts/PipeRelay.cs"
         "scripts/queue_video.lua"
     )
@@ -144,7 +145,7 @@ cmd_update_ytdlp() {
     fi
 
     # Always ensure executable permissions and symlinks
-    chmod +x "$dest_dir/q" "$dest_dir/q_modules/hybrid_bridge.py" 2>/dev/null || true
+    chmod +x "$dest_dir/q" "$dest_dir/q_modules/hybrid_bridge.py" "$dest_dir/q_modules/android_stream_bridge.py" 2>/dev/null || true
     mkdir -p "$HOME/.local/bin"
     ln -sf "$dest_dir/q" "$HOME/.local/bin/q"
     if [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ] && [ -w "$PREFIX/bin" ]; then
@@ -284,7 +285,11 @@ show_help() {
     print_boxed_line "  -i [N|url]      Metadata & Track Inspector (Synced Resolution)"
     print_boxed_line "  -vid [sz|N]     Toggle Desktop Video Window ${C_GRAY}(small|med|large|F11)${C_RESET}"
     print_boxed_line "  -res [val]      Set/Check Video Quality ${C_GRAY}(720|1080|1440|4k|auto)${C_RESET}"
-    print_boxed_line "  -hybrid [o|off] Toggle Dual-Engine: Standalone (60 FPS) vs Hybrid (120+ FPS)"
+    if [ "$IS_ANDROID" = true ]; then
+        print_boxed_line "  -hybrid [o|off] Toggle Dual-Engine: Standalone (Termux Audio) vs Hybrid (MPV App)"
+    else
+        print_boxed_line "  -hybrid [o|off] Toggle Dual-Engine: Standalone (60 FPS) vs Hybrid (120+ FPS)"
+    fi
     print_boxed_line "  -d / -dl [N|u]  Interactive Downloader Hub (Format & Dir Wizard)"
     print_boxed_line "  -p [N]          Play/Pause or Jump to track N ${C_GRAY}(Supports: 10+5)${C_RESET}"
     print_boxed_line "  -next / -prev   Next/Prev track ${C_GRAY}(Synced Logs)${C_RESET}"
@@ -343,6 +348,9 @@ show_help() {
     if [ "$IS_WSL" = true ]; then
         echo -e "${C_GRAY}${H_LINE}${C_RESET}"
         print_boxed_line "${C_GRAY}💡 Tip: Use ${C_WHITE}q -hybrid on${C_GRAY} for 120+ FPS Direct3D & native WASAPI audio!${C_RESET}"
+    elif [ "$IS_ANDROID" = true ]; then
+        echo -e "${C_GRAY}${H_LINE}${C_RESET}"
+        print_boxed_line "${C_GRAY}💡 Tip: Use ${C_WHITE}q -hybrid on${C_GRAY} for Play Store MPV + Android Audio Tunneling!${C_RESET}"
     fi
     printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
     B_LINE=${B_LINE// /─}

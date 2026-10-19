@@ -152,7 +152,7 @@ echo -e "${CYAN}📦 Installing Queue engine into $DEST_DIR...${NC}"
 # Clean existing symlinks/files in destination before copying permanent files
 rm -rf "$DEST_DIR/q" "$DEST_DIR/q_modules" "$DEST_DIR/scripts"
 cp -r "$REPO_DIR/q" "$REPO_DIR/q_modules" "$REPO_DIR/scripts" "$DEST_DIR/"
-chmod +x "$DEST_DIR/q"
+chmod +x "$DEST_DIR/q" "$DEST_DIR/q_modules/hybrid_bridge.py" "$DEST_DIR/q_modules/android_stream_bridge.py" 2>/dev/null || true
 
 # Link to user and system bin paths for instant zero-restart availability
 ln -sf "$DEST_DIR/q" "$HOME/.local/bin/q"
@@ -365,6 +365,48 @@ EOF
     if [ ! -f "$win_mpv_dir/mpv.conf" ] && [ -f "$SCRIPT_DIR/mpv.conf.example" ]; then
         cp "$SCRIPT_DIR/mpv.conf.example" "$win_mpv_dir/mpv.conf" 2>/dev/null
     fi
+fi
+
+# --- Dual-Engine Architecture (Android / Termux Optimization) ---
+if [ "$IS_ANDROID" = true ]; then
+    echo -e "\n${CYAN}🤖 Android / Termux Dual-Engine Configuration...${NC}"
+    echo -e "${YELLOW}💡 ENGINE CHOICES FOR ANDROID / TERMUX:${NC}"
+    echo -e "   1. ${GREEN}Standalone Termux Mode (Default):${NC} Headless terminal MPV audio + CPU wake-lock (ultra-low battery)."
+    echo -e "   2. ${YELLOW}Hybrid Mobile Mode:${NC} Play Store MPV ('is.xyz.mpv') with MediaCodec GPU hardware acceleration,"
+    echo -e "      Android AudioTrack tunneling, background playback, and Picture-in-Picture!"
+
+    # Auto-generate or optimize /sdcard/mpv/mpv.conf if storage is accessible
+    for mpv_dir in "/sdcard/mpv" "/storage/emulated/0/mpv" "$HOME/storage/shared/mpv"; do
+        if [ -d "$mpv_dir" ] || mkdir -p "$mpv_dir" 2>/dev/null; then
+            if [ ! -f "$mpv_dir/mpv.conf" ]; then
+                cat << 'EOF' > "$mpv_dir/mpv.conf"
+# === MPV Android Configuration for Queue Hybrid Mode ===
+# Hardware video decoding via Android MediaCodec
+hwdec=mediacodec
+
+# Advanced video rendering backend (libplacebo for HDR & OLED color accuracy)
+vo=gpu-next
+
+# Android AudioTrack / AAudio output (Audio Tunneling)
+audio-channels=stereo
+
+# Network caching & fast playback start buffer
+demuxer-max-bytes=128MiB
+demuxer-readahead-secs=30
+
+# Seamless playlist queue persistence
+keep-open=yes
+save-position-on-quit=no
+
+# Direct streaming bypass
+ytdl=no
+EOF
+                echo -e "${GREEN}✅ Configured optimized hardware profile at $mpv_dir/mpv.conf${NC}"
+            fi
+            break
+        fi
+    done
+    echo -e "   👉 You can toggle between engines anytime with: ${CYAN}q -hybrid on${NC} or ${CYAN}q -hybrid off${NC}"
 fi
 
 # --- Cross-Platform sed In-Place Deletion Helper ---
