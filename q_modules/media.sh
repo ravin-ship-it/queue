@@ -546,6 +546,47 @@ cmd_info() {
 cmd_next() {
     if [ "$MPV_RUNNING" = false ]; then echo -e "${C_PINK}😴💤 MPV isn't running... it must be taking a nap${C_RESET}"; return; fi
 
+    local raw_info
+    raw_info=$(echo -e '{"command":["get_property","shuffle"]}\n{"command":["get_property","playlist-count"]}\n{"command":["get_property","playlist-pos"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | (.[0].data // false), (.[1].data // 0), (.[2].data // -1)' 2>/dev/null)
+    local s_arr=($raw_info)
+    local is_shuf="${s_arr[0]}"
+    local pl_count="${s_arr[1]}"
+    local cur_pos="${s_arr[2]}"
+
+    if [ "$is_shuf" == "true" ] && [[ "$pl_count" =~ ^[0-9]+$ ]] && [ "$pl_count" -gt 1 ]; then
+        local hist_file
+        hist_file=$(get_shuffle_history_file)
+        # Record current position in shuffle history stack
+        if [[ "$cur_pos" =~ ^[0-9]+$ ]] && [ "$cur_pos" -ge 0 ]; then
+            mkdir -p "$(dirname "$hist_file")" 2>/dev/null
+            echo "$cur_pos" >> "$hist_file"
+        fi
+
+        # Pick a random track index different from current
+        local rand_idx=$cur_pos
+        local attempts=0
+        while [ "$rand_idx" -eq "$cur_pos" ] && [ "$attempts" -lt 20 ]; do
+            rand_idx=$(( RANDOM % pl_count ))
+            ((attempts++))
+        done
+
+        if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+            echo "{\"command\":[\"playlist-play-index\",$rand_idx]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+            echo '{"command":["set_property","pause",true]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+            send_android_mpv_cmd "playlist-play-index $rand_idx"
+            command -v input >/dev/null 2>&1 && input keyevent 87 2>/dev/null || true
+            ( auto_queue_related ) >/dev/null 2>&1 & disown
+            log_now_playing
+            return
+        fi
+
+        echo "{\"command\":[\"playlist-play-index\",$rand_idx]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+        ( auto_queue_related ) >/dev/null 2>&1 & disown
+        wait_for_playback_start
+        log_now_playing
+        return
+    fi
+
     if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
         echo '{ "command": ["playlist-next"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
         echo '{ "command": ["set_property", "pause", true] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
@@ -567,6 +608,35 @@ cmd_next() {
 
 cmd_prev() {
     if [ "$MPV_RUNNING" = false ]; then echo -e "${C_PINK}😴💤 MPV isn't running... it must be taking a nap${C_RESET}"; return; fi
+
+    local is_shuf="false"
+    is_shuf=$(echo '{"command":["get_property","shuffle"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // false')
+    local hist_file
+    hist_file=$(get_shuffle_history_file)
+
+    if [ "$is_shuf" == "true" ] && [ -f "$hist_file" ] && [ -s "$hist_file" ]; then
+        local prev_idx
+        prev_idx=$(tail -n 1 "$hist_file" 2>/dev/null)
+        sed -i '$d' "$hist_file" 2>/dev/null
+
+        if [[ "$prev_idx" =~ ^[0-9]+$ ]]; then
+            if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+                echo "{\"command\":[\"playlist-play-index\",$prev_idx]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+                echo '{"command":["set_property","pause",true]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+                send_android_mpv_cmd "playlist-play-index $prev_idx"
+                command -v input >/dev/null 2>&1 && input keyevent 88 2>/dev/null || true
+                ( auto_queue_related ) >/dev/null 2>&1 & disown
+                log_now_playing
+                return
+            fi
+
+            echo "{\"command\":[\"playlist-play-index\",$prev_idx]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+            ( auto_queue_related ) >/dev/null 2>&1 & disown
+            wait_for_playback_start
+            log_now_playing
+            return
+        fi
+    fi
 
     if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
         echo '{ "command": ["playlist-prev"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null

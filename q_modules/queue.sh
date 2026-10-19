@@ -520,6 +520,7 @@ cmd_clear() {
 }
 
 cmd_shuffle() {
+    if [ "$MPV_RUNNING" = false ]; then echo -e "${C_PINK}😴💤 MPV isn't running... it must be taking a nap${C_RESET}"; return; fi
     local mode="$1"
     if [ "$mode" == "list" ] || [ "$mode" == "all" ]; then
         echo '{"command": ["playlist-shuffle"]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
@@ -528,11 +529,23 @@ cmd_shuffle() {
     else
         # Toggle shuffle property
         local current=$(echo '{ "command": ["get_property", "shuffle"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // "false"')
+        local hist_file
+        hist_file=$(get_shuffle_history_file)
         if [ "$current" == "true" ]; then
             echo '{ "command": ["set_property", "shuffle", false] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+            rm -f "$hist_file" "$HOME/.cache/mpv/shuffle_history" 2>/dev/null
+            if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+                send_android_mpv_cmd "shuffle false"
+            fi
             echo -e "${C_ORANGE}🔀 Shuffle Mode: ${C_WHITE}OFF${C_RESET}"
         else
             echo '{ "command": ["set_property", "shuffle", true] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+            mkdir -p "$(dirname "$hist_file")" 2>/dev/null
+            : > "$hist_file"
+            : > "$HOME/.cache/mpv/shuffle_history" 2>/dev/null
+            if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+                send_android_mpv_cmd "shuffle true"
+            fi
             echo -e "${C_PINK}🔀 Shuffle Mode: ${C_WHITE}ON ${C_RESET}${C_GRAY}(Randomized Playback)${C_RESET}"
         fi
     fi

@@ -179,6 +179,20 @@ get_windows_user() {
     fi
 }
 
+get_shuffle_history_file() {
+    if [ "$IS_WSL" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+        local win_dir
+        win_dir=$(get_windows_user_dir)
+        if [ -n "$win_dir" ] && [ -d "$win_dir" ]; then
+            mkdir -p "$win_dir/.cache/mpv" 2>/dev/null
+            echo "$win_dir/.cache/mpv/shuffle_history"
+            return 0
+        fi
+    fi
+    mkdir -p "$HOME/.cache/mpv" 2>/dev/null
+    echo "$HOME/.cache/mpv/shuffle_history"
+}
+
 find_windows_mpv() {
     if [ -f "/mnt/c/Program Files/MPV Player/mpv.exe" ]; then
         echo "/mnt/c/Program Files/MPV Player/mpv.exe"
@@ -672,7 +686,18 @@ ensure_mpv_running() {
             local script_path="$SCRIPT_DIR/scripts/queue_video.lua"
             [ ! -f "$script_path" ] && script_path="$HOME/.config/mpv/scripts/queue_video.lua"
             [ ! -f "$script_path" ] && script_path="$(dirname "$MODULE_DIR")/scripts/queue_video.lua"
-            if [ -f "$script_path" ]; then
+            local win_user_dir
+            win_user_dir=$(get_windows_user_dir)
+            if [ -n "$win_user_dir" ] && [ -d "$win_user_dir" ]; then
+                local win_mpv_scripts_dir="$win_user_dir/AppData/Roaming/mpv/scripts"
+                mkdir -p "$win_mpv_scripts_dir" 2>/dev/null
+                if [ -f "$script_path" ]; then
+                    cp -f "$script_path" "$win_mpv_scripts_dir/queue_video.lua" 2>/dev/null
+                    local win_native_script
+                    win_native_script=$(wslpath -w "$win_mpv_scripts_dir/queue_video.lua" 2>/dev/null)
+                    [ -n "$win_native_script" ] && script_arg="'--script=$win_native_script',"
+                fi
+            elif [ -f "$script_path" ]; then
                 local win_script
                 win_script=$(wslpath -w "$script_path" 2>/dev/null)
                 [ -n "$win_script" ] && script_arg="'--script=$win_script',"
