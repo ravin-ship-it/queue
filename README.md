@@ -354,9 +354,10 @@ q -vid 5
 
 ### 🚀 Key Features
 
-- **100% Terminal Independent (Zero Desktop Session Needed)**:
-  - Works seamlessly from Windows Terminal / WSL2 Ubuntu via **WSLg** directly onto Windows 11, or native Linux (Wayland / X11).
-  - No desktop environments (GNOME, XFCE, or RDP) required!
+- **100% Cross-Platform (macOS, Native Linux & Windows WSL2)**:
+  - **macOS (Darwin)**: Native Cocoa/Metal windowing and CoreAudio (`ao=coreaudio`), with support for <kbd>⌘ Cmd</kbd> + <kbd>W</kbd> / <kbd>⌘ Cmd</kbd> + <kbd>Q</kbd>.
+  - **Native Linux**: Tear-free hardware acceleration via native Mesa kernel DRM drivers (`iris`, `radeonsi`, `nvidia`) on Wayland & X11.
+  - **Windows 11 / WSL2**: Direct host GPU acceleration via Microsoft D3D12 and WSLg seamless windowing.
 - **Continuous Queue Playback**:
   - Toggles video directly on the primary player daemon. When a track ends, the window stays open and automatically transitions to the next track in sequence—never freezing or pausing.
 - **Freely Resizable to Any Size (`no-keepaspect-window`)**:
@@ -369,13 +370,16 @@ q -vid 5
   - <kbd>Space</kbd>: Pause / Resume playback.
   - <kbd>&gt;</kbd> / <kbd>&lt;</kbd>: Skip to next / previous song in queue.
   - <kbd>Ctrl</kbd> + <kbd>s</kbd> / <kbd>r</kbd>: Cycle shuffle mode.
+  - <kbd>w</kbd> / <kbd>W</kbd>: Cycle preset window scales (35%, 50%, 75%, 100%).
+  - <kbd>+</kbd> / <kbd>-</kbd>: Scale window size up / down incrementally.
+  - <kbd>0</kbd> – <kbd>4</kbd>: Switch stream quality on-the-fly (<kbd>0</kbd> Auto 60fps, <kbd>1</kbd> 720p, <kbd>2</kbd> 1080p60, <kbd>3</kbd> 2K60, <kbd>4</kbd> 4K UHD).
 - **Non-Destructive Return to Audio Mode**:
-  - Pressing <kbd>q</kbd> or clicking the Windows <kbd>X</kbd> close button hides the video window while letting your background music continue playing uninterrupted!
+  - Pressing <kbd>q</kbd>, <kbd>Ctrl</kbd>+<kbd>w</kbd>, <kbd>⌘ Cmd</kbd>+<kbd>w</kbd>, or clicking the window close button hides the video window while letting your background music continue playing uninterrupted!
   - Run `q -vid` from any terminal to toggle the window back on.
 - **Dynamic `<|V|>` Status Indicator**:
   - Whenever video mode is active, the `<|V|>` badge appears in deep pink alongside the loop (`⟳`) and shuffle (`><`) indicators in the `q` prompt.
-- **WSLg High-DPI Cursor Scaling**:
-  - Automatically configures X11 cursor properties (`Xcursor.theme: Adwaita`, `Xcursor.size: 24`), preventing tiny microscopic cursor sizing on Windows 11 high-resolution displays.
+- **High-DPI Cursor Scaling**:
+  - Automatically configures X11 cursor properties on Linux and WSLg (`Xcursor.theme: Adwaita`, `Xcursor.size: 36` on WSL / `24` on native Linux), preventing tiny cursor sizing on high-resolution displays.
 
 ---
 

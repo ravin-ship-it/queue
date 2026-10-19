@@ -4,8 +4,10 @@ keep-open=yes
 save-position-on-quit=no
 resume-playback=no
 
-# Terminal / Audio (WSL, Linux, macOS, Android/Termux Resilient)
-ao=pulse,alsa,opensles,audiotrack
+# Terminal / Audio (macOS, Linux, WSL, Android/Termux Resilient)
+ao=coreaudio,pipewire,pulse,alsa,opensles,audiotrack
+pulse-latency-hacks=yes
+pulse-buffer=250
 audio-stream-silence=yes
 audio-wait-open=0.2
 audio-channels=stereo
@@ -14,18 +16,17 @@ volume-max=200
 gapless-audio=yes
 audio-pitch-correction=yes
 
-# Network & Streaming Reconnect Resilience
+# Network & Streaming Reconnect Resilience (Zero Speed Bump / Fluid Readahead)
 network-timeout=30
 stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5
 cache=yes
-cache-secs=60
-cache-pause=yes
-cache-pause-wait=2
-demuxer-max-bytes=150MiB
-demuxer-max-back-bytes=50MiB
-demuxer-readahead-secs=20
+cache-secs=120
+cache-pause=no
+demuxer-max-bytes=256MiB
+demuxer-max-back-bytes=64MiB
+demuxer-readahead-secs=60
 ytdl=yes
-ytdl-format=bestvideo[height<=1440][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=1080][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=1440][format_note!*=Premium]+bestaudio/bestvideo[height<=1080][format_note!*=Premium]+bestaudio/bestvideo[fps>=50][format_note!*=Premium]+bestaudio/bestvideo[format_note!*=Premium]+bestaudio/best
+ytdl-format=bestvideo[height<=1440][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo+bestaudio/best
 script-opts=ytdl_hook-ytdl_path=yt-dlp
 tls-verify=no
 

@@ -17,15 +17,23 @@ C_BOLD=$'\e[1m'
 FZF_COLOR_OPTS="--color=fg:#00ffff,hl:#ff1493,fg+:#00ffff,hl+:#ff1493,pointer:#ff1493,marker:#ff1493,border:#8700ff,header:#d75fff,prompt:#008787"
 
 get_clipboard() {
-    if command -v termux-clipboard-get >/dev/null; then
+    if command -v termux-clipboard-get >/dev/null 2>&1; then
         termux-clipboard-get
-    elif command -v powershell.exe >/dev/null; then
+    elif [ "$IS_MACOS" = true ] && command -v pbpaste >/dev/null 2>&1; then
+        pbpaste
+    elif [ "$IS_WSL" = true ] && command -v powershell.exe >/dev/null 2>&1; then
         # WSL: Use PowerShell to get Windows clipboard
         powershell.exe -NoProfile -Command "Get-Clipboard" | tr -d '\r'
-    elif command -v xclip >/dev/null; then
+    elif [ -n "$WAYLAND_DISPLAY" ] && command -v wl-paste >/dev/null 2>&1; then
+        wl-paste 2>/dev/null
+    elif command -v xclip >/dev/null 2>&1; then
         xclip -selection clipboard -o 2>/dev/null
-    elif command -v pbpaste >/dev/null; then
+    elif command -v xsel >/dev/null 2>&1; then
+        xsel --clipboard --output 2>/dev/null
+    elif command -v pbpaste >/dev/null 2>&1; then
         pbpaste
+    elif command -v powershell.exe >/dev/null 2>&1; then
+        powershell.exe -NoProfile -Command "Get-Clipboard" | tr -d '\r'
     fi
 }
 
@@ -44,9 +52,12 @@ check_dependencies() {
     if [ ${#missing[@]} -gt 0 ]; then
         echo -e "${C_PINK}❌ Missing or Broken Dependencies:${C_RESET} ${missing[*]}"
         
-        if command -v pkg >/dev/null && [ -d "/data/data/com.termux" ]; then
+        if [ "$IS_ANDROID" = true ] || (command -v pkg >/dev/null && [ -d "/data/data/com.termux" ]); then
             echo -e "${C_GRAY}Fix/Install on Termux with:${C_RESET}"
             echo -e "  ${C_CYAN}pkg install -y python python-pip && pip install -U --force-reinstall yt-dlp${C_RESET}"
+        elif [ "$IS_MACOS" = true ] || command -v brew >/dev/null 2>&1; then
+            echo -e "${C_GRAY}Install on macOS with Homebrew:${C_RESET}"
+            echo -e "  ${C_CYAN}brew install mpv yt-dlp fzf jq node${C_RESET}"
         else
             echo -e "${C_GRAY}Install on Linux/WSL with:${C_RESET}"
             echo -e "  ${C_CYAN}sudo apt update && sudo apt install mpv fzf jq netcat-openbsd ffmpeg${C_RESET}"

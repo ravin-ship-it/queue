@@ -14,6 +14,24 @@ if nc -h 2>&1 | grep -q -- "-N"; then
 fi
 export NC_OPTS
 
+# Platform Detection (Universal for WSL2, Bare-Metal Linux, macOS, and Android/Termux)
+IS_WSL=false
+IS_MACOS=false
+IS_LINUX=false
+IS_ANDROID=false
+
+if [[ "$OSTYPE" == "darwin"* ]] || [ "$(uname -s 2>/dev/null)" = "Darwin" ]; then
+    IS_MACOS=true
+elif [ -n "$PREFIX" ] && [[ "$PREFIX" == *"com.termux"* ]]; then
+    IS_ANDROID=true
+elif grep -qi "microsoft" /proc/version 2>/dev/null || [ -d "/usr/lib/wsl" ] || [ -d "/mnt/wslg" ]; then
+    IS_WSL=true
+    IS_LINUX=true
+elif [ "$(uname -s 2>/dev/null)" = "Linux" ]; then
+    IS_LINUX=true
+fi
+export IS_WSL IS_MACOS IS_LINUX IS_ANDROID
+
 # Clean up dead sockets automatically
 if [ -S "$HOME/.mpv-socket" ]; then
     if ! (echo '{"command":["get_property","idle-active"]}' | nc $NC_OPTS -w 1 "$HOME/.mpv-socket" >/dev/null 2>&1); then
@@ -446,7 +464,7 @@ if [ -z "$1" ]; then
     [ "$MPV_RUNNING" = true ] && start_idle_monitor
 
     # Get initial status
-    mapfile -t init < <(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","shuffle"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","af"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","filename"]}\n{"command":["get_property","playlist-pos-1"]}\n{"command":["get_property","playlist"]}\n{"command":["get_property","pause"]}\n{"command":["get_property","vo"]}\n{"command":["get_property","vid"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | .[0].data // 0, .[1].data // false, .[2].data // "no", .[3].data // "no", (if .[4].data == null or .[4].data == [] then "off" else "on" end), (if .[5].data == null then true else .[5].data end), ((.[6].data // .[7].data) // "😴💤" | gsub("\n"; " ")), (.[8].data // "?"), (.[9].data // [] | map(.filename) | join(";")), (if .[10].data == true then "true" else "false" end), (if (.[11].data[0].name // "null") != "null" and (.[12].data // false) != false and (.[12].data // false) != "no" then "on" else "off" end)')    
+    mapfile -t init < <(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","shuffle"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","af"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","filename"]}\n{"command":["get_property","playlist-pos-1"]}\n{"command":["get_property","playlist"]}\n{"command":["get_property","pause"]}\n{"command":["get_property","vo"]}\n{"command":["get_property","vid"]}\n{"command":["get_property","window-minimized"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | .[0].data // 0, .[1].data // false, .[2].data // "no", .[3].data // "no", (if .[4].data == null or .[4].data == [] then "off" else "on" end), (if .[5].data == null then true else .[5].data end), ((.[6].data // .[7].data) // "😴💤" | gsub("\n"; " ")), (.[8].data // "?"), (.[9].data // [] | map(.filename) | join(";")), (if .[10].data == true then "true" else "false" end), (if (.[11].data[0].name // "null") != "null" and (.[12].data // false) != false and (.[12].data // false) != "no" and (.[13].data // false) != true then "on" else "off" end)')    
     init_count="${init[0]}"; init_shuf="${init[1]}"; init_loop_f="${init[2]}"; init_loop_p="${init[3]}"; init_af="${init[4]}"
     init_idle="${init[5]}"; init_title="${init[6]}"; init_idx="${init[7]}"; init_fingerprint="${init[8]}"; init_paused="${init[9]}"
     init_vid="${init[10]}"
@@ -509,7 +527,7 @@ if [ -z "$1" ]; then
         done
 
         while true; do
-            raw=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","filename"]}\n{"command":["get_property","playlist-count"]}\n{"command":["get_property","shuffle"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","playlist-pos-1"]}\n{"command":["get_property","af"]}\n{"command":["get_property","playlist"]}\n{"command":["get_property","pause"]}\n{"command":["get_property","vo"]}\n{"command":["get_property","vid"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r '
+            raw=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","filename"]}\n{"command":["get_property","playlist-count"]}\n{"command":["get_property","shuffle"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","playlist-pos-1"]}\n{"command":["get_property","af"]}\n{"command":["get_property","playlist"]}\n{"command":["get_property","pause"]}\n{"command":["get_property","vo"]}\n{"command":["get_property","vid"]}\n{"command":["get_property","window-minimized"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r '
                 map(select(.event == null)) |
                 (if .[0].data == null then true else .[0].data end), "\u001f",
                 ((.[1].data // .[2].data) // "😴💤" | gsub("\n"; " ")), "\u001f",
@@ -521,7 +539,7 @@ if [ -z "$1" ]; then
                 (if .[8].data == null or .[8].data == [] then "off" else "on" end), "\u001f",
                 (.[9].data // [] | map(.filename) | join(";")), "\u001f",
                 (if .[10].data == true then "true" else "false" end), "\u001f",
-                (if (.[11].data[0].name // "null") != "null" and (.[12].data // false) != false and (.[12].data // false) != "no" then "on" else "off" end)
+                (if (.[11].data[0].name // "null") != "null" and (.[12].data // false) != false and (.[12].data // false) != "no" and (.[13].data // false) != true then "on" else "off" end)
             ' 2>/dev/null)
             
             if [ -z "$raw" ]; then

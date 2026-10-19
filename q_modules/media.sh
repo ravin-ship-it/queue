@@ -647,7 +647,6 @@ VIDEO_PID_FILE="$HOME/.cache/mpv/video_window.pid"
 is_video_window_open() {
     [ "$MPV_RUNNING" = false ] && return 1
     [ ! -S "$SOCKET" ] && return 1
-    [ -f "$HOME/.cache/mpv/video_active" ] && return 0
 
     local raw
     raw=$(echo -e '{"command":["get_property","vo"]}\n{"command":["get_property","vid"]}\n{"command":["get_property","window-minimized"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" 2>/dev/null)
@@ -676,31 +675,39 @@ cmd_video_toggle() {
         return 0
     fi
 
-    # Ensure display environment (WSLg handles DISPLAY=:0 / WAYLAND_DISPLAY=wayland-0 natively)
-    if [ -z "$DISPLAY" ] && [ -z "$WAYLAND_DISPLAY" ]; then
-        if [ -d "/mnt/wslg" ] || [ -S "/tmp/.X11-unix/X0" ]; then
-            export DISPLAY=":0"
-            export WAYLAND_DISPLAY="wayland-0"
-        else
-            echo -e "${C_PINK}🚫 No graphical display found. Desktop video requires an active display (X11 / Wayland / WSLg).${C_RESET}"
-            return 1
+    # Display environment validation:
+    # On macOS (Darwin), Aqua GUI compositor is always active, so bypass $DISPLAY/$WAYLAND_DISPLAY check.
+    if [ "$IS_MACOS" = false ]; then
+        if [ -z "$DISPLAY" ] && [ -z "$WAYLAND_DISPLAY" ]; then
+            if [ -d "/mnt/wslg" ] || [ -S "/tmp/.X11-unix/X0" ]; then
+                export DISPLAY=":0"
+                export WAYLAND_DISPLAY="wayland-0"
+            else
+                echo -e "${C_PINK}🚫 No graphical display found. Desktop video requires an active display (X11 / Wayland / WSLg).${C_RESET}"
+                return 1
+            fi
         fi
-    fi
 
-    # Enable host GPU acceleration via Microsoft D3D12 in WSL2
-    export GALLIUM_DRIVER="${GALLIUM_DRIVER:-d3d12}"
-    if [ -d "/usr/lib/wsl/lib" ] && [[ ":$LD_LIBRARY_PATH:" != *":/usr/lib/wsl/lib:"* ]]; then
-        export LD_LIBRARY_PATH="/usr/lib/wsl/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-    fi
-
-    # Fix tiny cursor on Windows 11 high-DPI displays in WSLg
-    export XCURSOR_THEME="${XCURSOR_THEME:-Adwaita}"
-    export XCURSOR_SIZE="${XCURSOR_SIZE:-36}"
-    if [ -n "$DISPLAY" ] && command -v xrdb >/dev/null 2>&1; then
-        if [ -f "$HOME/.Xresources" ]; then
-            xrdb -merge "$HOME/.Xresources" 2>/dev/null
+        # WSL2 host GPU acceleration vs Native Linux
+        if [ "$IS_WSL" = true ]; then
+            export GALLIUM_DRIVER="${GALLIUM_DRIVER:-d3d12}"
+            if [ -d "/usr/lib/wsl/lib" ] && [[ ":$LD_LIBRARY_PATH:" != *":/usr/lib/wsl/lib:"* ]]; then
+                export LD_LIBRARY_PATH="/usr/lib/wsl/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            fi
+            export XCURSOR_THEME="${XCURSOR_THEME:-Adwaita}"
+            export XCURSOR_SIZE="${XCURSOR_SIZE:-36}"
         else
-            echo -e "Xcursor.theme: $XCURSOR_THEME\nXcursor.size: $XCURSOR_SIZE" | xrdb -merge 2>/dev/null
+            # Native Linux: standard cursor, native Mesa drivers
+            export XCURSOR_THEME="${XCURSOR_THEME:-Adwaita}"
+            export XCURSOR_SIZE="${XCURSOR_SIZE:-24}"
+        fi
+
+        if [ -n "$DISPLAY" ] && command -v xrdb >/dev/null 2>&1; then
+            if [ -f "$HOME/.Xresources" ]; then
+                xrdb -merge "$HOME/.Xresources" 2>/dev/null
+            else
+                echo -e "Xcursor.theme: $XCURSOR_THEME\nXcursor.size: $XCURSOR_SIZE" | xrdb -merge 2>/dev/null
+            fi
         fi
     fi
 
@@ -711,12 +718,16 @@ cmd_video_toggle() {
         return 1
     fi
 
-    # Determine VO & GPU context:
-    # Direct Wayland EGL with D3D12 GPU hardware acceleration provides tear-free 60fps/144Hz fluidity.
-    # Fallback cleanly to X11 if no Wayland compositor is running.
+    # Determine VO & GPU context across platforms:
+    # - macOS: Cocoa/Metal native windowing with vo=gpu, gpu-context=auto
+    # - Wayland / WSLg: vo=gpu, gpu-context=wayland,auto
+    # - X11: vo=gpu,x11, gpu-context=x11egl,x11vk,auto
     local vo_opt="gpu"
     local gpu_ctx="wayland,auto"
-    if [ -z "$WAYLAND_DISPLAY" ]; then
+    if [ "$IS_MACOS" = true ]; then
+        gpu_ctx="auto"
+        vo_opt="gpu"
+    elif [ -z "$WAYLAND_DISPLAY" ]; then
         gpu_ctx="x11egl,x11vk,auto"
         vo_opt="gpu,x11"
     fi
@@ -732,6 +743,10 @@ cmd_video_toggle() {
     echo '{"command":["keybind","Q","script-message safe-hide-video"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
     echo '{"command":["keybind","Ctrl+w","script-message safe-hide-video"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
     echo '{"command":["keybind","Ctrl+W","script-message safe-hide-video"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo '{"command":["keybind","Meta+w","script-message safe-hide-video"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo '{"command":["keybind","Meta+W","script-message safe-hide-video"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo '{"command":["keybind","Meta+q","script-message safe-hide-video"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo '{"command":["keybind","Meta+Q","script-message safe-hide-video"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
     echo '{"command":["keybind","Alt+F4","script-message safe-hide-video"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
     echo '{"command":["keybind","ESC","set fullscreen no"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
     echo '{"command":["keybind","Ctrl+s","cycle shuffle"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
@@ -747,10 +762,18 @@ cmd_video_toggle() {
     echo '{"command":["keybind","Ctrl+WHEEL_UP","add window-scale 0.05 ; show-text \"Window Scale: ${window-scale}\" 1500"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
     echo '{"command":["keybind","Ctrl+WHEEL_DOWN","add window-scale -0.05 ; show-text \"Window Scale: ${window-scale}\" 1500"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
 
-    echo '{"command":["keybind","1","set ytdl-format \"bestvideo[height<=720][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=720][format_note!*=Premium]+bestaudio/best[height<=720]\" ; playlist-play-index current ; show-text \"Quality: 720p HD (60fps)\" 2500"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo '{"command":["keybind","2","set ytdl-format \"bestvideo[height<=1080][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=1080][format_note!*=Premium]+bestaudio/best\" ; playlist-play-index current ; show-text \"Quality: 1080p Full HD (60fps)\" 2500"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo '{"command":["keybind","3","set ytdl-format \"bestvideo[height<=1440][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=1440][format_note!*=Premium]+bestaudio/best\" ; playlist-play-index current ; show-text \"Quality: 1440p 2K QHD (60fps)\" 2500"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo '{"command":["keybind","4","set ytdl-format \"bestvideo[format_note!*=Premium]+bestaudio/best\" ; playlist-play-index current ; show-text \"Quality: Max / 4K UHD\" 2500"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    # In-Window Quality Hotkeys (AVC1/VP9 60 FPS prioritized + Opus 48 kHz audio)
+    local hotkey_0="bestvideo[height<=1440][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo+bestaudio/best"
+    local hotkey_1="bestvideo[height<=720][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=720][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720]+bestaudio/best[height<=720]"
+    local hotkey_2="bestvideo[height<=1080][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=1080][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080]+bestaudio/best"
+    local hotkey_3="bestvideo[height<=1440][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=1440][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440]+bestaudio/best"
+    local hotkey_4="bestvideo[fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo+bestaudio/best"
+
+    echo "{\"command\":[\"keybind\",\"0\",\"set ytdl-format \\\"$hotkey_0\\\" ; playlist-play-index current ; show-text \\\"Quality: Auto / Smart 60FPS\\\" 2500\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo "{\"command\":[\"keybind\",\"1\",\"set ytdl-format \\\"$hotkey_1\\\" ; playlist-play-index current ; show-text \\\"Quality: 720p HD (60fps)\\\" 2500\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo "{\"command\":[\"keybind\",\"2\",\"set ytdl-format \\\"$hotkey_2\\\" ; playlist-play-index current ; show-text \\\"Quality: 1080p Full HD (60fps)\\\" 2500\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo "{\"command\":[\"keybind\",\"3\",\"set ytdl-format \\\"$hotkey_3\\\" ; playlist-play-index current ; show-text \\\"Quality: 1440p 2K QHD (60fps)\\\" 2500\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo "{\"command\":[\"keybind\",\"4\",\"set ytdl-format \\\"$hotkey_4\\\" ; playlist-play-index current ; show-text \\\"Quality: Max / 4K UHD\\\" 2500\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
 
     local target_autofit="50%x50%"
     local target_scale="0.5"
@@ -780,8 +803,8 @@ cmd_video_toggle() {
         fi
     fi
 
-    # Smart video format: 60 FPS prioritized, crisp Full HD / 2K, never blurry, never locked behind Premium
-    local smart_fmt="bestvideo[height<=1440][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=1080][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=1440][format_note!*=Premium]+bestaudio/bestvideo[height<=1080][format_note!*=Premium]+bestaudio/bestvideo[fps>=50][format_note!*=Premium]+bestaudio/bestvideo[format_note!*=Premium]+bestaudio/best"
+    # Smart video format: 60 FPS prioritized, crisp Full HD / 2K, never blurry, never locked behind Premium, pristine Opus audio
+    local smart_fmt="$hotkey_0"
     echo "{\"command\":[\"set_property\",\"ytdl-format\",\"$smart_fmt\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
 
     # Enable video window directly on the active MPV player:
@@ -793,9 +816,9 @@ cmd_video_toggle() {
     # 6. apply-profile fast -> Sub-millisecond bilinear rendering, 0 dropped frames
     # 7. hwdec=auto-safe -> Direct GPU hardware video decoding
     # 8. opengl-pbo=yes -> Asynchronous pixel buffer uploads for zero-copy frames
-    # 9. swapchain-depth=3 -> Triple buffering absorbs presentation latency variance in Wayland/WSLg
-    # 10. video-sync=audio -> Locks to audio clock, avoiding WSLg RDP virtual VSync miscalculations
-    # 11. gpu-context=$gpu_ctx & vo=$vo_opt -> Native Wayland EGL with Direct3D 12 acceleration
+    # 9. swapchain-depth=3 -> Triple buffering absorbs presentation latency variance across compositors
+    # 10. video-sync=audio -> Locks to audio clock, avoiding virtual VSync miscalculations
+    # 11. gpu-context=$gpu_ctx & vo=$vo_opt -> Native hardware acceleration per platform
     # 12. video=auto & vid=auto -> Demux & render video stream
     # 13. force-window=yes -> Keep window persistent across playlist transitions
     # 14. pause=false -> Resume/continue playback
@@ -806,7 +829,7 @@ cmd_video_toggle() {
     local title
     title=$(echo '{"command":["get_property","media-title"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // "Queue Video"')
     echo -e "📺 ${C_PINK}Desktop Video Window Active:${C_RESET} ${C_CYAN}${title}${C_RESET}"
-    echo -e "${C_GRAY}💡 Resizable window. Press ${C_WHITE}w${C_GRAY} (cycle small/med/large), ${C_WHITE}+${C_GRAY}/${C_WHITE}-${C_GRAY} scale, ${C_WHITE}F11${C_GRAY} fullscreen, ${C_WHITE}1${C_GRAY}-${C_WHITE}4${C_GRAY} quality, ${C_WHITE}q${C_GRAY} return to audio.${C_RESET}"
+    echo -e "${C_GRAY}💡 Resizable window. Press ${C_WHITE}w${C_GRAY} (cycle small/med/large), ${C_WHITE}+${C_GRAY}/${C_WHITE}-${C_GRAY} scale, ${C_WHITE}F11${C_GRAY} fullscreen, ${C_WHITE}0${C_GRAY}-${C_WHITE}4${C_GRAY} quality, ${C_WHITE}q${C_GRAY} return to audio.${C_RESET}"
 }
 
 cmd_resolution() {
@@ -824,19 +847,19 @@ cmd_resolution() {
 
     case "$target" in
         720|720p|hd)
-            ytdl_fmt="bestvideo[height<=720][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=720][format_note!*=Premium]+bestaudio/best[height<=720]"
+            ytdl_fmt="bestvideo[height<=720][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=720][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720]+bestaudio/best[height<=720]"
             label="720p HD (60 FPS fluid / bandwidth saver)"
             ;;
         1080|1080p|fhd)
-            ytdl_fmt="bestvideo[height<=1080][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=1080][format_note!*=Premium]+bestaudio/best"
+            ytdl_fmt="bestvideo[height<=1080][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=1080][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080]+bestaudio/best"
             label="1080p Full HD (60 FPS crisp)"
             ;;
         1440|1440p|2k|qhd)
-            ytdl_fmt="bestvideo[height<=1440][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=1440][format_note!*=Premium]+bestaudio/best"
+            ytdl_fmt="bestvideo[height<=1440][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=1440][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440]+bestaudio/best"
             label="1440p 2K QHD (60 FPS ultra-crisp)"
             ;;
         2160|2160p|4k|uhd|max)
-            ytdl_fmt="bestvideo[format_note!*=Premium]+bestaudio/best"
+            ytdl_fmt="bestvideo[fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo+bestaudio/best"
             label="Max / 4K UHD (Uncapped highest quality)"
             ;;
         auto|smart|"")
@@ -859,10 +882,10 @@ cmd_resolution() {
                     echo -e "${C_CYAN}📺 Active Video Quality:${C_RESET} ${C_WHITE}${cur_w}x${cur_h}${C_RESET} @ ${C_PINK}${cur_fps} FPS${C_RESET} (${C_GRAY}codec: ${cur_codec}${C_RESET})"
                 fi
                 echo -e "${C_GRAY}💡 Quick Switch: 'q -res 720' | 'q -res 1080' | 'q -res 1440' | 'q -res 4k' | 'q -res auto'${C_RESET}"
-                echo -e "${C_GRAY}   Or inside video window press keys: ${C_WHITE}1${C_GRAY} (720p) | ${C_WHITE}2${C_GRAY} (1080p60) | ${C_WHITE}3${C_GRAY} (2K) | ${C_WHITE}4${C_GRAY} (4K)${C_RESET}"
+                echo -e "${C_GRAY}   Or inside video window press keys: ${C_WHITE}0${C_GRAY} (Auto) | ${C_WHITE}1${C_GRAY} (720p) | ${C_WHITE}2${C_GRAY} (1080p60) | ${C_WHITE}3${C_GRAY} (2K) | ${C_WHITE}4${C_GRAY} (4K)${C_RESET}"
                 return 0
             fi
-            ytdl_fmt="bestvideo[height<=1440][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=1080][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=1440][format_note!*=Premium]+bestaudio/bestvideo[height<=1080][format_note!*=Premium]+bestaudio/bestvideo[fps>=50][format_note!*=Premium]+bestaudio/bestvideo[format_note!*=Premium]+bestaudio/best"
+            ytdl_fmt="bestvideo[height<=1440][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo+bestaudio/best"
             label="Auto / Smart 60FPS (Adapts to internet, max 1440p60, never blurry)"
             ;;
         *)

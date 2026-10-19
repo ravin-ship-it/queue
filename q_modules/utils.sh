@@ -91,24 +91,30 @@ ensure_mpv_running() {
             initial_pl=("--playlist=$pl_arg")
         fi
 
-        # Ensure graphical display connection & GPU acceleration (WSL2 D3D12 / Wayland / X11)
-        if [ -z "$DISPLAY" ] && [ -z "$WAYLAND_DISPLAY" ]; then
-            if [ -d "/mnt/wslg" ] || [ -S "/tmp/.X11-unix/X0" ]; then
-                export DISPLAY=":0"
-                export WAYLAND_DISPLAY="wayland-0"
+        # Graphical display connection & GPU acceleration setup
+        if [ "$IS_WSL" = true ]; then
+            # WSL2 / WSLg: ensure display socket connection and host D3D12 GPU acceleration
+            if [ -z "$DISPLAY" ] && [ -z "$WAYLAND_DISPLAY" ]; then
+                if [ -d "/mnt/wslg" ] || [ -S "/tmp/.X11-unix/X0" ]; then
+                    export DISPLAY=":0"
+                    export WAYLAND_DISPLAY="wayland-0"
+                fi
             fi
+            export GALLIUM_DRIVER="${GALLIUM_DRIVER:-d3d12}"
+            if [ -d "/usr/lib/wsl/lib" ] && [[ ":$LD_LIBRARY_PATH:" != *":/usr/lib/wsl/lib:"* ]]; then
+                export LD_LIBRARY_PATH="/usr/lib/wsl/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            fi
+            export XCURSOR_THEME="${XCURSOR_THEME:-Adwaita}"
+            export XCURSOR_SIZE="${XCURSOR_SIZE:-36}"
+        elif [ "$IS_LINUX" = true ]; then
+            # Native Linux (Wayland / X11): Let Mesa auto-detect native DRM GPU driver (iris/radeonsi/nvidia)
+            # Never set GALLIUM_DRIVER=d3d12 or WSL lib paths on bare metal Linux!
+            export XCURSOR_THEME="${XCURSOR_THEME:-Adwaita}"
+            export XCURSOR_SIZE="${XCURSOR_SIZE:-24}"
         fi
 
-        # Enable host GPU acceleration via Microsoft D3D12 in WSL2
-        export GALLIUM_DRIVER="${GALLIUM_DRIVER:-d3d12}"
-        if [ -d "/usr/lib/wsl/lib" ] && [[ ":$LD_LIBRARY_PATH:" != *":/usr/lib/wsl/lib:"* ]]; then
-            export LD_LIBRARY_PATH="/usr/lib/wsl/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-        fi
-
-        # Ensure normal cursor size in WSLg / X11 (prevent tiny cursor on high-DPI displays)
-        export XCURSOR_THEME="${XCURSOR_THEME:-Adwaita}"
-        export XCURSOR_SIZE="${XCURSOR_SIZE:-36}"
-        if [ -n "$DISPLAY" ] && command -v xrdb >/dev/null 2>&1; then
+        # Apply X11 cursor scale if display and xrdb are available (Linux/WSL)
+        if [ "$IS_MACOS" = false ] && [ -n "$DISPLAY" ] && command -v xrdb >/dev/null 2>&1; then
             if [ -f "$HOME/.Xresources" ]; then
                 xrdb -merge "$HOME/.Xresources" 2>/dev/null
             else
@@ -129,11 +135,11 @@ ensure_mpv_running() {
         fi
 
         if command -v setsid >/dev/null 2>&1; then
-            setsid mpv --idle --keep-open=yes --no-terminal --vo=null \
+            setsid mpv --idle --keep-open=yes --no-terminal --vo=null --video=no \
                 "${input_conf_opt[@]}" "${script_opt[@]}" \
                 --input-ipc-server="$SOCKET" "${initial_pl[@]}" </dev/null >/dev/null 2>&1 &
         else
-            nohup mpv --idle --keep-open=yes --no-terminal --vo=null \
+            nohup mpv --idle --keep-open=yes --no-terminal --vo=null --video=no \
                 "${input_conf_opt[@]}" "${script_opt[@]}" \
                 --input-ipc-server="$SOCKET" "${initial_pl[@]}" </dev/null >/dev/null 2>&1 &
         fi

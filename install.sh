@@ -9,6 +9,23 @@ CYAN='\033[0;36m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+# --- Platform Detection ---
+IS_WSL=false
+IS_MACOS=false
+IS_LINUX=false
+IS_ANDROID=false
+
+if [[ "$OSTYPE" == "darwin"* ]] || [ "$(uname -s 2>/dev/null)" = "Darwin" ]; then
+    IS_MACOS=true
+elif [ -n "$PREFIX" ] && [[ "$PREFIX" == *"com.termux"* ]]; then
+    IS_ANDROID=true
+elif grep -qi "microsoft" /proc/version 2>/dev/null || [ -d "/usr/lib/wsl" ] || [ -d "/mnt/wslg" ]; then
+    IS_WSL=true
+    IS_LINUX=true
+elif [ "$(uname -s 2>/dev/null)" = "Linux" ]; then
+    IS_LINUX=true
+fi
+
 echo -e "${CYAN}🚀 Starting Advanced Installation of q...${NC}"
 
 # --- Dependency Resolution Engine ---
@@ -61,18 +78,33 @@ install_deps() {
         # Termux apt package for yt-dlp is often broken with Python 3.14; always install/heal via pip
         echo -e "${CYAN}🔧 Installing/Healing yt-dlp via pip for Termux Python...${NC}"
         pip install -U --force-reinstall yt-dlp || pkg install -y yt-dlp || true
-    elif command -v apt-get >/dev/null 2>&1; then # Debian/Ubuntu/Kali
+    elif command -v apt-get >/dev/null 2>&1; then # Debian/Ubuntu/Kali/WSL
         sudo apt-get update
         for pkg in "${missing[@]}"; do
             [ "$pkg" == "netcat" ] && pkg="netcat-openbsd"
             sudo apt-get install -y "$pkg"
         done
-    elif command -v brew >/dev/null 2>&1; then # macOS
-        for pkg in "${missing[@]}"; do
-            [ "$pkg" == "netcat" ] && continue
-            [ "$pkg" == "nodejs" ] && pkg="node"
-            brew install "$pkg"
-        done
+    elif [ "$IS_MACOS" = true ] || command -v brew >/dev/null 2>&1; then # macOS
+        # Ensure brew is in PATH if installed in standard locations
+        if ! command -v brew >/dev/null 2>&1; then
+            if [ -x "/opt/homebrew/bin/brew" ]; then
+                eval "$(/opt/homebrew/bin/brew shellenv)"
+            elif [ -x "/usr/local/bin/brew" ]; then
+                eval "$(/usr/local/bin/brew shellenv)"
+            fi
+        fi
+
+        if command -v brew >/dev/null 2>&1; then
+            for pkg in "${missing[@]}"; do
+                [ "$pkg" == "netcat" ] && continue # macOS has built-in BSD nc
+                [ "$pkg" == "nodejs" ] && pkg="node"
+                brew install "$pkg"
+            done
+        else
+            echo -e "${RED}❌ Homebrew (brew) is required to install missing dependencies on macOS.${NC}"
+            echo -e "${CYAN}👉 Please install Homebrew from https://brew.sh or manually install: ${missing[*]}${NC}"
+            exit 1
+        fi
     elif command -v pacman >/dev/null 2>&1; then # Arch
         for pkg in "${missing[@]}"; do
             [ "$pkg" == "netcat" ] && pkg="gnu-netcat"
@@ -148,22 +180,27 @@ if [ -d "scripts" ]; then
 fi
 
 # --- High-DPI Cursor Scaling (WSLg / Linux) ---
-mkdir -p "$HOME/.icons/default"
-cat << 'EOF' > "$HOME/.icons/default/index.theme"
+if [ "$IS_MACOS" = false ] && [ "$IS_ANDROID" = false ]; then
+    cursor_size="24"
+    [ "$IS_WSL" = true ] && cursor_size="36"
+
+    mkdir -p "$HOME/.icons/default"
+    cat << EOF > "$HOME/.icons/default/index.theme"
 [Icon Theme]
 Name=Default
 Comment=Default Cursor Theme
 Inherits=Adwaita
-Size=36
+Size=$cursor_size
 EOF
-cat << 'EOF' > "$HOME/.Xresources"
+    cat << EOF > "$HOME/.Xresources"
 Xcursor.theme: Adwaita
-Xcursor.size: 36
+Xcursor.size: $cursor_size
 EOF
-if [ -n "$DISPLAY" ] && command -v xrdb >/dev/null 2>&1; then
-    xrdb -merge "$HOME/.Xresources" 2>/dev/null || true
+    if [ -n "$DISPLAY" ] && command -v xrdb >/dev/null 2>&1; then
+        xrdb -merge "$HOME/.Xresources" 2>/dev/null || true
+    fi
+    echo -e "${GREEN}✅ Cursor scaling configured (size $cursor_size)${NC}"
 fi
-echo -e "${GREEN}✅ High-DPI cursor scaling configured (size 36)${NC}"
 
 # --- YT-DLP Configuration ---
 YTDLP_CONF_DIR="$HOME/.config/yt-dlp"
@@ -185,6 +222,17 @@ if [ -d "playlists" ]; then
     echo -e "${GREEN}✅ Bundled playlists safely integrated into $PLAYLIST_DEST${NC}"
 fi
 
+# --- Cross-Platform sed In-Place Deletion Helper ---
+cross_sed_delete() {
+    local pattern="$1"
+    local file="$2"
+    if [ "$IS_MACOS" = true ]; then
+        sed -i '' "$pattern" "$file" 2>/dev/null || true
+    else
+        sed -i "$pattern" "$file" 2>/dev/null || true
+    fi
+}
+
 # --- Shell Wrapper & PATH ---
 SHELL_RC=""
 [[ "$SHELL" == */zsh ]] && SHELL_RC="$HOME/.zshrc"
@@ -193,12 +241,19 @@ SHELL_RC=""
 [ -z "$SHELL_RC" ] && SHELL_RC="$HOME/.bashrc"
 
 if [ -n "$SHELL_RC" ]; then
-    # Ensure the RC file exists before grepping
+    # Ensure the RC file exists before editing
     [ ! -f "$SHELL_RC" ] && touch "$SHELL_RC"
 
-    # PATH & Environment Marker
-    if ! grep -q "# --- Q PATH START ---" "$SHELL_RC" 2>/dev/null; then
-        echo -e "\n# --- Q PATH START ---" >> "$SHELL_RC"
+    # Remove previous Q PATH blocks cleanly
+    cross_sed_delete '/# --- Q PATH START ---/,/# --- Q PATH END ---/d' "$SHELL_RC"
+
+    # Inject Platform-Specific PATH & Environment
+    echo -e "\n# --- Q PATH START ---" >> "$SHELL_RC"
+    if [ "$IS_MACOS" = true ]; then
+        echo "export PATH=\"/opt/homebrew/bin:/usr/local/bin:\$PATH:\$HOME/.local/bin:$DEST_DIR\"" >> "$SHELL_RC"
+        echo "# --- Q PATH END ---" >> "$SHELL_RC"
+        echo -e "${GREEN}✅ Added macOS Homebrew paths, $DEST_DIR, and ~/.local/bin to $SHELL_RC${NC}"
+    elif [ "$IS_WSL" = true ]; then
         echo "export PATH=\"\$PATH:\$HOME/.local/bin:$DEST_DIR\"" >> "$SHELL_RC"
         echo "export XCURSOR_THEME=\"\${XCURSOR_THEME:-Adwaita}\"" >> "$SHELL_RC"
         echo "export XCURSOR_SIZE=\"\${XCURSOR_SIZE:-36}\"" >> "$SHELL_RC"
@@ -207,13 +262,19 @@ if [ -n "$SHELL_RC" ]; then
         echo "    export LD_LIBRARY_PATH=\"/usr/lib/wsl/lib\${LD_LIBRARY_PATH:+:\$LD_LIBRARY_PATH}\"" >> "$SHELL_RC"
         echo "fi" >> "$SHELL_RC"
         echo "# --- Q PATH END ---" >> "$SHELL_RC"
-        echo -e "${GREEN}✅ Added $DEST_DIR, ~/.local/bin, and GPU acceleration settings to $SHELL_RC${NC}"
+        echo -e "${GREEN}✅ Added $DEST_DIR, ~/.local/bin, and WSL2 D3D12 acceleration settings to $SHELL_RC${NC}"
+    else
+        # Native Linux (Wayland / X11)
+        echo "export PATH=\"\$PATH:\$HOME/.local/bin:$DEST_DIR\"" >> "$SHELL_RC"
+        echo "export XCURSOR_THEME=\"\${XCURSOR_THEME:-Adwaita}\"" >> "$SHELL_RC"
+        echo "export XCURSOR_SIZE=\"\${XCURSOR_SIZE:-24}\"" >> "$SHELL_RC"
+        echo "# --- Q PATH END ---" >> "$SHELL_RC"
+        echo -e "${GREEN}✅ Added $DEST_DIR and ~/.local/bin to $SHELL_RC (Native Linux Mesa acceleration)${NC}"
     fi
 
-    # MPV Wrapper Marker
-    if grep -q "# --- Q MPV WRAPPER START ---" "$SHELL_RC" 2>/dev/null; then
-        sed -i '/# --- Q MPV WRAPPER START ---/,/# --- Q MPV WRAPPER END ---/d' "$SHELL_RC"
-    fi
+    # Remove previous MPV wrapper blocks cleanly
+    cross_sed_delete '/# --- Q MPV WRAPPER START ---/,/# --- Q MPV WRAPPER END ---/d' "$SHELL_RC"
+
     echo -e "${CYAN}🔧 Injecting mandatory mpv IPC wrapper function...${NC}"
     cat << 'EOF' >> "$SHELL_RC"
 
