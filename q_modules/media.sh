@@ -547,6 +547,11 @@ cmd_next() {
     if [ "$MPV_RUNNING" = false ]; then echo -e "${C_PINK}😴💤 MPV isn't running... it must be taking a nap${C_RESET}"; return; fi
     echo '{ "command": ["playlist-next"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
 
+    if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+        send_android_mpv_cmd "playlist-next"
+        command -v input >/dev/null 2>&1 && input keyevent 87 2>/dev/null || true
+    fi
+
     # Proactive auto-queue check after moving next
     ( auto_queue_related ) >/dev/null 2>&1 & disown
 
@@ -558,6 +563,11 @@ cmd_prev() {
     if [ "$MPV_RUNNING" = false ]; then echo -e "${C_PINK}😴💤 MPV isn't running... it must be taking a nap${C_RESET}"; return; fi
     echo '{ "command": ["playlist-prev"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
 
+    if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+        send_android_mpv_cmd "playlist-prev"
+        command -v input >/dev/null 2>&1 && input keyevent 88 2>/dev/null || true
+    fi
+
     # Proactive auto-queue check after moving back (maybe we are now at the end?)
     ( auto_queue_related ) >/dev/null 2>&1 & disown
 
@@ -567,6 +577,11 @@ cmd_prev() {
 cmd_stop() {
     # Force save state before quitting
     save_current_playlist true
+
+    if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+        send_android_mpv_cmd "pause"
+        command -v input >/dev/null 2>&1 && input keyevent 127 2>/dev/null || true
+    fi
     
     # 1. Try polite quit first if socket exists (lets WSL PulseAudio unhook cleanly)
     if [ -S "$SOCKET" ]; then
@@ -773,15 +788,19 @@ cmd_android_video_handoff() {
     local is_playlist=false
 
     # --- 4. Resolve stream target for mobile MPV ---
-    if [ "$total_count" -gt 1 ] && [[ ! "$target_idx" =~ ^https?:// ]]; then
+    if [ "$total_count" -ge 1 ] && [[ ! "$target_idx" =~ ^https?:// ]]; then
         echo -e "${C_CYAN}📱 Initializing Android Stream Bridge for continuous playback...${C_RESET}"
         local bridge_port
         bridge_port=$(ensure_android_bridge_running)
         if [ -n "$bridge_port" ]; then
-            stream_url="http://127.0.0.1:${bridge_port}/playlist.m3u?start=${start_offset}"
-            # Pre-warm bridge to generate M3U and mirror to /sdcard/Download
-            curl -s -m 2 "$stream_url" >/dev/null 2>&1 || true
+            stream_url="http://127.0.0.1:${bridge_port}/playlist.m3u"
+            # Pre-warm bridge to generate M3U, mirror to /sdcard/Download, and prefetch start track
+            curl -s -m 2 "http://127.0.0.1:${bridge_port}/playlist.m3u?start=${start_offset}" >/dev/null 2>&1 || true
             is_playlist=true
+
+            # Set starting track index in MPV Android's mpv.conf and live Lua command bridge
+            set_android_mpv_playlist_start "$start_offset"
+            send_android_mpv_cmd "playlist-play-index ${start_offset}"
         fi
     fi
 
@@ -1781,6 +1800,10 @@ cmd_play() {
             else
                 # Pause
                 echo '{ "command": ["set_property", "pause", true] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+                    send_android_mpv_cmd "pause"
+                    command -v input >/dev/null 2>&1 && input keyevent 127 2>/dev/null || true
+                fi
                 sleep 0.1
                 log_now_playing "|| Paused: "
             fi

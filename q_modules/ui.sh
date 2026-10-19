@@ -126,6 +126,7 @@ cmd_update_ytdlp() {
         "q_modules/android_stream_bridge.py"
         "scripts/PipeRelay.cs"
         "scripts/queue_video.lua"
+        "scripts/queue_android_bridge.lua"
     )
     local success=true
     local base_url="https://raw.githubusercontent.com/ravin-ship-it/queue/main"
@@ -142,6 +143,9 @@ cmd_update_ytdlp() {
     # Sync updated scripts to active mpv config
     if [ -f "$dest_dir/scripts/queue_video.lua" ]; then
         cp -f "$dest_dir/scripts/queue_video.lua" "$HOME/.config/mpv/scripts/queue_video.lua" 2>/dev/null || true
+    fi
+    if [ -f "$dest_dir/scripts/queue_android_bridge.lua" ]; then
+        ensure_android_mpv_config >/dev/null 2>&1 || true
     fi
 
     # Always ensure executable permissions and symlinks

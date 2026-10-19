@@ -769,6 +769,15 @@ queue_item_ipc() {
     local target_path=$(format_path_for_mpv "$clean_url")
     local json_cmd=$(jq -nc --arg path "$target_path" '{"command": ["loadfile", $path, "append-play"]}')
     send_ipc "$json_cmd" > /dev/null
+
+    if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+        local bridge_port
+        bridge_port=$(ensure_android_bridge_running)
+        if [ -n "$bridge_port" ]; then
+            send_android_mpv_cmd "loadfile http://127.0.0.1:${bridge_port}/track/${count} append"
+            curl -s -m 1 "http://127.0.0.1:${bridge_port}/playlist.m3u" >/dev/null 2>&1 & disown
+        fi
+    fi
     
     # Auto-resume only if MPV was idle at the end of the queue (Play new index)
     check_and_resume "$count"

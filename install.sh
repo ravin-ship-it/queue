@@ -375,9 +375,11 @@ if [ "$IS_ANDROID" = true ]; then
     echo -e "   2. ${YELLOW}Hybrid Mobile Mode:${NC} Play Store MPV ('is.xyz.mpv') with MediaCodec GPU hardware acceleration,"
     echo -e "      Android AudioTrack tunneling, background playback, and Picture-in-Picture!"
 
-    # Auto-generate or optimize /sdcard/mpv/mpv.conf if storage is accessible
+    # Auto-generate or optimize /sdcard/mpv/mpv.conf and install command relay script if storage is accessible
     for mpv_dir in "/sdcard/mpv" "/storage/emulated/0/mpv" "$HOME/storage/shared/mpv"; do
         if [ -d "$mpv_dir" ] || mkdir -p "$mpv_dir" 2>/dev/null; then
+            mkdir -p "$mpv_dir/scripts" 2>/dev/null || true
+            cp -f "$REPO_DIR/scripts/queue_android_bridge.lua" "$mpv_dir/scripts/queue_bridge.lua" 2>/dev/null || true
             if [ ! -f "$mpv_dir/mpv.conf" ]; then
                 cat << 'EOF' > "$mpv_dir/mpv.conf"
 # === MPV Android Configuration for Queue Hybrid Mode ===
@@ -400,8 +402,14 @@ save-position-on-quit=no
 
 # Direct streaming bypass
 ytdl=no
+
+# Live Command Bridge for Real-Time Sync from Termux
+script=/sdcard/mpv/scripts/queue_bridge.lua
 EOF
-                echo -e "${GREEN}✅ Configured optimized hardware profile at $mpv_dir/mpv.conf${NC}"
+                echo -e "${GREEN}✅ Configured optimized hardware profile & Lua bridge at $mpv_dir/mpv.conf${NC}"
+            elif ! grep -q "queue_bridge.lua" "$mpv_dir/mpv.conf" 2>/dev/null; then
+                echo "script=/sdcard/mpv/scripts/queue_bridge.lua" >> "$mpv_dir/mpv.conf"
+                echo -e "${GREEN}✅ Integrated live Lua command bridge into $mpv_dir/mpv.conf${NC}"
             fi
             break
         fi

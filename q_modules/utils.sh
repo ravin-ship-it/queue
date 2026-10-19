@@ -78,6 +78,13 @@ check_and_resume() {
             else
                 echo -e "${C_GRAY}(Resume check failed: still idle)${C_RESET}"
             fi
+
+            if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+                if [ -n "$force_idx" ]; then
+                    send_android_mpv_cmd "playlist-play-index $force_idx"
+                fi
+                send_android_mpv_cmd "unpause"
+            fi
         fi
     fi
 }
@@ -429,8 +436,89 @@ ensure_android_mpv_config() {
         return 1
     fi
 
+    # 1. Install or update Lua command bridge for real-time IPC
+    local script_dir="$target_dir/scripts"
+    mkdir -p "$script_dir" 2>/dev/null
+    local lua_bridge="$script_dir/queue_bridge.lua"
+
+    local src_lua=""
+    for c in \
+        "${SCRIPT_DIR:-}/scripts/queue_android_bridge.lua" \
+        "$HOME/.local/bin/mpv/scripts/queue_android_bridge.lua" \
+        "$(dirname "$(realpath "${BASH_SOURCE[0]}")")/../scripts/queue_android_bridge.lua"; do
+        if [ -f "$c" ]; then
+            src_lua="$c"
+            break
+        fi
+    done
+
+    if [ -n "$src_lua" ] && [ -f "$src_lua" ]; then
+        cp -f "$src_lua" "$lua_bridge" 2>/dev/null || true
+    else
+        cat << 'LUA_EOF' > "$lua_bridge"
+-- queue_bridge.lua: Inter-Process Command Relay between Termux Queue & MPV Android
+local cmd_file = "/sdcard/mpv/queue_cmd.txt"
+local alt_cmd_file = "/storage/emulated/0/mpv/queue_cmd.txt"
+
+local function check_and_execute_cmd()
+    local path = cmd_file
+    local f = io.open(path, "r")
+    if not f then
+        path = alt_cmd_file
+        f = io.open(path, "r")
+    end
+    if not f then return end
+
+    local content = f:read("*all")
+    f:close()
+    os.remove(path)
+
+    if not content or content == "" then return end
+
+    for line in content:gmatch("[^\r\n]+") do
+        line = line:match("^%s*(.-)%s*$")
+        if line ~= "" then
+            local parts = {}
+            for part in line:gmatch("%S+") do table.insert(parts, part) end
+            if #parts > 0 then
+                local cmd = parts[1]
+                if cmd == "loadfile" and #parts >= 2 then
+                    mp.commandv("loadfile", parts[2], parts[3] or "append")
+                elseif cmd == "loadlist" and #parts >= 2 then
+                    mp.commandv("loadlist", parts[2], parts[3] or "replace")
+                elseif cmd == "playlist-play-index" and #parts >= 2 then
+                    local idx = tonumber(parts[2])
+                    if idx then mp.commandv("playlist-play-index", idx) end
+                elseif cmd == "playlist-next" then
+                    mp.commandv("playlist-next")
+                elseif cmd == "playlist-prev" then
+                    mp.commandv("playlist-prev")
+                elseif cmd == "playlist-clear" then
+                    mp.commandv("playlist-clear")
+                elseif cmd == "pause" then
+                    mp.set_property_bool("pause", true)
+                elseif cmd == "play" or cmd == "unpause" then
+                    mp.set_property_bool("pause", false)
+                elseif cmd == "seek" and #parts >= 2 then
+                    local target = tonumber(parts[2])
+                    if target then mp.commandv("seek", target, parts[3] or "absolute") end
+                end
+            end
+        end
+    end
+end
+mp.add_periodic_timer(0.25, check_and_execute_cmd)
+LUA_EOF
+    fi
+
+    # 2. Configure mpv.conf
     local conf_file="$target_dir/mpv.conf"
-    cat << 'CONF_EOF' > "$conf_file"
+    local cur_pl_start=""
+    if [ -f "$conf_file" ]; then
+        cur_pl_start=$(grep "^playlist-start=" "$conf_file" 2>/dev/null || true)
+    fi
+
+    cat << CONF_EOF > "$conf_file"
 # === MPV Android Configuration for Queue Hybrid Mode ===
 # Hardware video decoding via Android MediaCodec
 hwdec=mediacodec
@@ -451,8 +539,47 @@ save-position-on-quit=no
 
 # Direct streaming bypass (Queue bridge resolves streams)
 ytdl=no
+
+# Live Command Bridge for Real-Time Sync from Termux
+script=${lua_bridge}
 CONF_EOF
+
+    if [ -n "$cur_pl_start" ]; then
+        echo "$cur_pl_start" >> "$conf_file"
+    fi
+
     return 0
+}
+
+set_android_mpv_playlist_start() {
+    local offset="$1"
+    [[ ! "$offset" =~ ^[0-9]+$ ]] && offset=0
+    ensure_android_mpv_config >/dev/null 2>&1 || true
+    for target_dir in "/sdcard/mpv" "/storage/emulated/0/mpv" "$HOME/storage/shared/mpv"; do
+        local conf_file="$target_dir/mpv.conf"
+        if [ -f "$conf_file" ]; then
+            if grep -q "^playlist-start=" "$conf_file" 2>/dev/null; then
+                sed -i "s/^playlist-start=.*/playlist-start=${offset}/" "$conf_file" 2>/dev/null || true
+            else
+                echo "playlist-start=${offset}" >> "$conf_file"
+            fi
+            return 0
+        fi
+    done
+    return 1
+}
+
+send_android_mpv_cmd() {
+    local cmd="$1"
+    [ -z "$cmd" ] && return 1
+    for target_dir in "/sdcard/mpv" "/storage/emulated/0/mpv" "$HOME/storage/shared/mpv"; do
+        if [ -d "$target_dir" ] && [ -w "$target_dir" ]; then
+            local cmd_file="$target_dir/queue_cmd.txt"
+            echo "$cmd" >> "$cmd_file"
+            return 0
+        fi
+    done
+    return 1
 }
 
 ensure_mpv_running() {

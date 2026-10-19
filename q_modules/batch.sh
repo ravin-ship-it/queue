@@ -219,12 +219,26 @@ execute_batch() {
                 sleep 0.1
             done
 
+            if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+                local bridge_port
+                bridge_port=$(ensure_android_bridge_running)
+                if [ -n "$bridge_port" ]; then
+                    for (( b_idx=0; b_idx<${#PLAYLIST_URLS[@]}; b_idx++ )); do
+                        send_android_mpv_cmd "loadfile http://127.0.0.1:${bridge_port}/track/$((init_count + b_idx)) append"
+                    done
+                    curl -s -m 1 "http://127.0.0.1:${bridge_port}/playlist.m3u" >/dev/null 2>&1 & disown
+                fi
+            fi
+
             if [ "$SHOULD_START_PLAY" = true ]; then
                 # Directly play the newly added track immediately
                 echo "{\"command\": [\"playlist-play-index\", $init_count]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
                 echo '{"command": ["set_property", "pause", false]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
                 wait_for_playback_start
                 log_now_playing "|> Playing: "
+                if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+                    cmd_android_video_handoff "$((init_count + 1))"
+                fi
             else
                 # MPV is already playing: queue without interrupting
                 if [ ${#PLAYLIST_URLS[@]} -gt 1 ]; then

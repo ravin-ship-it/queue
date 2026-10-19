@@ -175,6 +175,20 @@ cmd_playlist_load() {
         wait_for_playback_start
         log_now_playing "|> Playing (New Queue): "
     fi
+
+    if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+        local bridge_port
+        bridge_port=$(ensure_android_bridge_running)
+        if [ -n "$bridge_port" ]; then
+            curl -s -m 1 "http://127.0.0.1:${bridge_port}/playlist.m3u" >/dev/null 2>&1 || true
+            if [[ "$load_mode" == *"Replace"* ]] || [[ "$load_mode" == *"New Queue"* ]]; then
+                set_android_mpv_playlist_start 0
+                send_android_mpv_cmd "loadlist http://127.0.0.1:${bridge_port}/playlist.m3u replace"
+            else
+                send_android_mpv_cmd "loadlist http://127.0.0.1:${bridge_port}/playlist.m3u replace"
+            fi
+        fi
+    fi
     save_current_playlist true >/dev/null 2>&1 & disown
 }
 
@@ -290,6 +304,15 @@ cmd_playlist_list() {
         echo '{"command": ["set_property", "pause", false]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
         wait_for_playback_start
         log_now_playing "|> Playing (New Queue): "
+        if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+            local bridge_port
+            bridge_port=$(ensure_android_bridge_running)
+            if [ -n "$bridge_port" ]; then
+                set_android_mpv_playlist_start 0
+                curl -s -m 1 "http://127.0.0.1:${bridge_port}/playlist.m3u" >/dev/null 2>&1 || true
+                send_android_mpv_cmd "loadlist http://127.0.0.1:${bridge_port}/playlist.m3u replace"
+            fi
+        fi
         save_current_playlist true >/dev/null 2>&1 & disown
         return
     fi
@@ -315,9 +338,15 @@ cmd_playlist_list() {
     done < <(echo "$urls")
     
     echo -e "${C_GREEN}✅ Loaded ${C_ORANGE}${sel_count}${C_GREEN} tracks from ${C_CYAN}${selected_pl}${C_RESET}"
+    if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+        local bridge_port
+        bridge_port=$(ensure_android_bridge_running)
+        if [ -n "$bridge_port" ]; then
+            curl -s -m 1 "http://127.0.0.1:${bridge_port}/playlist.m3u" >/dev/null 2>&1 || true
+            send_android_mpv_cmd "loadlist http://127.0.0.1:${bridge_port}/playlist.m3u replace"
+        fi
+    fi
     save_current_playlist true >/dev/null 2>&1 & disown
-    
-    [ "$MPV_RUNNING" = true ] && save_current_playlist true >/dev/null 2>&1 & disown
 }
 
 cmd_playlist_raw() {

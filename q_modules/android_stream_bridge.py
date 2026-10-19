@@ -78,8 +78,8 @@ def parse_expire_timestamp(stream_url):
         pass
     return time.time() + 18000.0
 
-def query_mpv_socket(cmd_dict, timeout=1.0):
-    """Query MPV UNIX domain IPC socket."""
+def query_mpv_socket(cmd_dict, timeout=1.5):
+    """Query MPV UNIX domain IPC socket and return response data."""
     sock_path = os.environ.get("SOCKET", DEFAULT_SOCKET)
     if not os.path.exists(sock_path):
         return None
@@ -89,21 +89,38 @@ def query_mpv_socket(cmd_dict, timeout=1.0):
         s.connect(sock_path)
         payload = (json.dumps(cmd_dict) + "\n").encode("utf-8")
         s.sendall(payload)
-        res_data = b""
-        while True:
-            chunk = s.recv(4096)
+
+        buffer = ""
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                chunk = s.recv(8192)
+            except socket.timeout:
+                break
             if not chunk:
                 break
-            res_data += chunk
-            if b"\n" in chunk:
-                break
+            buffer += chunk.decode("utf-8", errors="ignore")
+
+            # Process complete lines from socket stream
+            while "\n" in buffer:
+                line, buffer = buffer.split("\n", 1)
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    msg = json.loads(line)
+                    # Skip asynchronous event messages
+                    if "event" in msg and "data" not in msg:
+                        continue
+                    if "data" in msg:
+                        s.close()
+                        return msg["data"]
+                    if msg.get("error") == "success":
+                        s.close()
+                        return msg.get("data")
+                except json.JSONDecodeError:
+                    continue
         s.close()
-        for line in res_data.decode("utf-8", errors="ignore").splitlines():
-            line = line.strip()
-            if line:
-                parsed = json.loads(line)
-                if "data" in parsed:
-                    return parsed["data"]
     except Exception:
         pass
     return None
@@ -252,19 +269,19 @@ class StreamBridgeHandler(BaseHTTPRequestHandler):
                         start_offset = item["index"]
                         break
 
-            # Order: start_offset to end, followed by beginning to start_offset (circular seamless queue)
-            ordered = []
-            if playlist:
-                if 0 <= start_offset < len(playlist):
-                    ordered = playlist[start_offset:] + playlist[:start_offset]
-                else:
-                    ordered = playlist
-
-            for item in ordered:
+            # Serve playlist in full sequential order (1 to N) so track numbers and queue structure match exactly
+            for item in playlist:
                 idx = item["index"]
-                title = item.get("title", f"Track {idx + 1}")
-                lines.append(f"#EXTINF:0,{title}")
+                raw_title = item.get("title", f"Track {idx + 1}")
+                clean_title = raw_title.replace("\r", " ").replace("\n", " ").strip()
+                lines.append(f"#EXTINF:0,{clean_title}")
                 lines.append(f"{base_url}/track/{idx}")
+
+            # Pre-fetch requested start track and upcoming track in background
+            if playlist and 0 <= start_offset < len(playlist):
+                schedule_prefetch(playlist[start_offset]["url"])
+                if start_offset + 1 < len(playlist):
+                    schedule_prefetch(playlist[start_offset + 1]["url"])
 
             if len(lines) == 1:
                 # Empty playlist placeholder
@@ -304,6 +321,14 @@ class StreamBridgeHandler(BaseHTTPRequestHandler):
                 return
 
             playlist = get_current_playlist()
+            if not playlist or idx < 0 or idx >= len(playlist):
+                # Small retry window in case socket IPC is in middle of adding track
+                for _ in range(3):
+                    time.sleep(0.2)
+                    playlist = get_current_playlist()
+                    if playlist and 0 <= idx < len(playlist):
+                        break
+
             if not playlist or idx < 0 or idx >= len(playlist):
                 self.send_error(404, "Track index out of range")
                 return
