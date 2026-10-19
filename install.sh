@@ -193,7 +193,9 @@ fi
 # --- MPV Helper Scripts ---
 if [ -d "scripts" ]; then
     mkdir -p "$CONF_DIR/scripts"
-    cp -rf scripts/* "$CONF_DIR/scripts/"
+    cp -rf scripts/*.lua "$CONF_DIR/scripts/" 2>/dev/null || true
+    cp -rf scripts/*.js "$CONF_DIR/scripts/" 2>/dev/null || true
+    rm -f "$CONF_DIR/scripts/PipeRelay.cs" 2>/dev/null || true
     echo -e "${GREEN}✅ Installed helper scripts to $CONF_DIR/scripts/${NC}"
 fi
 

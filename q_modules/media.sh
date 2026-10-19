@@ -685,8 +685,158 @@ is_video_window_open() {
     return 1
 }
 
+cmd_android_video_handoff() {
+    local target_idx="$1"
+
+    # --- 1. TOGGLE OFF: If mobile video handoff was previously launched and no target index, resume background audio ---
+    if [ -f "$HOME/.cache/mpv/android_video_active" ] && [ -z "$target_idx" ]; then
+        rm -f "$HOME/.cache/mpv/android_video_active"
+        if [ "$MPV_RUNNING" = true ] && [ -S "$SOCKET" ]; then
+            echo '{"command":["set_property","pause",false]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+            echo -e "🎧 ${C_PINK}Returned to background audio mode (Termux MPV unpaused)${C_RESET}"
+        else
+            echo -e "🎧 ${C_PINK}Returned to background audio mode.${C_RESET}"
+        fi
+        return 0
+    fi
+
+    # --- 2. Query target track URL and title ---
+    if [[ ! "$target_idx" =~ ^https?:// ]]; then
+        ensure_mpv_running
+        if [ "$MPV_RUNNING" = false ] || [ ! -S "$SOCKET" ]; then
+            echo -e "${C_PINK}🔇 MPV player is not active. Queue a song or start playback first.${C_RESET}"
+            return 1
+        fi
+    fi
+
+    local track_url=""
+    local track_title="Queue Video"
+    local time_pos="0"
+
+    if [[ "$target_idx" =~ ^https?:// ]]; then
+        track_url="$target_idx"
+        track_title="Queue Video"
+        time_pos=0
+    elif [[ "$target_idx" =~ ^[0-9]+$ ]]; then
+        local total_count
+        total_count=$(echo '{"command":["get_property","playlist-count"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // 0')
+        if [ "$target_idx" -lt 1 ] || [ "$target_idx" -gt "$total_count" ]; then
+            echo -e "${C_PINK}🚫 Track [${C_ORANGE}${target_idx}${C_PINK}] does not exist. Max tracks: ${C_WHITE}[${C_ORANGE}${total_count}${C_WHITE}]${C_RESET}"
+            return 1
+        fi
+        local item_raw
+        item_raw=$(echo '{"command":["get_property","playlist"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r --argjson idx "$((target_idx - 1))" 'select(.event == null) | .data[$idx] | [(.filename // ""), (.title // "Queue Video")] | @tsv')
+        IFS=$'\t' read -r track_url track_title <<< "$item_raw"
+        time_pos=0
+    else
+        # Target is empty: query currently active playing track from socket
+        local track_raw
+        track_raw=$(echo -e '{"command":["get_property","path"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","time-pos"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | [(.[0].data // ""), (.[1].data // "Queue Video"), (.[2].data // 0)] | @tsv')
+        IFS=$'\t' read -r track_url track_title time_pos <<< "$track_raw"
+    fi
+
+    if [ -z "$track_url" ] || [ "$track_url" = "null" ]; then
+        echo -e "${C_PINK}⚠️ No active track in queue. Specify a track number (e.g. 'q -vid 1') or queue a song.${C_RESET}"
+        return 1
+    fi
+
+    # --- 3. Format playback position ---
+    local pos_sec="${time_pos%.*}"
+    pos_sec="${pos_sec:-0}"
+    local pos_ms
+    pos_ms=$(awk -v t="$time_pos" 'BEGIN { printf "%.0f", (t > 0 ? t * 1000 : 0) }')
+    local time_formatted
+    if [ "$pos_sec" -ge 3600 ]; then
+        time_formatted=$(printf "%d:%02d:%02d" "$((pos_sec / 3600))" "$(((pos_sec % 3600) / 60))" "$((pos_sec % 60))")
+    else
+        time_formatted=$(printf "%d:%02d" "$((pos_sec / 60))" "$((pos_sec % 60))")
+    fi
+
+    local stream_url=""
+
+    # --- 4. Resolve stream target for mobile MPV ---
+    if [[ "$track_url" =~ ^https?:// ]]; then
+        echo -e "${C_CYAN}📱 Android Video Handoff: Resolving direct stream via yt-dlp...${C_RESET}"
+        stream_url=$(yt-dlp -g --no-warnings --extractor-args "youtube:player_client=android,web" -f "best[ext=mp4]/best" "$track_url" 2>/dev/null | head -n 1)
+        if [ -z "$stream_url" ]; then
+            stream_url=$(yt-dlp -g --no-warnings "$track_url" 2>/dev/null | head -n 1)
+        fi
+        if [ -z "$stream_url" ]; then
+            echo -e "${C_PINK}❌ Failed to extract stream URL for mobile video player.${C_RESET}"
+            return 1
+        fi
+    else
+        # Local file handling: check shared storage vs Termux sandbox
+        if [[ "$track_url" =~ ^/sdcard/ ]] || [[ "$track_url" =~ ^/storage/ ]]; then
+            stream_url="file://$track_url"
+        else
+            local shared_dir="/sdcard/Download/queue_handoff"
+            mkdir -p "$shared_dir" 2>/dev/null || true
+            local dest_file="$shared_dir/$(basename "$track_url")"
+            if cp "$track_url" "$dest_file" 2>/dev/null; then
+                stream_url="file://$dest_file"
+            else
+                stream_url="file://$track_url"
+            fi
+        fi
+    fi
+
+    # --- 5. Pause Termux background audio to prevent double playback ---
+    if [ "$MPV_RUNNING" = true ] && [ -S "$SOCKET" ]; then
+        echo '{"command":["set_property","pause",true]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+        touch "$HOME/.cache/mpv/android_video_active"
+    fi
+
+    # --- 6. Launch Android Intent via Activity Manager (am) ---
+    local am_bin="am"
+    if ! command -v am >/dev/null 2>&1 && [ -x "/system/bin/am" ]; then
+        am_bin="/system/bin/am"
+    fi
+
+    echo -e "📺 ${C_PINK}Launching MPV Android at ${C_WHITE}${time_formatted}${C_PINK}...${C_RESET}"
+    echo -e "   ${C_TEAL}Title: ${C_WHITE}${track_title}${C_RESET}"
+
+    local launched=false
+    # Priority 1: Play Store MPV app (is.xyz.mpv/.MPVActivity) with position & title
+    if $am_bin start -a android.intent.action.VIEW -d "$stream_url" -t "video/*" -n "is.xyz.mpv/.MPVActivity" --ei "position" "$pos_ms" --es "title" "$track_title" >/dev/null 2>&1; then
+        launched=true
+        echo -e "${C_GREEN}✨ Video opened in Play Store MPV Android!${C_RESET}"
+    # Priority 2: Generic Android video intent (VLC, MX Player, system chooser)
+    elif $am_bin start -a android.intent.action.VIEW -d "$stream_url" -t "video/*" --ei "position" "$pos_ms" --es "title" "$track_title" >/dev/null 2>&1; then
+        launched=true
+        echo -e "${C_GREEN}✨ Video opened in Android media player!${C_RESET}"
+    # Priority 3: Termux URL opening tools
+    elif command -v termux-open-url >/dev/null 2>&1; then
+        termux-open-url "$stream_url" >/dev/null 2>&1
+        launched=true
+        echo -e "${C_GREEN}✨ Video stream sent via termux-open-url!${C_RESET}"
+    elif command -v termux-open >/dev/null 2>&1; then
+        termux-open "$stream_url" >/dev/null 2>&1
+        launched=true
+        echo -e "${C_GREEN}✨ Video stream sent via termux-open!${C_RESET}"
+    fi
+
+    if [ "$launched" = true ]; then
+        echo -e "${C_GRAY}💡 Termux background audio paused. Run ${C_WHITE}'q -vid'${C_GRAY} or ${C_WHITE}'q -p'${C_GRAY} to resume audio in Termux.${C_RESET}"
+        return 0
+    else
+        echo -e "${C_PINK}❌ Unable to launch Android media player. Ensure MPV Android is installed or 'am' is accessible.${C_RESET}"
+        rm -f "$HOME/.cache/mpv/android_video_active"
+        if [ "$MPV_RUNNING" = true ] && [ -S "$SOCKET" ]; then
+            echo '{"command":["set_property","pause",false]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+        fi
+        return 1
+    fi
+}
+
 cmd_video_toggle() {
     local target_idx="$1"
+
+    # --- ANDROID / TERMUX HYBRID VIDEO HANDOFF ---
+    if [ "$IS_ANDROID" = true ] || (command -v getprop >/dev/null 2>&1 && [ -d "/data/data/com.termux" ]); then
+        cmd_android_video_handoff "$target_idx"
+        return $?
+    fi
 
     # --- TOGGLE OFF: If video window is currently open and no target specified ---
     if is_video_window_open && [ -z "$target_idx" ]; then
@@ -706,9 +856,6 @@ cmd_video_toggle() {
             if [ -d "/mnt/wslg" ] || [ -S "/tmp/.X11-unix/X0" ]; then
                 export DISPLAY=":0"
                 export WAYLAND_DISPLAY="wayland-0"
-            elif [ "$IS_ANDROID" = true ]; then
-                echo -e "${C_PINK}📱 Desktop video window is disabled on Android/Termux (operates in high-fidelity headless audio mode).${C_RESET}"
-                return 1
             else
                 echo -e "${C_PINK}🚫 No graphical display found. Desktop video requires an active display (X11 / Wayland / WSLg).${C_RESET}"
                 return 1
@@ -892,9 +1039,15 @@ cmd_hybrid_toggle() {
         if [ "$IS_MACOS" = true ]; then
             echo -e "${C_PINK}ℹ️  Hybrid Boost Mode is designed specifically for Windows + WSL2.${C_RESET}"
             echo -e "${C_CYAN}🍏 Your macOS system is already running native Metal/Cocoa with direct 120 FPS+ hardware acceleration!${C_RESET}"
-        elif [ "$IS_ANDROID" = true ]; then
-            echo -e "${C_PINK}ℹ️  Hybrid Boost Mode is designed specifically for Windows + WSL2.${C_RESET}"
-            echo -e "${C_CYAN}🤖 Termux/Android mode operates in standalone headless audio mode.${C_RESET}"
+        elif [ "$IS_ANDROID" = true ] || (command -v getprop >/dev/null 2>&1 && [ -d "/data/data/com.termux" ]); then
+            print_header_box "${C_PINK}📱 Queue Hybrid Engine (Android / Termux)${C_RESET}"
+            print_boxed_line "${C_TEAL}Audio Engine:  ${C_WHITE}Termux Headless MPV + CPU Wake-Lock (Screen-off battery saver)${C_RESET}"
+            print_boxed_line "${C_TEAL}Video Engine:  ${C_WHITE}Play Store MPV App ('is.xyz.mpv') via Android Intent Handoff${C_RESET}"
+            print_boxed_line "${C_TEAL}Video Handoff: ${C_ORANGE}Active (type 'q -vid' or press 'v' in 'q -i' to hand off)${C_RESET}"
+            printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
+            B_LINE=${B_LINE// /─}
+            echo -e "${C_GRAY}${B_LINE}${C_RESET}"
+            return 0
         else
             echo -e "${C_PINK}ℹ️  Hybrid Boost Mode is designed specifically for Windows + WSL2.${C_RESET}"
             echo -e "${C_CYAN}🐧 Your native Linux system already has direct kernel GPU access with uncapped 120 FPS+ hardware acceleration!${C_RESET}"
@@ -1114,26 +1267,33 @@ cmd_resolution() {
     cur_time=$(echo '{"command":["get_property","time-pos"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // empty' 2>/dev/null)
 
     # Use queue_video.lua handler (zero-restart position resume via playback-restart event)
-    echo "{\"command\":[\"script-message\",\"change-resolution\",\"$ytdl_fmt\",\"$label\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    local res_resp
+    res_resp=$(echo "{\"command\":[\"script-message\",\"change-resolution\",\"$ytdl_fmt\",\"$label\"]}" | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
 
-    # Fallback in case script-message is not handled
-    echo "{\"command\":[\"set_property\",\"ytdl-format\",\"$ytdl_fmt\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo '{"command":["playlist-play-index","current"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo "{\"command\":[\"show-text\",\"Quality: $label\",2500]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    # Fallback ONLY if script-message was not handled (prevents duplicate reload restarting track from 0:00)
+    if ! echo "$res_resp" | grep -q '"error":"success"'; then
+        echo "{\"command\":[\"set_property\",\"ytdl-format\",\"$ytdl_fmt\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+        echo '{"command":["playlist-play-index","current"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+        echo "{\"command\":[\"show-text\",\"Quality: $label\",2500]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
 
-    # Detached seek watcher guarantees position restoration across any engine or script state
-    if [ -n "$cur_time" ] && [[ "$cur_time" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-        local cur_int="${cur_time%.*}"
-        if [ "$cur_int" -ge 2 ]; then
-            (
-                wait_for_playback_start >/dev/null 2>&1
-                echo "{\"command\":[\"seek\",$cur_time,\"absolute+exact\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-            ) & disown
+        # Detached seek watcher guarantees position restoration across any engine or script state
+        if [ -n "$cur_time" ] && [[ "$cur_time" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+            local cur_int="${cur_time%.*}"
+            if [ "$cur_int" -ge 2 ]; then
+                (
+                    wait_for_playback_start >/dev/null 2>&1
+                    echo "{\"command\":[\"seek\",$cur_time,\"absolute+exact\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+                ) & disown
+            fi
         fi
     fi
 
     echo -e "${C_CYAN}📺 Video Quality set to:${C_RESET} ${C_PINK}${label}${C_RESET}"
-    echo -e "${C_GRAY}   Reloaded stream with high-framerate matching (playback position preserved).${C_RESET}"
+    if ! is_video_window_open && [ "$IS_ANDROID" = false ]; then
+        echo -e "${C_GRAY}💡 Note: Currently in background audio mode. Open video window with 'q -vid' to view.${C_RESET}"
+    else
+        echo -e "${C_GRAY}   Reloaded stream with high-framerate matching (playback position preserved).${C_RESET}"
+    fi
 }
 
 cmd_loop() {
