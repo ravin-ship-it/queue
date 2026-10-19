@@ -171,9 +171,17 @@ cmd_playlist_load() {
             if [[ "$cur_cnt" =~ ^[0-9]+$ ]] && [ "$cur_cnt" -gt 0 ]; then break; fi
             sleep 0.1
         done
-        echo '{"command": ["set_property", "pause", false]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
-        wait_for_playback_start
-        log_now_playing "|> Playing (New Queue): "
+        if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+            echo '{"command": ["set_property", "pause", true]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+            echo '{"command": ["set_property", "mute", true]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+            echo '{"command": ["set_property", "ao", "null"]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+            log_now_playing "|> Playing (New Queue): "
+            cmd_android_video_handoff "1"
+        else
+            echo '{"command": ["set_property", "pause", false]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+            wait_for_playback_start
+            log_now_playing "|> Playing (New Queue): "
+        fi
     fi
 
     if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
@@ -185,7 +193,7 @@ cmd_playlist_load() {
                 set_android_mpv_playlist_start 0
                 send_android_mpv_cmd "loadlist http://127.0.0.1:${bridge_port}/playlist.m3u replace"
             else
-                send_android_mpv_cmd "loadlist http://127.0.0.1:${bridge_port}/playlist.m3u replace"
+                send_android_mpv_cmd "loadlist http://127.0.0.1:${bridge_port}/playlist.m3u append"
             fi
         fi
     fi
@@ -301,10 +309,11 @@ cmd_playlist_list() {
             sleep 0.1
         done
 
-        echo '{"command": ["set_property", "pause", false]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
-        wait_for_playback_start
-        log_now_playing "|> Playing (New Queue): "
         if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+            echo '{"command": ["set_property", "pause", true]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+            echo '{"command": ["set_property", "mute", true]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+            echo '{"command": ["set_property", "ao", "null"]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+            log_now_playing "|> Playing (New Queue): "
             local bridge_port
             bridge_port=$(ensure_android_bridge_running)
             if [ -n "$bridge_port" ]; then
@@ -312,6 +321,11 @@ cmd_playlist_list() {
                 curl -s -m 1 "http://127.0.0.1:${bridge_port}/playlist.m3u" >/dev/null 2>&1 || true
                 send_android_mpv_cmd "loadlist http://127.0.0.1:${bridge_port}/playlist.m3u replace"
             fi
+            cmd_android_video_handoff "1"
+        else
+            echo '{"command": ["set_property", "pause", false]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+            wait_for_playback_start
+            log_now_playing "|> Playing (New Queue): "
         fi
         save_current_playlist true >/dev/null 2>&1 & disown
         return

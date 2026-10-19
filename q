@@ -794,9 +794,17 @@ if [ -z "$1" ]; then
                      json_cmd=$(jq -nc --arg path "$url" --arg m "$m" '{"command": ["loadfile", $path, $m]}')
                      echo "$json_cmd" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
                  done <<< "$(echo "$selection" | sort -n)"
-                 echo '{"command": ["set_property", "pause", false]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
-                 wait_for_playback_start
-                 log_now_playing "|> Playing (New Queue): "
+                 if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+                     echo '{"command": ["set_property", "pause", true]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                     echo '{"command": ["set_property", "mute", true]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                     echo '{"command": ["set_property", "ao", "null"]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                     log_now_playing "|> Playing (New Queue): "
+                     cmd_android_video_handoff "1"
+                 else
+                     echo '{"command": ["set_property", "pause", false]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                     wait_for_playback_start
+                     log_now_playing "|> Playing (New Queue): "
+                 fi
                  ( sleep 0.3; save_current_playlist true ) >/dev/null 2>&1 & disown
                  exit 0
              fi

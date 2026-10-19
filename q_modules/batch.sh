@@ -157,9 +157,17 @@ execute_batch() {
                 sleep 0.1
             done
 
-            echo '{"command": ["set_property", "pause", false]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
-            wait_for_playback_start
-            log_now_playing "|> Playing (New Queue): "
+            if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+                echo '{"command": ["set_property", "pause", true]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                echo '{"command": ["set_property", "mute", true]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                echo '{"command": ["set_property", "ao", "null"]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                log_now_playing "|> Playing (New Queue): "
+                cmd_android_video_handoff "1"
+            else
+                echo '{"command": ["set_property", "pause", false]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                wait_for_playback_start
+                log_now_playing "|> Playing (New Queue): "
+            fi
             save_current_playlist true >/dev/null 2>&1 & disown
         fi
     elif [ "$DO_QUEUE" = true ] || ([ ${#TARGET_FILES[@]} -eq 0 ] && [ ${#PLAYLIST_URLS[@]} -gt 0 ]); then
@@ -231,13 +239,19 @@ execute_batch() {
             fi
 
             if [ "$SHOULD_START_PLAY" = true ]; then
-                # Directly play the newly added track immediately
-                echo "{\"command\": [\"playlist-play-index\", $init_count]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
-                echo '{"command": ["set_property", "pause", false]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
-                wait_for_playback_start
-                log_now_playing "|> Playing: "
                 if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+                    echo "{\"command\": [\"playlist-play-index\", $init_count]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                    echo '{"command": ["set_property", "pause", true]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                    echo '{"command": ["set_property", "mute", true]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                    echo '{"command": ["set_property", "ao", "null"]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                    log_now_playing "|> Playing: "
                     cmd_android_video_handoff "$((init_count + 1))"
+                else
+                    # Directly play the newly added track immediately
+                    echo "{\"command\": [\"playlist-play-index\", $init_count]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                    echo '{"command": ["set_property", "pause", false]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                    wait_for_playback_start
+                    log_now_playing "|> Playing: "
                 fi
             else
                 # MPV is already playing: queue without interrupting

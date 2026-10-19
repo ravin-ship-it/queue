@@ -68,22 +68,24 @@ check_and_resume() {
                  # Force play specific index
                  echo "{ \"command\": [\"playlist-play-index\", $force_idx] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
             fi
-            echo '{ "command": ["set_property", "pause", false] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
-            
-            # Check success
-            sleep 0.2
-            local new_idle=$(echo '{ "command": ["get_property", "idle-active"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // "false"')
-            if [ "$new_idle" == "false" ]; then
-                log_now_playing "|> Playing (Auto): "
-            else
-                echo -e "${C_GRAY}(Resume check failed: still idle)${C_RESET}"
-            fi
-
             if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+                echo '{ "command": ["set_property", "pause", true] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
                 if [ -n "$force_idx" ]; then
                     send_android_mpv_cmd "playlist-play-index $force_idx"
                 fi
                 send_android_mpv_cmd "unpause"
+                log_now_playing "|> Playing (Auto): "
+            else
+                echo '{ "command": ["set_property", "pause", false] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                
+                # Check success
+                sleep 0.2
+                local new_idle=$(echo '{ "command": ["get_property", "idle-active"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // "false"')
+                if [ "$new_idle" == "false" ]; then
+                    log_now_playing "|> Playing (Auto): "
+                else
+                    echo -e "${C_GRAY}(Resume check failed: still idle)${C_RESET}"
+                fi
             fi
         fi
     fi
@@ -714,13 +716,18 @@ ensure_mpv_running() {
             script_opt=("--script=$SCRIPT_DIR/scripts/queue_video.lua")
         fi
 
+        local extra_android_opts=()
+        if [ "$IS_ANDROID" = true ] && [ "$mode" == "hybrid" ]; then
+            extra_android_opts=("--ao=null" "--audio=no")
+        fi
+
         if command -v setsid >/dev/null 2>&1; then
             setsid mpv --idle --keep-open=yes --no-terminal --vo=null --video=no \
-                "${input_conf_opt[@]}" "${script_opt[@]}" \
+                "${input_conf_opt[@]}" "${script_opt[@]}" "${extra_android_opts[@]}" \
                 --input-ipc-server="$SOCKET" "${initial_pl[@]}" </dev/null >/dev/null 2>&1 &
         else
             nohup mpv --idle --keep-open=yes --no-terminal --vo=null --video=no \
-                "${input_conf_opt[@]}" "${script_opt[@]}" \
+                "${input_conf_opt[@]}" "${script_opt[@]}" "${extra_android_opts[@]}" \
                 --input-ipc-server="$SOCKET" "${initial_pl[@]}" </dev/null >/dev/null 2>&1 &
         fi
         disown
@@ -733,6 +740,15 @@ ensure_mpv_running() {
         MPV_RUNNING=true
         start_idle_monitor
         restore_state_properties
+    fi
+
+    # Enforce silent background mode on Android if Hybrid Mode is active
+    if [ "$IS_ANDROID" = true ] && [ "$MPV_RUNNING" = true ] && [ -S "$SOCKET" ]; then
+        if [ "$(get_queue_mode)" == "hybrid" ]; then
+            echo '{"command":["set_property","mute",true]}' | nc $NC_OPTS -w 0.5 "$SOCKET" >/dev/null 2>&1
+            echo '{"command":["set_property","ao","null"]}' | nc $NC_OPTS -w 0.5 "$SOCKET" >/dev/null 2>&1
+            echo '{"command":["set_property","pause",true]}' | nc $NC_OPTS -w 0.5 "$SOCKET" >/dev/null 2>&1
+        fi
     fi
 }
 

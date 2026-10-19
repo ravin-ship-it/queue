@@ -545,12 +545,18 @@ cmd_info() {
 
 cmd_next() {
     if [ "$MPV_RUNNING" = false ]; then echo -e "${C_PINK}😴💤 MPV isn't running... it must be taking a nap${C_RESET}"; return; fi
-    echo '{ "command": ["playlist-next"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
 
     if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+        echo '{ "command": ["playlist-next"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+        echo '{ "command": ["set_property", "pause", true] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
         send_android_mpv_cmd "playlist-next"
         command -v input >/dev/null 2>&1 && input keyevent 87 2>/dev/null || true
+        ( auto_queue_related ) >/dev/null 2>&1 & disown
+        log_now_playing
+        return
     fi
+
+    echo '{ "command": ["playlist-next"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
 
     # Proactive auto-queue check after moving next
     ( auto_queue_related ) >/dev/null 2>&1 & disown
@@ -561,12 +567,18 @@ cmd_next() {
 
 cmd_prev() {
     if [ "$MPV_RUNNING" = false ]; then echo -e "${C_PINK}😴💤 MPV isn't running... it must be taking a nap${C_RESET}"; return; fi
-    echo '{ "command": ["playlist-prev"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
 
     if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+        echo '{ "command": ["playlist-prev"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+        echo '{ "command": ["set_property", "pause", true] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
         send_android_mpv_cmd "playlist-prev"
         command -v input >/dev/null 2>&1 && input keyevent 88 2>/dev/null || true
+        ( auto_queue_related ) >/dev/null 2>&1 & disown
+        log_now_playing
+        return
     fi
+
+    echo '{ "command": ["playlist-prev"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
 
     # Proactive auto-queue check after moving back (maybe we are now at the end?)
     ( auto_queue_related ) >/dev/null 2>&1 & disown
@@ -580,6 +592,7 @@ cmd_stop() {
 
     if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
         send_android_mpv_cmd "pause"
+        send_android_mpv_cmd "playlist-clear"
         command -v input >/dev/null 2>&1 && input keyevent 127 2>/dev/null || true
     fi
     
@@ -709,16 +722,32 @@ is_video_window_open() {
 cmd_android_video_handoff() {
     local target_idx="$1"
 
-    # --- 1. TOGGLE OFF: If mobile video handoff was previously launched and no target index, resume background audio ---
-    if [ -f "$HOME/.cache/mpv/android_video_active" ] && [ -z "$target_idx" ]; then
-        rm -f "$HOME/.cache/mpv/android_video_active"
+    # --- 1. TOGGLE OFF (Standalone Mode Only): If mobile video handoff was previously launched and no target index, resume background audio ---
+    if [ "$(get_queue_mode)" == "hybrid" ]; then
+        # In Hybrid Mode, MPV Android is the sole audio & video player; Termux MPV must stay paused and silent
         if [ "$MPV_RUNNING" = true ] && [ -S "$SOCKET" ]; then
-            echo '{"command":["set_property","pause",false]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-            echo -e "🎧 ${C_PINK}Returned to background audio mode (Termux MPV unpaused)${C_RESET}"
-        else
-            echo -e "🎧 ${C_PINK}Returned to background audio mode.${C_RESET}"
+            echo '{"command":["set_property","pause",true]}' | nc $NC_OPTS -w 0.5 "$SOCKET" >/dev/null 2>&1
+            echo '{"command":["set_property","mute",true]}' | nc $NC_OPTS -w 0.5 "$SOCKET" >/dev/null 2>&1
+            echo '{"command":["set_property","ao","null"]}' | nc $NC_OPTS -w 0.5 "$SOCKET" >/dev/null 2>&1
         fi
-        return 0
+    else
+        # Standalone Mode: Toggle OFF if video was active and no new target index was requested
+        if [ -f "$HOME/.cache/mpv/android_video_active" ] && [ -z "$target_idx" ]; then
+            local last_active=0
+            last_active=$(stat -c %Y "$HOME/.cache/mpv/android_video_active" 2>/dev/null || stat -f %m "$HOME/.cache/mpv/android_video_active" 2>/dev/null || echo 0)
+            local now_time
+            now_time=$(date +%s)
+            if [ "$((now_time - last_active))" -ge 3 ]; then
+                rm -f "$HOME/.cache/mpv/android_video_active"
+                if [ "$MPV_RUNNING" = true ] && [ -S "$SOCKET" ]; then
+                    echo '{"command":["set_property","pause",false]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+                    echo -e "🎧 ${C_PINK}Returned to background audio mode (Termux MPV unpaused)${C_RESET}"
+                else
+                    echo -e "🎧 ${C_PINK}Returned to background audio mode.${C_RESET}"
+                fi
+                return 0
+            fi
+        fi
     fi
 
     # --- 2. Query target track URL and title ---
@@ -835,6 +864,8 @@ cmd_android_video_handoff() {
     # --- 5. Pause Termux background audio to prevent double playback ---
     if [ "$MPV_RUNNING" = true ] && [ -S "$SOCKET" ]; then
         echo '{"command":["set_property","pause",true]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+        echo '{"command":["set_property","mute",true]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+        echo '{"command":["set_property","ao","null"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
         touch "$HOME/.cache/mpv/android_video_active"
     fi
 
@@ -881,13 +912,19 @@ cmd_android_video_handoff() {
         if [ "$is_playlist" = true ]; then
             echo -e "   ${C_TEAL}Queue:${C_WHITE} ${total_count} tracks connected ${C_GRAY}(Continuous background playback)${C_RESET}"
         fi
-        echo -e "${C_GRAY}💡 Termux background audio paused. Run ${C_WHITE}'q -vid'${C_GRAY} or ${C_WHITE}'q -p'${C_GRAY} to resume audio in Termux.${C_RESET}"
+        if [ "$(get_queue_mode)" == "hybrid" ]; then
+            echo -e "${C_GRAY}💡 Playback running in Play Store MPV Android (Hardware Audio Tunneling + MediaCodec GPU).${C_RESET}"
+        else
+            echo -e "${C_GRAY}💡 Termux background audio paused. Run ${C_WHITE}'q -vid'${C_GRAY} or ${C_WHITE}'q -p'${C_GRAY} to resume audio in Termux.${C_RESET}"
+        fi
         return 0
     else
         echo -e "${C_PINK}❌ Unable to launch Android media player. Ensure MPV Android is installed or 'am' is accessible.${C_RESET}"
         rm -f "$HOME/.cache/mpv/android_video_active"
         if [ "$MPV_RUNNING" = true ] && [ -S "$SOCKET" ]; then
-            echo '{"command":["set_property","pause",false]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+            if [ "$(get_queue_mode)" != "hybrid" ]; then
+                echo '{"command":["set_property","pause",false]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+            fi
         fi
         return 1
     fi
@@ -1220,14 +1257,13 @@ cmd_hybrid_toggle() {
                 ensure_android_mpv_config >/dev/null 2>&1 || true
                 echo -e "   ${C_GRAY}💡 To switch back anytime: ${C_WHITE}q -hybrid off${C_RESET}"
 
-                # If audio was actively playing in Termux MPV, seamlessly hand off to Android MPV!
+                # In Hybrid Mode, Termux MPV must stay paused and silent
                 if [ "$MPV_RUNNING" = true ] && [ -S "$SOCKET" ]; then
-                    local is_paused
-                    is_paused=$(echo '{"command":["get_property","pause"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // false')
-                    if [ "$is_paused" != "true" ]; then
-                        echo -e "${C_PINK}🔄 Migrating active playback to Play Store MPV Android...${C_RESET}"
-                        cmd_android_video_handoff ""
-                    fi
+                    echo '{"command":["set_property","pause",true]}' | nc $NC_OPTS -w 0.5 "$SOCKET" >/dev/null 2>&1
+                    echo '{"command":["set_property","mute",true]}' | nc $NC_OPTS -w 0.5 "$SOCKET" >/dev/null 2>&1
+                    echo '{"command":["set_property","ao","null"]}' | nc $NC_OPTS -w 0.5 "$SOCKET" >/dev/null 2>&1
+                    echo -e "${C_PINK}🔄 Migrating active playback to Play Store MPV Android...${C_RESET}"
+                    cmd_android_video_handoff ""
                 fi
             else
                 echo -e "🐧 ${C_CYAN}Switched to Standalone Termux Mode!${C_RESET}"
@@ -1237,13 +1273,14 @@ cmd_hybrid_toggle() {
                 stop_android_bridge >/dev/null 2>&1 || true
                 echo -e "   ${C_GRAY}💡 To switch to Hybrid Mobile mode anytime: ${C_WHITE}q -hybrid on${C_RESET}"
 
-                # If Android MPV was active, resume audio in Termux MPV!
-                if [ -f "$HOME/.cache/mpv/android_video_active" ]; then
-                    rm -f "$HOME/.cache/mpv/android_video_active"
-                    if [ "$MPV_RUNNING" = true ] && [ -S "$SOCKET" ]; then
-                        echo '{"command":["set_property","pause",false]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-                        echo -e "🎧 ${C_PINK}Resumed background audio in Termux MPV${C_RESET}"
-                    fi
+                # If Android MPV was active, pause it and resume audio in Termux MPV!
+                send_android_mpv_cmd "pause"
+                rm -f "$HOME/.cache/mpv/android_video_active"
+                if [ "$MPV_RUNNING" = true ] && [ -S "$SOCKET" ]; then
+                    echo '{"command":["set_property","mute",false]}' | nc $NC_OPTS -w 0.5 "$SOCKET" >/dev/null 2>&1
+                    echo '{"command":["set_property","ao","opensles,pulse,alsa"]}' | nc $NC_OPTS -w 0.5 "$SOCKET" >/dev/null 2>&1
+                    echo '{"command":["set_property","pause",false]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+                    echo -e "🎧 ${C_PINK}Resumed background audio in Termux MPV${C_RESET}"
                 fi
             fi
             return 0
@@ -1718,7 +1755,13 @@ cmd_play() {
 
         # Force Playback Start
         echo "{ \"command\": [\"playlist-play-index\", $start_idx] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
-        echo '{ "command": ["set_property", "pause", false] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+        if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+            echo '{ "command": ["set_property", "pause", true] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+            echo '{ "command": ["set_property", "mute", true] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+            echo '{ "command": ["set_property", "ao", "null"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+        else
+            echo '{ "command": ["set_property", "pause", false] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+        fi
 
         MPV_RUNNING=true
         just_started=true
@@ -1736,11 +1779,13 @@ cmd_play() {
 
     if [ -z "$index" ]; then
         if [ "$just_started" = true ]; then
-            echo '{ "command": ["set_property", "pause", false] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
-            wait_for_playback_start
-            log_now_playing "|> Restored & Playing: "
             if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+                log_now_playing "|> Restored & Playing: "
                 cmd_android_video_handoff ""
+            else
+                echo '{ "command": ["set_property", "pause", false] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                wait_for_playback_start
+                log_now_playing "|> Restored & Playing: "
             fi
         else
             # Single atomic IPC query to get pause, idle-active, eof-reached, playlist-pos, playlist-count
@@ -1755,13 +1800,17 @@ cmd_play() {
                     local start_idx=$(jq -r '.pos // 0' "$HOME/.cache/mpv/state.json" 2>/dev/null)
                     [[ ! "$start_idx" =~ ^[0-9]+$ ]] && start_idx=0
                     echo "{\"command\": [\"playlist-play-index\", $start_idx]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
-                    echo '{ "command": ["set_property", "pause", false] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
-                    wait_for_playback_start
-                    log_now_playing "|> Restored & Playing: "
                     if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+                        echo '{ "command": ["set_property", "pause", true] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                        log_now_playing "|> Restored & Playing: "
                         cmd_android_video_handoff ""
+                        return
+                    else
+                        echo '{ "command": ["set_property", "pause", false] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                        wait_for_playback_start
+                        log_now_playing "|> Restored & Playing: "
+                        return
                     fi
-                    return
                 fi
                 echo -e "${C_ORANGE}⚠️ Queue is empty.${C_RESET}"
                 return
@@ -1772,30 +1821,37 @@ cmd_play() {
                 local start_idx=0
                 [ "$cur_pos" -ge 0 ] 2>/dev/null && start_idx="$cur_pos"
                 echo "{\"command\": [\"playlist-play-index\", $start_idx]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
-                echo '{ "command": ["seek", 0, "absolute"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
-                echo '{ "command": ["set_property", "pause", false] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
-                wait_for_playback_start
-                log_now_playing "|> Playing: "
                 if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+                    echo '{ "command": ["set_property", "pause", true] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                    log_now_playing "|> Playing: "
                     cmd_android_video_handoff ""
+                else
+                    echo '{ "command": ["seek", 0, "absolute"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                    echo '{ "command": ["set_property", "pause", false] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                    wait_for_playback_start
+                    log_now_playing "|> Playing: "
                 fi
             elif [ "$cur_pause" == "true" ]; then
                 # Unpause
-                echo '{ "command": ["set_property", "pause", false] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
-                
-                # Check if stream timed out during long pause (e.g. 50 mins idle/EOF)
-                sleep 0.2
-                local check_idle=$(echo '{"command":["get_property","idle-active"]}' | nc $NC_OPTS -w 0.5 "$SOCKET" 2>/dev/null | jq -r '.data // false')
-                if [ "$check_idle" == "true" ] && [ "$cur_pos" -ge 0 ] 2>/dev/null; then
-                    # Stream connection dropped/expired! Force reload current track index with fresh token
-                    echo "{\"command\":[\"playlist-play-index\",$cur_pos]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
-                    echo '{ "command": ["seek", 0, "absolute"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
-                    echo '{ "command": ["set_property", "pause", false] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
-                fi
-                wait_for_playback_start
-                log_now_playing "|> Playing: "
                 if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
-                    cmd_android_video_handoff ""
+                    echo '{ "command": ["set_property", "pause", true] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                    send_android_mpv_cmd "unpause"
+                    command -v input >/dev/null 2>&1 && input keyevent 126 2>/dev/null || true
+                    log_now_playing "|> Playing: "
+                else
+                    echo '{ "command": ["set_property", "pause", false] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                    
+                    # Check if stream timed out during long pause (e.g. 50 mins idle/EOF)
+                    sleep 0.2
+                    local check_idle=$(echo '{"command":["get_property","idle-active"]}' | nc $NC_OPTS -w 0.5 "$SOCKET" 2>/dev/null | jq -r '.data // false')
+                    if [ "$check_idle" == "true" ] && [ "$cur_pos" -ge 0 ] 2>/dev/null; then
+                        # Stream connection dropped/expired! Force reload current track index with fresh token
+                        echo "{\"command\":[\"playlist-play-index\",$cur_pos]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                        echo '{ "command": ["seek", 0, "absolute"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                        echo '{ "command": ["set_property", "pause", false] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                    fi
+                    wait_for_playback_start
+                    log_now_playing "|> Playing: "
                 fi
             else
                 # Pause
@@ -1840,15 +1896,20 @@ cmd_play() {
         return
     fi
 
-    # Set pos AND force unpause and reset seek to 0 (Separate commands for maximum compatibility)
-    echo "{\"command\":[\"playlist-play-index\",$((index - 1))]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
-    echo "{\"command\":[\"seek\",0,\"absolute\"]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
-    echo "{\"command\":[\"set_property\",\"pause\",false]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
-    
-    wait_for_playback_start
-    log_now_playing "|> Playing: "
-
     if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+        echo "{\"command\":[\"playlist-play-index\",$((index - 1))]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+        echo "{\"command\":[\"set_property\",\"pause\",true]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+        echo "{\"command\":[\"set_property\",\"mute\",true]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+        echo "{\"command\":[\"set_property\",\"ao\",\"null\"]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+        log_now_playing "|> Playing: "
         cmd_android_video_handoff "$index"
+    else
+        # Set pos AND force unpause and reset seek to 0 (Separate commands for maximum compatibility)
+        echo "{\"command\":[\"playlist-play-index\",$((index - 1))]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+        echo "{\"command\":[\"seek\",0,\"absolute\"]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+        echo "{\"command\":[\"set_property\",\"pause\",false]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+        
+        wait_for_playback_start
+        log_now_playing "|> Playing: "
     fi
 }
