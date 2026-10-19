@@ -678,7 +678,7 @@ is_video_window_open() {
     vid_val=$(echo "$raw" | jq -s -r 'map(select(.event == null)) | .[1].data // false' 2>/dev/null)
     min_val=$(echo "$raw" | jq -s -r 'map(select(.event == null)) | .[2].data // false' 2>/dev/null)
 
-    if [ "$vo_name" != "null" ] && [ -n "$vo_name" ] && [ "$vid_val" != "false" ] && [ "$vid_val" != "no" ] && [ "$min_val" != "true" ]; then
+    if [ "$vo_name" != "null" ] && [ -n "$vo_name" ] && [ "$min_val" != "true" ]; then
         return 0
     fi
     return 1
@@ -757,34 +757,35 @@ cmd_video_toggle() {
     fi
 
     # Ensure MPV input configuration & keybindings are active
+    local batch_keys=""
     if [ -f "$HOME/.config/mpv/input.conf" ]; then
-        echo "{\"command\":[\"load-input-conf\",\"$HOME/.config/mpv/input.conf\"]}" | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
+        batch_keys+="{\"command\":[\"load-input-conf\",\"$HOME/.config/mpv/input.conf\"]}\n"
     fi
-    echo '{"command":["keybind","F11","cycle fullscreen"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo '{"command":["keybind","f","cycle fullscreen"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo '{"command":["keybind","CLOSE_WIN","script-message safe-hide-video"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo '{"command":["keybind","q","script-message safe-hide-video"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo '{"command":["keybind","Q","script-message safe-hide-video"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo '{"command":["keybind","Ctrl+w","script-message safe-hide-video"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo '{"command":["keybind","Ctrl+W","script-message safe-hide-video"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo '{"command":["keybind","Meta+w","script-message safe-hide-video"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo '{"command":["keybind","Meta+W","script-message safe-hide-video"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo '{"command":["keybind","Meta+q","script-message safe-hide-video"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo '{"command":["keybind","Meta+Q","script-message safe-hide-video"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo '{"command":["keybind","Alt+F4","script-message safe-hide-video"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo '{"command":["keybind","ESC","set fullscreen no"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo '{"command":["keybind","Ctrl+s","cycle shuffle"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo '{"command":["keybind","r","playlist-shuffle"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    batch_keys+='{"command":["keybind","F11","cycle fullscreen"]}\n'
+    batch_keys+='{"command":["keybind","f","cycle fullscreen"]}\n'
+    batch_keys+='{"command":["keybind","CLOSE_WIN","script-message safe-hide-video"]}\n'
+    batch_keys+='{"command":["keybind","q","script-message safe-hide-video"]}\n'
+    batch_keys+='{"command":["keybind","Q","script-message safe-hide-video"]}\n'
+    batch_keys+='{"command":["keybind","Ctrl+w","script-message safe-hide-video"]}\n'
+    batch_keys+='{"command":["keybind","Ctrl+W","script-message safe-hide-video"]}\n'
+    batch_keys+='{"command":["keybind","Meta+w","script-message safe-hide-video"]}\n'
+    batch_keys+='{"command":["keybind","Meta+W","script-message safe-hide-video"]}\n'
+    batch_keys+='{"command":["keybind","Meta+q","script-message safe-hide-video"]}\n'
+    batch_keys+='{"command":["keybind","Meta+Q","script-message safe-hide-video"]}\n'
+    batch_keys+='{"command":["keybind","Alt+F4","script-message safe-hide-video"]}\n'
+    batch_keys+='{"command":["keybind","ESC","set fullscreen no"]}\n'
+    batch_keys+='{"command":["keybind","Ctrl+s","cycle shuffle"]}\n'
+    batch_keys+='{"command":["keybind","r","playlist-shuffle"]}\n'
 
     # In-Window Scaling & Sizing Hotkeys
-    echo '{"command":["keybind","w","cycle_values window-scale 0.35 0.5 0.75 1.0 ; show-text \"Window Scale: ${window-scale}\" 1500"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo '{"command":["keybind","W","cycle_values window-scale 1.0 0.75 0.5 0.35 ; show-text \"Window Scale: ${window-scale}\" 1500"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo '{"command":["keybind","+","add window-scale 0.05 ; show-text \"Window Scale: ${window-scale}\" 1500"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo '{"command":["keybind","=","add window-scale 0.05 ; show-text \"Window Scale: ${window-scale}\" 1500"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo '{"command":["keybind","-","add window-scale -0.05 ; show-text \"Window Scale: ${window-scale}\" 1500"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo '{"command":["keybind","_","add window-scale -0.05 ; show-text \"Window Scale: ${window-scale}\" 1500"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo '{"command":["keybind","Ctrl+WHEEL_UP","add window-scale 0.05 ; show-text \"Window Scale: ${window-scale}\" 1500"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo '{"command":["keybind","Ctrl+WHEEL_DOWN","add window-scale -0.05 ; show-text \"Window Scale: ${window-scale}\" 1500"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    batch_keys+='{"command":["keybind","w","cycle_values window-scale 0.35 0.5 0.75 1.0 ; show-text \"Window Scale: ${window-scale}\" 1500"]}\n'
+    batch_keys+='{"command":["keybind","W","cycle_values window-scale 1.0 0.75 0.5 0.35 ; show-text \"Window Scale: ${window-scale}\" 1500"]}\n'
+    batch_keys+='{"command":["keybind","+","add window-scale 0.05 ; show-text \"Window Scale: ${window-scale}\" 1500"]}\n'
+    batch_keys+='{"command":["keybind","=","add window-scale 0.05 ; show-text \"Window Scale: ${window-scale}\" 1500"]}\n'
+    batch_keys+='{"command":["keybind","-","add window-scale -0.05 ; show-text \"Window Scale: ${window-scale}\" 1500"]}\n'
+    batch_keys+='{"command":["keybind","_","add window-scale -0.05 ; show-text \"Window Scale: ${window-scale}\" 1500"]}\n'
+    batch_keys+='{"command":["keybind","Ctrl+WHEEL_UP","add window-scale 0.05 ; show-text \"Window Scale: ${window-scale}\" 1500"]}\n'
+    batch_keys+='{"command":["keybind","Ctrl+WHEEL_DOWN","add window-scale -0.05 ; show-text \"Window Scale: ${window-scale}\" 1500"]}\n'
 
     # In-Window Quality Hotkeys (AVC1/VP9 60 FPS prioritized + Opus 48 kHz audio)
     local hotkey_0="bestvideo[height<=1440][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo+bestaudio/best"
@@ -793,15 +794,32 @@ cmd_video_toggle() {
     local hotkey_3="bestvideo[height<=1440][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=1440][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440]+bestaudio/best"
     local hotkey_4="bestvideo[fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo+bestaudio/best"
 
-    echo "{\"command\":[\"keybind\",\"0\",\"set ytdl-format \\\"$hotkey_0\\\" ; playlist-play-index current ; show-text \\\"Quality: Auto / Smart 60FPS\\\" 2500\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo "{\"command\":[\"keybind\",\"1\",\"set ytdl-format \\\"$hotkey_1\\\" ; playlist-play-index current ; show-text \\\"Quality: 720p HD (60fps)\\\" 2500\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo "{\"command\":[\"keybind\",\"2\",\"set ytdl-format \\\"$hotkey_2\\\" ; playlist-play-index current ; show-text \\\"Quality: 1080p Full HD (60fps)\\\" 2500\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo "{\"command\":[\"keybind\",\"3\",\"set ytdl-format \\\"$hotkey_3\\\" ; playlist-play-index current ; show-text \\\"Quality: 1440p 2K QHD (60fps)\\\" 2500\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo "{\"command\":[\"keybind\",\"4\",\"set ytdl-format \\\"$hotkey_4\\\" ; playlist-play-index current ; show-text \\\"Quality: Max / 4K UHD\\\" 2500\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    batch_keys+="{\"command\":[\"keybind\",\"0\",\"set ytdl-format \\\"$hotkey_0\\\" ; playlist-play-index current ; show-text \\\"Quality: Auto / Smart 60FPS\\\" 2500\"]}\n"
+    batch_keys+="{\"command\":[\"keybind\",\"1\",\"set ytdl-format \\\"$hotkey_1\\\" ; playlist-play-index current ; show-text \\\"Quality: 720p HD (60fps)\\\" 2500\"]}\n"
+    batch_keys+="{\"command\":[\"keybind\",\"2\",\"set ytdl-format \\\"$hotkey_2\\\" ; playlist-play-index current ; show-text \\\"Quality: 1080p Full HD (60fps)\\\" 2500\"]}\n"
+    batch_keys+="{\"command\":[\"keybind\",\"3\",\"set ytdl-format \\\"$hotkey_3\\\" ; playlist-play-index current ; show-text \\\"Quality: 1440p 2K QHD (60fps)\\\" 2500\"]}\n"
+    batch_keys+="{\"command\":[\"keybind\",\"4\",\"set ytdl-format \\\"$hotkey_4\\\" ; playlist-play-index current ; show-text \\\"Quality: Max / 4K UHD\\\" 2500\"]}\n"
+    echo -e "$batch_keys" | timeout 0.5s nc $NC_OPTS "$SOCKET" >/dev/null 2>&1 || true
 
     local target_autofit="50%x50%"
     local target_scale="0.5"
     local target_fs="false"
+
+    # Ensure queue has tracks before attempting to display video window
+    local total_count
+    total_count=$(echo '{"command":["get_property","playlist-count"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // 0')
+    if [[ ! "$total_count" =~ ^[0-9]+$ ]] || [ "$total_count" -le 0 ]; then
+        if [ -f "$LAST_PLAYLIST_FILE" ] && [ -s "$LAST_PLAYLIST_FILE" ]; then
+            load_playlist_file_to_mpv "$LAST_PLAYLIST_FILE" "replace"
+            total_count=$(echo '{"command":["get_property","playlist-count"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // 0')
+        fi
+    fi
+    if [[ ! "$total_count" =~ ^[0-9]+$ ]] || [ "$total_count" -le 0 ]; then
+        if [[ ! "$target_idx" =~ ^http.* ]]; then
+            echo -e "${C_PINK}⚠️ Queue is empty. Add a song or start playback before opening video window.${C_RESET}"
+            return 1
+        fi
+    fi
 
     # If target index, size preset, or URL is passed
     if [ -n "$target_idx" ]; then
@@ -810,13 +828,11 @@ cmd_video_toggle() {
             echo "{\"command\":[\"loadfile\",\"$target_idx\",\"replace\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
         elif [[ "$target_idx" =~ ^[0-9]+$ ]]; then
             # Specific track index requested
-            local pl_count
-            pl_count=$(echo '{"command":["get_property","playlist-count"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // 0')
-            if [ "$target_idx" -lt 1 ] || [ "$target_idx" -gt "$pl_count" ]; then
-                echo -e "${C_PINK}🚫 Track [${C_ORANGE}${target_idx}${C_PINK}] does not exist. Max tracks: ${C_WHITE}[${C_ORANGE}${pl_count}${C_WHITE}]${C_RESET}"
+            if [ "$target_idx" -lt 1 ] || [ "$target_idx" -gt "$total_count" ]; then
+                echo -e "${C_PINK}🚫 Track [${C_ORANGE}${target_idx}${C_PINK}] does not exist. Max tracks: ${C_WHITE}[${C_ORANGE}${total_count}${C_WHITE}]${C_RESET}"
                 return 1
             fi
-            echo "{\"command\":[\"set_property\",\"playlist-pos\",$((target_idx - 1))]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+            echo "{\"command\":[\"playlist-play-index\",$((target_idx - 1))]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
         elif [[ "$target_idx" =~ ^(small|sm|35|med|medium|50|large|lg|75|full|fs|100)$ ]]; then
             case "$target_idx" in
                 small|sm|35) target_autofit="35%x35%"; target_scale="0.35" ;;
@@ -846,8 +862,12 @@ cmd_video_toggle() {
     # 12. video=auto & vid=auto -> Demux & render video stream
     # 13. force-window=yes -> Keep window persistent across playlist transitions
     # 14. pause=false -> Resume/continue playback
-    echo -e "{\"command\":[\"set_property\",\"window-minimized\",false]}\n{\"command\":[\"set_property\",\"autofit\",\"$target_autofit\"]}\n{\"command\":[\"set_property\",\"window-scale\",$target_scale]}\n{\"command\":[\"set_property\",\"geometry\",\"50%:50%\"]}\n{\"command\":[\"set_property\",\"auto-window-resize\",false]}\n{\"command\":[\"set_property\",\"keepaspect-window\",false]}\n{\"command\":[\"apply-profile\",\"fast\"]}\n{\"command\":[\"set_property\",\"hwdec\",\"auto-safe\"]}\n{\"command\":[\"set_property\",\"opengl-pbo\",true]}\n{\"command\":[\"set_property\",\"swapchain-depth\",3]}\n{\"command\":[\"set_property\",\"video-sync\",\"audio\"]}\n{\"command\":[\"set_property\",\"gpu-context\",\"$gpu_ctx\"]}\n{\"command\":[\"set_property\",\"vo\",\"$vo_opt\"]}\n{\"command\":[\"set_property\",\"video\",\"auto\"]}\n{\"command\":[\"set_property\",\"vid\",\"auto\"]}\n{\"command\":[\"set_property\",\"fullscreen\",$target_fs]}\n{\"command\":[\"set_property\",\"force-window\",\"yes\"]}\n{\"command\":[\"set_property\",\"pause\",false]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo -e "{\"command\":[\"set_property\",\"window-minimized\",false]}\n{\"command\":[\"set_property\",\"autofit\",\"$target_autofit\"]}\n{\"command\":[\"set_property\",\"window-scale\",$target_scale]}\n{\"command\":[\"set_property\",\"geometry\",\"50%:50%\"]}\n{\"command\":[\"set_property\",\"auto-window-resize\",false]}\n{\"command\":[\"set_property\",\"keepaspect-window\",false]}\n{\"command\":[\"apply-profile\",\"fast\"]}\n{\"command\":[\"set_property\",\"hwdec\",\"auto-safe\"]}\n{\"command\":[\"set_property\",\"opengl-pbo\",true]}\n{\"command\":[\"set_property\",\"swapchain-depth\",3]}\n{\"command\":[\"set_property\",\"video-sync\",\"audio\"]}\n{\"command\":[\"set_property\",\"gpu-context\",\"$gpu_ctx\"]}\n{\"command\":[\"set_property\",\"vo\",\"$vo_opt\"]}\n{\"command\":[\"set_property\",\"video\",\"auto\"]}\n{\"command\":[\"set_property\",\"vid\",\"auto\"]}\n{\"command\":[\"set_property\",\"fullscreen\",$target_fs]}\n{\"command\":[\"set_property\",\"force-window\",\"yes\"]}\n{\"command\":[\"set_property\",\"pause\",false]}" | timeout 0.5s nc $NC_OPTS "$SOCKET" >/dev/null 2>&1 || true
     touch "$HOME/.cache/mpv/video_active"
+    local cur_vid=$(echo '{"command":["get_property","vid"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // false')
+    if [ "$cur_vid" == "false" ] || [ "$cur_vid" == "no" ]; then
+        echo '{"command":["playlist-play-index","current"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    fi
 
     # Fetch track title and format notification
     local title
@@ -1003,17 +1023,7 @@ cmd_hybrid_toggle() {
         echo -e "${C_PINK}🔄 Migrating active playback to new engine...${C_RESET}"
         ensure_mpv_running
         if [ -f "$LAST_PLAYLIST_FILE" ] && [ -s "$LAST_PLAYLIST_FILE" ]; then
-            local is_first=true
-            local batch=""
-            while IFS= read -r line; do
-                [ -z "$line" ] && continue
-                local target_path=$(format_path_for_mpv "$line")
-                local m="append-play"
-                [ "$is_first" = true ] && { m="replace"; is_first=false; }
-                local cmd_json=$(jq -nc --arg path "$target_path" --arg m "$m" '{"command":["loadfile",$path,$m]}')
-                batch+="${cmd_json}\n"
-            done < "$LAST_PLAYLIST_FILE"
-            echo -e "$batch" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+            load_playlist_file_to_mpv "$LAST_PLAYLIST_FILE" "replace"
         fi
         if [ -n "$cur_pos" ] && [ "$cur_pos" != "null" ]; then
             echo "{\"command\":[\"playlist-play-index\",$cur_pos]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
@@ -1308,10 +1318,15 @@ cmd_play() {
         echo -e "${C_PINK}🚀 Restoring last session...${C_RESET}"
         ensure_mpv_running "$LAST_PLAYLIST_FILE"
         
+        local cnt=$(echo '{"command":["get_property","playlist-count"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0' 2>/dev/null)
+        if [[ ! "$cnt" =~ ^[0-9]+$ ]] || [ "$cnt" -le 0 ]; then
+             load_playlist_file_to_mpv "$LAST_PLAYLIST_FILE" "replace"
+        fi
+
         # Stabilization: Wait for playlist to populate (max 3s)
         for i in {1..15}; do
-             local cnt=$(echo '{"command":["get_property","playlist-count"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0' 2>/dev/null)
-             if [[ "$cnt" =~ ^[0-9]+$ ]] && [ "$cnt" -gt 0 ]; then break; fi
+             local cur_c=$(echo '{"command":["get_property","playlist-count"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0' 2>/dev/null)
+             if [[ "$cur_c" =~ ^[0-9]+$ ]] && [ "$cur_c" -gt 0 ]; then break; fi
              sleep 0.2
         done
 
@@ -1353,8 +1368,7 @@ cmd_play() {
             if [[ ! "$cur_count" =~ ^[0-9]+$ ]] || [ "$cur_count" -le 0 ]; then
                 if [ -f "$LAST_PLAYLIST_FILE" ] && [ -s "$LAST_PLAYLIST_FILE" ]; then
                     echo -e "${C_PINK}🚀 Loading saved playlist into MPV...${C_RESET}"
-                    echo "{\"command\": [\"loadlist\", \"$LAST_PLAYLIST_FILE\", \"replace\"]}" | nc $NC_OPTS -w 2 "$SOCKET" > /dev/null 2>&1
-                    sleep 0.3
+                    load_playlist_file_to_mpv "$LAST_PLAYLIST_FILE" "replace"
                     restore_state_properties
                     local start_idx=$(jq -r '.pos // 0' "$HOME/.cache/mpv/state.json" 2>/dev/null)
                     [[ ! "$start_idx" =~ ^[0-9]+$ ]] && start_idx=0
@@ -1415,6 +1429,13 @@ cmd_play() {
 
     # Validate Index
     local count=$(echo '{"command":["get_property","playlist-count"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0' 2>/dev/null)
+    if [[ ! "$count" =~ ^[0-9]+$ ]] || [ "$count" -le 0 ]; then
+        if [ -f "$LAST_PLAYLIST_FILE" ] && [ -s "$LAST_PLAYLIST_FILE" ]; then
+            load_playlist_file_to_mpv "$LAST_PLAYLIST_FILE" "replace"
+            restore_state_properties
+            count=$(echo '{"command":["get_property","playlist-count"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0' 2>/dev/null)
+        fi
+    fi
     if [[ ! "$count" =~ ^[0-9]+$ ]] || [ "$index" -lt 1 ] || [ "$index" -gt "$count" ]; then
         [[ ! "$count" =~ ^[0-9]+$ ]] && count="0"
         # Use local ESC-safe colors for the log

@@ -1,3 +1,29 @@
+resolve_playlist_file() {
+    local target="$1"
+    [ -z "$target" ] && return 1
+    local file=""
+    if [[ "$target" =~ ^[0-9]+$ ]]; then
+        file=$(find "$PLAYLIST_DIR" -maxdepth 1 -name "*.txt" | sort | sed -n "${target}p")
+    else
+        file="${PLAYLIST_DIR}/${target}.txt"
+        if [ ! -f "$file" ]; then
+            local ci_file
+            ci_file=$(find "$PLAYLIST_DIR" -maxdepth 1 -iname "${target}.txt" | head -n 1)
+            [ -n "$ci_file" ] && file="$ci_file"
+        fi
+        if [ ! -f "$file" ]; then
+            local partial_file
+            partial_file=$(find "$PLAYLIST_DIR" -maxdepth 1 -iname "*${target}*.txt" | head -n 1)
+            [ -n "$partial_file" ] && file="$partial_file"
+        fi
+    fi
+    if [ -n "$file" ] && [ -f "$file" ]; then
+        echo "$file"
+        return 0
+    fi
+    return 1
+}
+
 cmd_playlist_save() {
     local name="$1"
     if [ -z "$name" ]; then
@@ -92,14 +118,9 @@ cmd_playlist_load() {
     while IFS= read -r item; do
         [ -z "$item" ] && continue
         
-        local file=""
-        if [[ "$item" =~ ^[0-9]+$ ]]; then
-            file=$(find "$PLAYLIST_DIR" -maxdepth 1 -name "*.txt" | sort | sed -n "${item}p")
-        else
-            file="${PLAYLIST_DIR}/${item}.txt"
-        fi
-
-        if [ ! -f "$file" ]; then
+        local file
+        file=$(resolve_playlist_file "$item")
+        if [ -z "$file" ] || [ ! -f "$file" ]; then
             echo -e "${C_PINK}🔍🤷 Playlist ${C_WHITE}[${C_ORANGE}${item}${C_WHITE}] ${C_PINK}not found${C_RESET}"
             continue
         fi
@@ -114,6 +135,7 @@ cmd_playlist_load() {
             shuf "$file" > "$temp_list"
         fi
 
+        local batch_cmds=""
         while IFS= read -r url; do
             [ -z "$url" ] && continue
             # Robust URL cleaning (Only for remote HTTP URLs)
@@ -132,17 +154,21 @@ cmd_playlist_load() {
 
             local target_path=$(format_path_for_mpv "$clean_url")
             local json_cmd=$(jq -nc --arg path "$target_path" --arg m "$m" '{"command": ["loadfile", $path, $m]}')
-            send_ipc "$json_cmd" > /dev/null
+            batch_cmds+="${json_cmd}\n"
         done < "$temp_list"
+
+        if [ -n "$batch_cmds" ]; then
+            echo -e "$batch_cmds" | nc $NC_OPTS -w 2 "$SOCKET" > /dev/null
+        fi
         
         [ "$temp_list" != "$file" ] && rm "$temp_list"
         echo -e "${C_GREEN}✅ Loaded ${C_ORANGE}${count}${C_GREEN} tracks from ${C_CYAN}${name}${C_RESET}"
     done <<< "$input"
 
-    if [[ "$load_mode" == *"Replace"* ]] || [[ "$load_mode" == *"New Queue"* ]]; then
+    if [ "$total_loaded" -gt 0 ] && { [[ "$load_mode" == *"Replace"* ]] || [[ "$load_mode" == *"New Queue"* ]]; }; then
         for i in {1..15}; do
             local cur_cnt=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
-            if [ "$cur_cnt" -gt 0 ]; then break; fi
+            if [[ "$cur_cnt" =~ ^[0-9]+$ ]] && [ "$cur_cnt" -gt 0 ]; then break; fi
             sleep 0.1
         done
         echo '{"command": ["set_property", "pause", false]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
@@ -320,20 +346,14 @@ cmd_playlist_raw() {
     fi
 
     # 2. Resolve Target (Index or Name)
-    local name=""
-    local file=""
-    if [[ "$input" =~ ^[0-9]+$ ]]; then
-        file=$(find "$PLAYLIST_DIR" -maxdepth 1 -name "*.txt" | sort | sed -n "${input}p")
-        [ -n "$file" ] && name=$(basename "$file" .txt)
-    else
-        name="$input"
-        file="${PLAYLIST_DIR}/${name}.txt"
-    fi
+    local file
+    file=$(resolve_playlist_file "$input")
 
-    if [ ! -f "$file" ]; then
+    if [ -z "$file" ] || [ ! -f "$file" ]; then
         echo -e "${C_PINK}🔍🤷 Playlist [${input}] not found${C_RESET}"
         return
     fi
+    local name=$(basename "$file" .txt)
     
     # 3. List Playlist Contents
     print_header_box "${C_PURPLE}📂 Playlist: ${C_CYAN}${name}${C_RESET}"
@@ -362,17 +382,11 @@ cmd_playlist_rm() {
         return
     fi
     
-    local all_playlists=$(find "$PLAYLIST_DIR" -maxdepth 1 -name "*.txt" | sort)
     declare -a FILES_TO_DELETE
     
     for input in "$@"; do
-        local file=""
-        if [[ "$input" =~ ^[0-9]+$ ]]; then
-            file=$(echo "$all_playlists" | sed -n "${input}p")
-        else
-            local safe_input=$(basename "$input")
-            file="${PLAYLIST_DIR}/${safe_input}.txt"
-        fi
+        local file
+        file=$(resolve_playlist_file "$input")
 
         if [ -n "$file" ] && [ -f "$file" ]; then
             FILES_TO_DELETE+=("$file")

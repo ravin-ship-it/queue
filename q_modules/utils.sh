@@ -143,12 +143,13 @@ find_windows_mpv() {
 }
 
 find_windows_ytdlp() {
-    local win_user
-    win_user=$(get_windows_user)
-    if [ -f "/mnt/c/Users/$win_user/yt-dlp.exe" ]; then
-        echo "C:\\Users\\$win_user\\yt-dlp.exe"
-    elif [ -f "/mnt/c/Users/$win_user/AppData/Local/Microsoft/WinGet/Packages/yt-dlp.yt-dlp_Microsoft.Winget.Source_8wekyb3d8bbwe/yt-dlp.exe" ]; then
-        echo "C:\\Users\\$win_user\\AppData\\Local\\Microsoft\\WinGet\\Packages\\yt-dlp.yt-dlp_Microsoft.Winget.Source_8wekyb3d8bbwe\\yt-dlp.exe"
+    local win_dir
+    win_dir=$(get_windows_user_dir)
+    [ -z "$win_dir" ] && win_dir="/mnt/c/Users/HP"
+    if [ -f "$win_dir/yt-dlp.exe" ]; then
+        wslpath -w "$win_dir/yt-dlp.exe" 2>/dev/null
+    elif [ -f "$win_dir/AppData/Local/Microsoft/WinGet/Packages/yt-dlp.yt-dlp_Microsoft.Winget.Source_8wekyb3d8bbwe/yt-dlp.exe" ]; then
+        wslpath -w "$win_dir/AppData/Local/Microsoft/WinGet/Packages/yt-dlp.yt-dlp_Microsoft.Winget.Source_8wekyb3d8bbwe/yt-dlp.exe" 2>/dev/null
     elif [ -f "/mnt/c/Program Files/MPV Player/yt-dlp.exe" ]; then
         echo "C:\\Program Files\\MPV Player\\yt-dlp.exe"
     elif command -v yt-dlp.exe >/dev/null 2>&1; then
@@ -170,9 +171,9 @@ format_path_for_mpv() {
 }
 
 ensure_piperelay_compiled() {
-    local win_user
-    win_user=$(get_windows_user)
-    local win_dir="/mnt/c/Users/$win_user"
+    local win_dir
+    win_dir=$(get_windows_user_dir)
+    [ -z "$win_dir" ] && win_dir="/mnt/c/Users/HP"
     local win_exe="$win_dir/PipeRelay.exe"
 
     if [ -f "$win_exe" ] && [ -x "$win_exe" ]; then
@@ -206,6 +207,44 @@ ensure_piperelay_compiled() {
     return 1
 }
 
+load_playlist_file_to_mpv() {
+    local file="$1"
+    local replace_mode="${2:-replace}"
+    [ ! -f "$file" ] || [ ! -s "$file" ] && return 1
+
+    local is_first=true
+    local batch=""
+    while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        local clean_url="$line"
+        if [[ "$line" =~ ^http ]]; then
+            clean_url="${line%%\\t*}"
+            clean_url="${clean_url%%[[:space:]]*}"
+            clean_url=$(echo "$clean_url" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+        fi
+        local target_path=$(format_path_for_mpv "$clean_url")
+        local m="append-play"
+        if [ "$is_first" = true ] && [ "$replace_mode" == "replace" ]; then
+            m="replace"
+            is_first=false
+        fi
+        local cmd_json=$(jq -nc --arg path "$target_path" --arg m "$m" '{"command":["loadfile",$path,$m]}')
+        batch+="${cmd_json}\n"
+    done < "$file"
+
+    if [ -n "$batch" ]; then
+        echo -e "$batch" | nc $NC_OPTS -w 2 "$SOCKET" >/dev/null 2>&1
+        for i in {1..20}; do
+            local cnt=$(echo '{"command":["get_property","playlist-count"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0' 2>/dev/null)
+            if [[ "$cnt" =~ ^[0-9]+$ ]] && [ "$cnt" -gt 0 ]; then
+                return 0
+            fi
+            sleep 0.1
+        done
+    fi
+    return 0
+}
+
 ensure_mpv_running() {
     local pl_arg="$1"
     if [ "$MPV_RUNNING" = false ] || [ ! -S "$SOCKET" ]; then
@@ -226,9 +265,9 @@ ensure_mpv_running() {
             relay_bin=$(ensure_piperelay_compiled)
 
             if [ -n "$win_mpv" ] && [ -n "$relay_bin" ]; then
-                taskkill.exe /F /IM mpv.exe 2>/dev/null || true
-                taskkill.exe /F /IM mpv.com 2>/dev/null || true
-                taskkill.exe /F /IM PipeRelay.exe 2>/dev/null || true
+                taskkill.exe /F /IM mpv.exe </dev/null 2>/dev/null || true
+                taskkill.exe /F /IM mpv.com </dev/null 2>/dev/null || true
+                taskkill.exe /F /IM PipeRelay.exe </dev/null 2>/dev/null || true
                 pkill -f "hybrid_bridge.py" 2>/dev/null || true
 
                 local pipe_name="mpv-q-pipe"
@@ -247,12 +286,20 @@ ensure_mpv_running() {
                     [ -n "$win_script" ] && script_arg="'--script=$win_script',"
                 fi
 
-                powershell.exe -NoProfile -Command "Start-Process -FilePath '$win_mpv' -ArgumentList '--idle=yes','--keep-open=yes','--vo=null','--video=no',${ytdl_arg}${script_arg}'--input-ipc-server=\\\\.\\pipe\\$pipe_name' -WindowStyle Hidden" </dev/null >/dev/null 2>&1
+                local win_mpv_native
+                win_mpv_native=$(wslpath -w "$win_mpv" 2>/dev/null)
+                [ -z "$win_mpv_native" ] && win_mpv_native="$win_mpv"
+
+                powershell.exe -NoProfile -Command "Start-Process -FilePath '$win_mpv_native' -ArgumentList '--idle=yes','--keep-open=yes','--vo=null','--video=no',${ytdl_arg}${script_arg}'--input-ipc-server=\\\\.\\pipe\\$pipe_name' -WindowStyle Hidden" </dev/null >/dev/null 2>&1
 
                 local bridge_script="$MODULE_DIR/hybrid_bridge.py"
                 [ ! -f "$bridge_script" ] && bridge_script="$SCRIPT_DIR/q_modules/hybrid_bridge.py"
 
-                python3 "$bridge_script" "$SOCKET" "$pipe_name" "$relay_bin" >/dev/null 2>&1 &
+                if command -v setsid >/dev/null 2>&1; then
+                    setsid python3 "$bridge_script" "$SOCKET" "$pipe_name" "$relay_bin" </dev/null >/dev/null 2>&1 &
+                else
+                    nohup python3 "$bridge_script" "$SOCKET" "$pipe_name" "$relay_bin" </dev/null >/dev/null 2>&1 &
+                fi
                 disown
 
                 for i in {1..30}; do
@@ -261,8 +308,19 @@ ensure_mpv_running() {
                 done
 
                 if [ -S "$SOCKET" ]; then
+                    # Verify IPC responsiveness (wait up to 3s for MPV to initialize IPC)
+                    for attempt in {1..30}; do
+                        if echo '{"command":["get_property","idle-active"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | grep -q "data"; then
+                            break
+                        fi
+                        sleep 0.1
+                    done
+
                     MPV_RUNNING=true
                     start_idle_monitor
+                    if [ -n "$pl_arg" ] && [ -f "$pl_arg" ] && [ -s "$pl_arg" ]; then
+                        load_playlist_file_to_mpv "$pl_arg" "replace"
+                    fi
                     restore_state_properties
                     return 0
                 fi

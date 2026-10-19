@@ -31,13 +31,19 @@ def main():
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
-            bufsize=0
+            bufsize=0,
+            start_new_session=True
         )
     except Exception as e:
         sys.stderr.write(f"Failed to start PipeRelay: {e}\n")
         sys.exit(1)
 
     def cleanup(*args):
+        try:
+            with open("/home/xen/.cache/mpv/bridge_debug.log", "a") as f:
+                f.write(f"Cleanup called with args: {args}, proc.poll(): {proc.poll()}\n")
+        except Exception:
+            pass
         try:
             proc.terminate()
             proc.kill()
@@ -50,6 +56,10 @@ def main():
                 pass
         sys.exit(0)
 
+    try:
+        signal.signal(signal.SIGHUP, signal.SIG_IGN)
+    except (AttributeError, ValueError):
+        pass
     signal.signal(signal.SIGINT, cleanup)
     signal.signal(signal.SIGTERM, cleanup)
 
@@ -64,8 +74,14 @@ def main():
     while proc.poll() is None:
         try:
             readable, _, exceptional = select.select(inputs, [], inputs, 0.5)
-        except (select.error, OSError):
-            break
+        except (select.error, OSError) as e:
+            try:
+                with open("/home/xen/.cache/mpv/bridge_debug.log", "a") as f:
+                    f.write(f"Select exception: {e}\n")
+            except Exception:
+                pass
+            inputs = [s for s in inputs if hasattr(s, 'fileno') and s.fileno() != -1]
+            continue
 
         for s in readable:
             if s is server:
@@ -84,7 +100,14 @@ def main():
                     try:
                         c.sendall(line)
                     except OSError:
-                        pass
+                        if c in clients:
+                            clients.remove(c)
+                        if c in inputs:
+                            inputs.remove(c)
+                        try:
+                            c.close()
+                        except OSError:
+                            pass
             else:
                 try:
                     data = s.recv(4096)
@@ -115,6 +138,11 @@ def main():
             except OSError:
                 pass
 
+    try:
+        with open("/home/xen/.cache/mpv/bridge_debug.log", "a") as f:
+            f.write(f"While loop exited! proc.poll(): {proc.poll()}\n")
+    except Exception:
+        pass
     cleanup()
 
 if __name__ == "__main__":

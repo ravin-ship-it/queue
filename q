@@ -209,13 +209,13 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
             shift
             found=false
             while [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]] && [[ ! "$1" =~ $SMART_CMDS ]]; do
-                 if [[ "$1" =~ ^[0-9]+$ ]]; then
-                     file=$(find "$PLAYLIST_DIR" -maxdepth 1 -name "*.txt" | sort | sed -n "${1}p")
+                 file=$(resolve_playlist_file "$1")
+                 if [ -n "$file" ] && [ -f "$file" ]; then
+                     cmd_remove_redundant "$file"
+                     found=true
                  else
-                     file="${PLAYLIST_DIR}/${1}.txt"
+                     echo -e "${C_PINK}🔍🤷 Playlist [${1}] not found${C_RESET}"
                  fi
-                 cmd_remove_redundant "$file"
-                 found=true
                  shift
             done
             [ "$found" = false ] && { echo -e "${C_PINK}🔍🤷 Usage: -pl-rmr <name/index>${C_RESET}"; }
@@ -225,13 +225,13 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
             shift
             found=false
             while [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]] && [[ ! "$1" =~ $SMART_CMDS ]]; do
-                 if [[ "$1" =~ ^[0-9]+$ ]]; then
-                     file=$(find "$PLAYLIST_DIR" -maxdepth 1 -name "*.txt" | sort | sed -n "${1}p")
+                 file=$(resolve_playlist_file "$1")
+                 if [ -n "$file" ] && [ -f "$file" ]; then
+                     cmd_clean "$file"
+                     found=true
                  else
-                     file="${PLAYLIST_DIR}/${1}.txt"
+                     echo -e "${C_PINK}🔍🤷 Playlist [${1}] not found${C_RESET}"
                  fi
-                 cmd_clean "$file"
-                 found=true
                  shift
             done
             [ "$found" = false ] && { echo -e "${C_PINK}🔍🤷 Usage: -pl-clean <name/index>${C_RESET}"; }
