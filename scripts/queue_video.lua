@@ -1,21 +1,24 @@
 -- queue_video.lua: Safe video window lifecycle management for Queue (q)
 -- Prevents Wayland/EGL/D3D12/Cocoa driver teardown crashes across Linux, WSLg, and macOS
 
-local state_file = os.getenv("HOME") .. "/.cache/mpv/video_active"
+local home = os.getenv("HOME") or os.getenv("USERPROFILE") or ""
+local state_file = home ~= "" and (home .. "/.cache/mpv/video_active") or nil
 
 local function safe_hide()
     mp.set_property_bool("window-minimized", true)
-    os.remove(state_file)
+    if state_file then pcall(os.remove, state_file) end
     mp.commandv("show-text", "🎧 Audio Mode (Video Hidden)", "1500")
 end
 
 local function safe_show()
     mp.set_property_bool("window-minimized", false)
     mp.set_property_bool("force-window", true)
-    local f = io.open(state_file, "w")
-    if f then
-        f:write("1\n")
-        f:close()
+    if state_file then
+        local f = io.open(state_file, "w")
+        if f then
+            f:write("1\n")
+            f:close()
+        end
     end
 end
 
@@ -25,13 +28,15 @@ local function update_state()
     local vid = mp.get_property("vid")
 
     if not minimized and vo and vo ~= "null" and vid and vid ~= "no" and vid ~= "false" then
-        local f = io.open(state_file, "w")
-        if f then
-            f:write("1\n")
-            f:close()
+        if state_file then
+            local f = io.open(state_file, "w")
+            if f then
+                f:write("1\n")
+                f:close()
+            end
         end
     else
-        os.remove(state_file)
+        if state_file then pcall(os.remove, state_file) end
     end
 end
 

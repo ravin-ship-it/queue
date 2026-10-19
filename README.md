@@ -233,6 +233,8 @@ You can use standard short flags (`q -p`) or clean smart commands (`q play`).
 | `q prev` | `q -prev` | Return to previous track |
 | `q stop` | `q -stop` | Gracefully quit MPV and unhook audio |
 | `q vid [N\|url]`| `q -vid` / `q -video` | **Toggle Desktop Video Window** *(WSLg / X11 / Wayland, Resizable, F11)* |
+| `q res [val]`   | `q -res` / `q -quality` | **Video Stream Quality** *(720\|1080\|1440\|4k\|auto)* |
+| `q hybrid [on\|off]` | `q -hybrid` | **Dual-Engine Toggle**: Standalone (60 FPS) vs Hybrid Boost (120+ FPS Direct3D) |
 | `q vol [0-130]` | `q -v [N]` | View or set playback volume |
 | `q fx [on\|off]`| `q -fx` | Toggle spatial Dolby-like audio profile |
 | `q shuffle` | `q -shuf [list]` | Toggle shuffle mode *(or randomize queue entries)* |
@@ -380,6 +382,50 @@ q -vid 5
   - Whenever video mode is active, the `<|V|>` badge appears in deep pink alongside the loop (`⟳`) and shuffle (`><`) indicators in the `q` prompt.
 - **High-DPI Cursor Scaling**:
   - Automatically configures X11 cursor properties on Linux and WSLg (`Xcursor.theme: Adwaita`, `Xcursor.size: 36` on WSL / `24` on native Linux), preventing tiny cursor sizing on high-resolution displays.
+
+---
+
+## ⚡ Dual-Engine Architecture (Windows + WSL2 Boost Mode)
+
+For users running **Windows 11 / 10 + WSL2**, Queue features an intelligent **Dual-Engine Architecture** giving you complete freedom of choice:
+
+| Feature | 🐧 Standalone WSL Mode *(Default)* | ⚡ Hybrid Boost Mode |
+| :--- | :--- | :--- |
+| **Target Audience** | Zero setup / users without Windows MPV | Uncapped 120+ FPS & zero virtualization latency |
+| **Max Framerate** | Capped at **60 FPS** *(WSLg compositor limit)* | **120+ FPS / 144 FPS / 240 FPS** *(Direct host GPU)* |
+| **Renderer** | Mesa Gallium D3D12 via WSLg Wayland | **Native Windows Direct3D 11 / 12 / Vulkan** |
+| **Audio Pipeline** | WSL PulseAudio Virtual Audio Sink | **Native Windows WASAPI** *(Host hardware direct)* |
+| **CPU / GPU Overhead**| Small hypervisor overhead | **Zero overhead** *(Native Windows host execution)* |
+| **IPC Channel** | Direct UNIX socket (`~/.mpv-socket`) | Zero-dependency native `PipeRelay.exe` *(<1ms latency)* |
+| **Prerequisites** | None *(100% automated in WSL)* | Native Windows MPV (`winget install shinchiro.mpv`) |
+
+### 🔄 1-Command Switching Between Builds:
+
+Switch between Standalone and Hybrid modes instantly with zero downtime:
+
+```bash
+# Enable Hybrid Boost Mode (120+ FPS Direct3D & WASAPI)
+q -hybrid on       # or: q hybrid on
+
+# Switch back to Standalone WSL Mode (60 FPS WSLg)
+q -hybrid off      # or: q hybrid off
+
+# Toggle between modes
+q -hybrid          # or: q hybrid
+
+# Inspect active engine & bridge health
+q -hybrid status   # or: q hybrid status
+```
+
+> [!TIP]
+> **Active Playback Migration**: When toggling engines while music or video is playing, Queue automatically snapshot-migrates your active track, exact seek position, pause state, and video window to the new engine seamlessly!
+
+```powershell
+# To install Windows MPV & yt-dlp for Hybrid Boost mode:
+# Run in Windows PowerShell (Admin or User):
+winget install shinchiro.mpv
+winget install yt-dlp.yt-dlp
+```
 
 ---
 

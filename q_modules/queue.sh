@@ -766,7 +766,8 @@ queue_item_ipc() {
     local formatted_track=$(format_track_log "$next_index" "$clean_url" "$display_title_log")
     echo -e "${C_PINK}✅ Queued ${formatted_track}"
 
-    local json_cmd=$(jq -nc --arg path "$clean_url" '{"command": ["loadfile", $path, "append-play"]}')
+    local target_path=$(format_path_for_mpv "$clean_url")
+    local json_cmd=$(jq -nc --arg path "$target_path" '{"command": ["loadfile", $path, "append-play"]}')
     send_ipc "$json_cmd" > /dev/null
     
     # Auto-resume only if MPV was idle at the end of the queue (Play new index)

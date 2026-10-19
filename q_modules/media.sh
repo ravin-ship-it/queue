@@ -517,6 +517,21 @@ cmd_info() {
         print_boxed_line "${C_TEAL}Codec:       ${C_WHITE}$codec${C_RESET}"
         print_boxed_line "${C_TEAL}Rate:        ${C_WHITE}${rate} Hz${C_RESET}"
         print_boxed_line "${C_TEAL}Duration:    ${C_WHITE}$dur${C_RESET}"
+        local engine_badge=""
+        if [ "$IS_WSL" = true ]; then
+            if [ "$(get_queue_mode)" == "hybrid" ]; then
+                engine_badge="${C_ORANGE}Hybrid Boost Mode ⚡${C_GRAY} (120+ FPS Direct3D)${C_RESET}"
+            else
+                engine_badge="${C_CYAN}Standalone WSL Mode 🐧${C_GRAY} (60 FPS Mesa D3D12)${C_RESET}"
+            fi
+        elif [ "$IS_MACOS" = true ]; then
+            engine_badge="${C_GREEN}Native macOS 🍏${C_GRAY} (Metal / Cocoa)${C_RESET}"
+        elif [ "$IS_ANDROID" = true ]; then
+            engine_badge="${C_ORANGE}Android / Termux 🤖${C_GRAY} (Audio)${C_RESET}"
+        else
+            engine_badge="${C_GREEN}Native Linux 🐧${C_GRAY} (Mesa / DRM)${C_RESET}"
+        fi
+        print_boxed_line "${C_TEAL}Engine:      $engine_badge"
     fi
     printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
     B_LINE=${B_LINE// /─}
@@ -573,6 +588,12 @@ cmd_stop() {
 
     # 4. Cleanup any remaining mpv instances
     pkill -u "$(whoami)" -f "mpv --idle" >/dev/null 2>&1
+    pkill -u "$(whoami)" -f "hybrid_bridge.py" >/dev/null 2>&1
+    if [ "$IS_WSL" = true ]; then
+        taskkill.exe /F /IM mpv.exe 2>/dev/null || true
+        taskkill.exe /F /IM mpv.com 2>/dev/null || true
+        taskkill.exe /F /IM PipeRelay.exe 2>/dev/null || true
+    fi
     
     # 5. Remove socket and reset state
     rm -f "$SOCKET"
@@ -675,9 +696,11 @@ cmd_video_toggle() {
         return 0
     fi
 
+    local mode=$(get_queue_mode)
+
     # Display environment validation:
-    # On macOS (Darwin), Aqua GUI compositor is always active, so bypass $DISPLAY/$WAYLAND_DISPLAY check.
-    if [ "$IS_MACOS" = false ]; then
+    # On macOS (Darwin) and in Hybrid Windows mode, host GUI is always active; bypass $DISPLAY/$WAYLAND_DISPLAY check.
+    if [ "$mode" != "hybrid" ] && [ "$IS_MACOS" = false ]; then
         if [ -z "$DISPLAY" ] && [ -z "$WAYLAND_DISPLAY" ]; then
             if [ -d "/mnt/wslg" ] || [ -S "/tmp/.X11-unix/X0" ]; then
                 export DISPLAY=":0"
@@ -718,13 +741,14 @@ cmd_video_toggle() {
         return 1
     fi
 
-    # Determine VO & GPU context across platforms:
+    # Determine VO & GPU context across platforms and engines:
+    # - Hybrid Windows: Native Direct3D 11/12 / Vulkan (vo=gpu, gpu-context=auto)
     # - macOS: Cocoa/Metal native windowing with vo=gpu, gpu-context=auto
     # - Wayland / WSLg: vo=gpu, gpu-context=wayland,auto
     # - X11: vo=gpu,x11, gpu-context=x11egl,x11vk,auto
     local vo_opt="gpu"
     local gpu_ctx="wayland,auto"
-    if [ "$IS_MACOS" = true ]; then
+    if [ "$mode" == "hybrid" ] || [ "$IS_MACOS" = true ]; then
         gpu_ctx="auto"
         vo_opt="gpu"
     elif [ -z "$WAYLAND_DISPLAY" ]; then
@@ -828,8 +852,185 @@ cmd_video_toggle() {
     # Fetch track title and format notification
     local title
     title=$(echo '{"command":["get_property","media-title"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // "Queue Video"')
-    echo -e "📺 ${C_PINK}Desktop Video Window Active:${C_RESET} ${C_CYAN}${title}${C_RESET}"
+    if [ "$mode" == "hybrid" ]; then
+        echo -e "📺 ${C_PINK}Desktop Video Window Active (Hybrid Boost Mode - 120 FPS Direct3D):${C_RESET} ${C_CYAN}${title}${C_RESET}"
+    else
+        echo -e "📺 ${C_PINK}Desktop Video Window Active (Standalone Mode):${C_RESET} ${C_CYAN}${title}${C_RESET}"
+    fi
     echo -e "${C_GRAY}💡 Resizable window. Press ${C_WHITE}w${C_GRAY} (cycle small/med/large), ${C_WHITE}+${C_GRAY}/${C_WHITE}-${C_GRAY} scale, ${C_WHITE}F11${C_GRAY} fullscreen, ${C_WHITE}0${C_GRAY}-${C_WHITE}4${C_GRAY} quality, ${C_WHITE}q${C_GRAY} return to audio.${C_RESET}"
+}
+
+cmd_hybrid_toggle() {
+    local action="$1"
+    action=$(echo "$action" | tr '[:upper:]' '[:lower:]')
+
+    if [ "$IS_WSL" = false ]; then
+        if [ "$IS_MACOS" = true ]; then
+            echo -e "${C_PINK}ℹ️  Hybrid Boost Mode is designed specifically for Windows + WSL2.${C_RESET}"
+            echo -e "${C_CYAN}🍏 Your macOS system is already running native Metal/Cocoa with direct 120 FPS+ hardware acceleration!${C_RESET}"
+        elif [ "$IS_ANDROID" = true ]; then
+            echo -e "${C_PINK}ℹ️  Hybrid Boost Mode is designed specifically for Windows + WSL2.${C_RESET}"
+            echo -e "${C_CYAN}🤖 Termux/Android mode operates in standalone headless audio mode.${C_RESET}"
+        else
+            echo -e "${C_PINK}ℹ️  Hybrid Boost Mode is designed specifically for Windows + WSL2.${C_RESET}"
+            echo -e "${C_CYAN}🐧 Your native Linux system already has direct kernel GPU access with uncapped 120 FPS+ hardware acceleration!${C_RESET}"
+        fi
+        return 0
+    fi
+
+    local cur_mode
+    cur_mode=$(get_queue_mode)
+
+    if [ "$action" == "status" ]; then
+        local win_mpv
+        win_mpv=$(find_windows_mpv)
+        local relay_bin
+        relay_bin=$(ensure_piperelay_compiled)
+
+        print_header_box "${C_PINK}⚡ Queue Engine Status (Windows + WSL2)${C_RESET}"
+        if [ "$cur_mode" == "hybrid" ]; then
+            print_boxed_line "${C_TEAL}Active Engine:  ${C_ORANGE}Hybrid Boost Mode ⚡${C_RESET}"
+            print_boxed_line "${C_TEAL}Video Pipeline: ${C_WHITE}Native Windows mpv.exe (Direct3D 11/12, 120+ FPS)${C_RESET}"
+            print_boxed_line "${C_TEAL}Audio Pipeline: ${C_WHITE}Native Windows WASAPI (Host hardware audio)${C_RESET}"
+        else
+            print_boxed_line "${C_TEAL}Active Engine:  ${C_CYAN}Standalone WSL Mode 🐧${C_RESET}"
+            print_boxed_line "${C_TEAL}Video Pipeline: ${C_WHITE}WSLg Mesa D3D12 (Capped at 60 FPS compositor)${C_RESET}"
+            print_boxed_line "${C_TEAL}Audio Pipeline: ${C_WHITE}WSL PulseAudio Virtual Sink${C_RESET}"
+        fi
+        echo -e "${C_GRAY}${H_LINE}${C_RESET}"
+        if [ -n "$win_mpv" ]; then
+            print_boxed_line "${C_TEAL}Windows MPV:    ${C_GREEN}Installed ✅${C_RESET} ${C_GRAY}(${win_mpv:0:$((INNER_WIDTH-28))})${C_RESET}"
+        else
+            print_boxed_line "${C_TEAL}Windows MPV:    ${C_PINK}Not Found ❌${C_RESET} ${C_GRAY}(Run: winget install shinchiro.mpv)${C_RESET}"
+        fi
+        if [ -n "$relay_bin" ] && [ -f "$relay_bin" ]; then
+            print_boxed_line "${C_TEAL}PipeRelay:      ${C_GREEN}Ready ✅${C_RESET} ${C_GRAY}(${relay_bin:0:$((INNER_WIDTH-24))})${C_RESET}"
+        else
+            print_boxed_line "${C_TEAL}PipeRelay:      ${C_PINK}Not Compiled ❌${C_RESET}"
+        fi
+        printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
+        B_LINE=${B_LINE// /─}
+        echo -e "${C_GRAY}${B_LINE}${C_RESET}"
+        echo -e "${C_GRAY}💡 Tip: Switch engines anytime with ${C_WHITE}q -hybrid on${C_GRAY} or ${C_WHITE}q -hybrid off${C_RESET}"
+        return 0
+    fi
+
+    local target_mode=""
+    if [ "$action" == "on" ] || [ "$action" == "enable" ] || [ "$action" == "1" ]; then
+        target_mode="hybrid"
+    elif [ "$action" == "off" ] || [ "$action" == "disable" ] || [ "$action" == "0" ]; then
+        target_mode="standalone"
+    elif [ -z "$action" ] || [ "$action" == "toggle" ]; then
+        if [ "$cur_mode" == "hybrid" ]; then
+            target_mode="standalone"
+        else
+            target_mode="hybrid"
+        fi
+    else
+        echo -e "${C_PINK}❓ Unknown hybrid command: \"$action\"${C_RESET}"
+        echo -e "${C_GRAY}Usage: ${C_WHITE}q -hybrid [on|off|status]${C_RESET}"
+        return 1
+    fi
+
+    if [ "$cur_mode" == "$target_mode" ]; then
+        if [ "$target_mode" == "hybrid" ]; then
+            echo -e "⚡ ${C_ORANGE}Hybrid Boost Mode is already active!${C_RESET} (Native Windows MPV, 120+ FPS Direct3D)"
+        else
+            echo -e "🐧 ${C_CYAN}Standalone WSL Mode is already active!${C_RESET} (WSLg Mesa D3D12, 60 FPS)"
+        fi
+        return 0
+    fi
+
+    # Switching to Hybrid mode: verify prerequisites
+    if [ "$target_mode" == "hybrid" ]; then
+        local win_mpv
+        win_mpv=$(find_windows_mpv)
+        if [ -z "$win_mpv" ]; then
+            echo -e "${C_PINK}❌ Native Windows MPV was not detected on your Windows host.${C_RESET}"
+            echo -e "${C_CYAN}To enable Hybrid Boost Mode (120+ FPS 4K/8K Direct3D rendering):${C_RESET}"
+            echo -e "${C_WHITE}1. Open PowerShell on Windows and run:${C_RESET}"
+            echo -e "   ${C_ORANGE}winget install shinchiro.mpv${C_RESET}"
+            echo -e "${C_WHITE}2. Once installed, re-run in WSL:${C_RESET}"
+            echo -e "   ${C_ORANGE}q -hybrid on${C_RESET}"
+            return 1
+        fi
+
+        local relay_bin
+        relay_bin=$(ensure_piperelay_compiled)
+        if [ -z "$relay_bin" ]; then
+            echo -e "${C_PINK}❌ Failed to compile PipeRelay.exe using Windows .NET compiler.${C_RESET}"
+            return 1
+        fi
+    fi
+
+    # Check if MPV is actively running and preserve state
+    local was_running=false
+    local cur_pos=""
+    local cur_time=""
+    local was_paused=false
+    local video_was_active=false
+
+    if [ -S "$SOCKET" ] && (echo '{"command":["get_property","idle-active"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1); then
+        was_running=true
+        cur_pos=$(echo '{"command":["get_property","playlist-pos"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // empty' 2>/dev/null)
+        cur_time=$(echo '{"command":["get_property","time-pos"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // empty' 2>/dev/null)
+        was_paused=$(echo '{"command":["get_property","pause"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // false' 2>/dev/null)
+        [ -f "$HOME/.cache/mpv/video_active" ] && video_was_active=true
+        save_current_playlist true
+    fi
+
+    # Stop current engine
+    cmd_stop >/dev/null 2>&1
+
+    # Save new engine preference
+    mkdir -p "$HOME/.config/mpv"
+    echo "$target_mode" > "$HOME/.config/mpv/queue_mode"
+
+    if [ "$target_mode" == "hybrid" ]; then
+        echo -e "⚡ ${C_ORANGE}Switched to Hybrid Boost Mode!${C_RESET}"
+        echo -e "   ${C_TEAL}Renderer:${C_RESET} ${C_WHITE}Native Windows Direct3D 11/12 (Uncapped 120+ FPS, 4K/8K)${C_RESET}"
+        echo -e "   ${C_TEAL}Audio:${C_RESET}    ${C_WHITE}Native Host WASAPI (Zero virtualization latency)${C_RESET}"
+        echo -e "   ${C_GRAY}💡 To switch back anytime: ${C_WHITE}q -hybrid off${C_RESET}"
+    else
+        echo -e "🐧 ${C_CYAN}Switched to Standalone WSL Mode!${C_RESET}"
+        echo -e "   ${C_TEAL}Renderer:${C_RESET} ${C_WHITE}WSLg Mesa D3D12 (60 FPS)${C_RESET}"
+        echo -e "   ${C_TEAL}Audio:${C_RESET}    ${C_WHITE}WSL PulseAudio Virtual Sink${C_RESET}"
+        echo -e "   ${C_GRAY}💡 To switch to Hybrid Boost mode anytime: ${C_WHITE}q -hybrid on${C_RESET}"
+    fi
+
+    # If it was running, restart with new engine seamlessly
+    if [ "$was_running" = true ]; then
+        echo -e "${C_PINK}🔄 Migrating active playback to new engine...${C_RESET}"
+        ensure_mpv_running
+        if [ -f "$LAST_PLAYLIST_FILE" ] && [ -s "$LAST_PLAYLIST_FILE" ]; then
+            local is_first=true
+            local batch=""
+            while IFS= read -r line; do
+                [ -z "$line" ] && continue
+                local target_path=$(format_path_for_mpv "$line")
+                local m="append-play"
+                [ "$is_first" = true ] && { m="replace"; is_first=false; }
+                local cmd_json=$(jq -nc --arg path "$target_path" --arg m "$m" '{"command":["loadfile",$path,$m]}')
+                batch+="${cmd_json}\n"
+            done < "$LAST_PLAYLIST_FILE"
+            echo -e "$batch" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+        fi
+        if [ -n "$cur_pos" ] && [ "$cur_pos" != "null" ]; then
+            echo "{\"command\":[\"playlist-play-index\",$cur_pos]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+            if [ -n "$cur_time" ] && [ "$cur_time" != "null" ]; then
+                echo "{\"command\":[\"seek\",$cur_time,\"absolute\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+            fi
+            if [ "$was_paused" == "true" ]; then
+                echo '{"command":["set_property","pause",true]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+            else
+                echo '{"command":["set_property","pause",false]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+            fi
+        fi
+        if [ "$video_was_active" = true ]; then
+            sleep 0.2
+            cmd_video_toggle ""
+        fi
+    fi
 }
 
 cmd_resolution() {

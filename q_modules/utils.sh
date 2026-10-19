@@ -82,6 +82,130 @@ check_and_resume() {
     fi
 }
 
+get_queue_mode() {
+    if [ "$IS_WSL" = true ] && [ -f "$HOME/.config/mpv/queue_mode" ]; then
+        local mode
+        mode=$(cat "$HOME/.config/mpv/queue_mode" 2>/dev/null | tr -d '[:space:]')
+        if [ "$mode" == "hybrid" ]; then
+            echo "hybrid"
+            return 0
+        fi
+    fi
+    echo "standalone"
+}
+
+get_windows_user_dir() {
+    if [ "$IS_WSL" = true ]; then
+        local win_prof
+        win_prof=$(cmd.exe /c "echo %USERPROFILE%" </dev/null 2>/dev/null | tail -n 1 | tr -d '\r\n')
+        if [ -n "$win_prof" ]; then
+            local u_dir
+            u_dir=$(wslpath -u "$win_prof" 2>/dev/null)
+            if [ -d "$u_dir" ]; then
+                echo "$u_dir"
+                return 0
+            fi
+        fi
+        for u in /mnt/c/Users/*; do
+            local base
+            base=$(basename "$u")
+            if [ "$base" != "Public" ] && [ "$base" != "Default" ] && [ "$base" != "All Users" ] && [ "$base" != "Default User" ] && [ -d "$u" ]; then
+                echo "$u"
+                return 0
+            fi
+        done
+    fi
+    echo ""
+}
+
+get_windows_user() {
+    local u_dir
+    u_dir=$(get_windows_user_dir)
+    if [ -n "$u_dir" ]; then
+        basename "$u_dir"
+    else
+        echo "HP"
+    fi
+}
+
+find_windows_mpv() {
+    if [ -f "/mnt/c/Program Files/MPV Player/mpv.com" ]; then
+        echo "/mnt/c/Program Files/MPV Player/mpv.com"
+    elif [ -f "/mnt/c/Program Files/MPV Player/mpv.exe" ]; then
+        echo "/mnt/c/Program Files/MPV Player/mpv.exe"
+    elif command -v mpv.exe >/dev/null 2>&1; then
+        command -v mpv.exe
+    elif [ -f "/mnt/c/Users/$(get_windows_user)/AppData/Local/Microsoft/WinGet/Links/mpv.exe" ]; then
+        echo "/mnt/c/Users/$(get_windows_user)/AppData/Local/Microsoft/WinGet/Links/mpv.exe"
+    else
+        echo ""
+    fi
+}
+
+find_windows_ytdlp() {
+    local win_user
+    win_user=$(get_windows_user)
+    if [ -f "/mnt/c/Users/$win_user/yt-dlp.exe" ]; then
+        echo "C:\\Users\\$win_user\\yt-dlp.exe"
+    elif [ -f "/mnt/c/Users/$win_user/AppData/Local/Microsoft/WinGet/Packages/yt-dlp.yt-dlp_Microsoft.Winget.Source_8wekyb3d8bbwe/yt-dlp.exe" ]; then
+        echo "C:\\Users\\$win_user\\AppData\\Local\\Microsoft\\WinGet\\Packages\\yt-dlp.yt-dlp_Microsoft.Winget.Source_8wekyb3d8bbwe\\yt-dlp.exe"
+    elif [ -f "/mnt/c/Program Files/MPV Player/yt-dlp.exe" ]; then
+        echo "C:\\Program Files\\MPV Player\\yt-dlp.exe"
+    elif command -v yt-dlp.exe >/dev/null 2>&1; then
+        echo "yt-dlp.exe"
+    else
+        echo ""
+    fi
+}
+
+format_path_for_mpv() {
+    local target="$1"
+    if [ "$IS_WSL" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+        if [[ ! "$target" =~ ^[a-zA-Z0-9]+:// ]] && [[ ! "$target" =~ ^http ]] && [ -e "$target" ]; then
+            wslpath -w "$target" 2>/dev/null || echo "$target"
+            return
+        fi
+    fi
+    echo "$target"
+}
+
+ensure_piperelay_compiled() {
+    local win_user
+    win_user=$(get_windows_user)
+    local win_dir="/mnt/c/Users/$win_user"
+    local win_exe="$win_dir/PipeRelay.exe"
+
+    if [ -f "$win_exe" ] && [ -x "$win_exe" ]; then
+        echo "$win_exe"
+        return 0
+    fi
+
+    local csc_compiler="/mnt/c/Windows/Microsoft.NET/Framework64/v4.0.30319/csc.exe"
+    [ ! -f "$csc_compiler" ] && csc_compiler="/mnt/c/Windows/Microsoft.NET/Framework/v4.0.30319/csc.exe"
+
+    if [ ! -f "$csc_compiler" ]; then
+        return 1
+    fi
+
+    local cs_src="$SCRIPT_DIR/scripts/PipeRelay.cs"
+    [ ! -f "$cs_src" ] && cs_src="$HOME/.local/bin/mpv/scripts/PipeRelay.cs"
+    [ ! -f "$cs_src" ] && cs_src="$(dirname "$MODULE_DIR")/scripts/PipeRelay.cs"
+
+    if [ ! -f "$cs_src" ]; then
+        return 1
+    fi
+
+    cp "$cs_src" "$win_dir/PipeRelay.cs" 2>/dev/null
+    (cd "$win_dir" && "$csc_compiler" /out:PipeRelay.exe /target:exe /nologo PipeRelay.cs </dev/null >/dev/null 2>&1)
+    rm -f "$win_dir/PipeRelay.cs" 2>/dev/null
+
+    if [ -f "$win_exe" ]; then
+        echo "$win_exe"
+        return 0
+    fi
+    return 1
+}
+
 ensure_mpv_running() {
     local pl_arg="$1"
     if [ "$MPV_RUNNING" = false ] || [ ! -S "$SOCKET" ]; then
@@ -91,6 +215,62 @@ ensure_mpv_running() {
             initial_pl=("--playlist=$pl_arg")
         fi
 
+        local mode
+        mode=$(get_queue_mode)
+
+        # --- HYBRID WINDOWS ENGINE STARTUP (WSL2 Host Delegation) ---
+        if [ "$mode" == "hybrid" ] && [ "$IS_WSL" = true ]; then
+            local win_mpv
+            win_mpv=$(find_windows_mpv)
+            local relay_bin
+            relay_bin=$(ensure_piperelay_compiled)
+
+            if [ -n "$win_mpv" ] && [ -n "$relay_bin" ]; then
+                taskkill.exe /F /IM mpv.exe 2>/dev/null || true
+                taskkill.exe /F /IM mpv.com 2>/dev/null || true
+                taskkill.exe /F /IM PipeRelay.exe 2>/dev/null || true
+                pkill -f "hybrid_bridge.py" 2>/dev/null || true
+
+                local pipe_name="mpv-q-pipe"
+                local win_ytdlp
+                win_ytdlp=$(find_windows_ytdlp)
+                local ytdl_arg=""
+                [ -n "$win_ytdlp" ] && ytdl_arg="'--script-opts=ytdl_hook-ytdl_path=$win_ytdlp',"
+
+                local script_arg=""
+                local script_path="$SCRIPT_DIR/scripts/queue_video.lua"
+                [ ! -f "$script_path" ] && script_path="$HOME/.config/mpv/scripts/queue_video.lua"
+                [ ! -f "$script_path" ] && script_path="$(dirname "$MODULE_DIR")/scripts/queue_video.lua"
+                if [ -f "$script_path" ]; then
+                    local win_script
+                    win_script=$(wslpath -w "$script_path" 2>/dev/null)
+                    [ -n "$win_script" ] && script_arg="'--script=$win_script',"
+                fi
+
+                powershell.exe -NoProfile -Command "Start-Process -FilePath '$win_mpv' -ArgumentList '--idle=yes','--keep-open=yes','--vo=null','--video=no',${ytdl_arg}${script_arg}'--input-ipc-server=\\\\.\\pipe\\$pipe_name' -WindowStyle Hidden" </dev/null >/dev/null 2>&1
+
+                local bridge_script="$MODULE_DIR/hybrid_bridge.py"
+                [ ! -f "$bridge_script" ] && bridge_script="$SCRIPT_DIR/q_modules/hybrid_bridge.py"
+
+                python3 "$bridge_script" "$SOCKET" "$pipe_name" "$relay_bin" >/dev/null 2>&1 &
+                disown
+
+                for i in {1..30}; do
+                    [ -S "$SOCKET" ] && break
+                    sleep 0.1
+                done
+
+                if [ -S "$SOCKET" ]; then
+                    MPV_RUNNING=true
+                    start_idle_monitor
+                    restore_state_properties
+                    return 0
+                fi
+            fi
+            # If hybrid startup encountered issues, cleanly fall back to standalone
+        fi
+
+        # --- STANDALONE ENGINE (WSLg, Bare-Metal Linux, or macOS) ---
         # Graphical display connection & GPU acceleration setup
         if [ "$IS_WSL" = true ]; then
             # WSL2 / WSLg: ensure display socket connection and host D3D12 GPU acceleration

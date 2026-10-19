@@ -144,7 +144,8 @@ execute_batch() {
                 # Replace on index 0 to wipe previous playlist entirely; append subsequent tracks
                 local mode="append-play"
                 [ "$i" -eq 0 ] && mode="replace"
-                local q_json_cmd=$(jq -nc --arg path "$q_clean_url" --arg m "$mode" '{"command": ["loadfile", $path, $m]}')
+                local q_target_path=$(format_path_for_mpv "$q_clean_url")
+                local q_json_cmd=$(jq -nc --arg path "$q_target_path" --arg m "$mode" '{"command": ["loadfile", $path, $m]}')
                 batch_cmds+="${q_json_cmd}\n"
             done
 
@@ -204,7 +205,8 @@ execute_batch() {
                     CACHE_MEM["$q_clean_url"]="${q_title}"$'\t'"${q_artist}"$'\t'"${q_dur}"
                 fi
 
-                local q_json_cmd=$(jq -nc --arg path "$q_clean_url" '{"command": ["loadfile", $path, "append-play"]}')
+                local q_target_path=$(format_path_for_mpv "$q_clean_url")
+                local q_json_cmd=$(jq -nc --arg path "$q_target_path" '{"command": ["loadfile", $path, "append-play"]}')
                 batch_cmds+="${q_json_cmd}\n"
             done
 

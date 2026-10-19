@@ -222,6 +222,84 @@ if [ -d "playlists" ]; then
     echo -e "${GREEN}✅ Bundled playlists safely integrated into $PLAYLIST_DEST${NC}"
 fi
 
+# --- Dual-Engine Architecture (Windows + WSL2 Optimization) ---
+if [ "$IS_WSL" = true ]; then
+    echo -e "\n${CYAN}⚡ Windows + WSL2 Dual-Engine Configuration...${NC}"
+    win_prof=$(cmd.exe /c "echo %USERPROFILE%" </dev/null 2>/dev/null | tail -n 1 | tr -d '\r\n')
+    win_dir=""
+    [ -n "$win_prof" ] && win_dir=$(wslpath -u "$win_prof" 2>/dev/null)
+    if [ -z "$win_dir" ] || [ ! -d "$win_dir" ]; then
+        for u in /mnt/c/Users/*; do
+            base=$(basename "$u")
+            if [ "$base" != "Public" ] && [ "$base" != "Default" ] && [ "$base" != "All Users" ] && [ "$base" != "Default User" ] && [ -d "$u" ]; then
+                win_dir="$u"
+                break
+            fi
+        done
+    fi
+    [ -z "$win_dir" ] && win_dir="/mnt/c/Users/HP"
+    win_user=$(basename "$win_dir")
+
+    # 1. Compile Native PipeRelay.exe via Windows .NET compiler
+    win_relay="$win_dir/PipeRelay.exe"
+    csc_compiler="/mnt/c/Windows/Microsoft.NET/Framework64/v4.0.30319/csc.exe"
+    [ ! -f "$csc_compiler" ] && csc_compiler="/mnt/c/Windows/Microsoft.NET/Framework/v4.0.30319/csc.exe"
+
+    if [ -f "$csc_compiler" ]; then
+        if [ ! -f "$win_relay" ]; then
+            echo -e "${CYAN}🔨 Compiling native zero-dependency PipeRelay.exe for sub-millisecond IPC...${NC}"
+            cp "$REPO_DIR/scripts/PipeRelay.cs" "$win_dir/PipeRelay.cs" 2>/dev/null
+            (cd "$win_dir" && "$csc_compiler" /out:PipeRelay.exe /target:exe /nologo PipeRelay.cs </dev/null >/dev/null 2>&1)
+            rm -f "$win_dir/PipeRelay.cs" 2>/dev/null
+        fi
+        [ -f "$win_relay" ] && echo -e "${GREEN}✅ PipeRelay.exe ready at $win_relay${NC}"
+    fi
+
+    # 2. Check for Native Windows MPV
+    has_win_mpv=false
+    if [ -f "/mnt/c/Program Files/MPV Player/mpv.com" ] || [ -f "/mnt/c/Program Files/MPV Player/mpv.exe" ] || command -v mpv.exe >/dev/null 2>&1; then
+        has_win_mpv=true
+    fi
+
+    # Check for Windows yt-dlp
+    winget_ytdlp="$win_dir/AppData/Local/Microsoft/WinGet/Packages/yt-dlp.yt-dlp_Microsoft.Winget.Source_8wekyb3d8bbwe/yt-dlp.exe"
+    if [ -f "$winget_ytdlp" ] && [ ! -f "$win_dir/yt-dlp.exe" ]; then
+        cp "$winget_ytdlp" "$win_dir/yt-dlp.exe" 2>/dev/null || true
+    fi
+
+    echo -e "\n${YELLOW}💡 PERFORMANCE TIP FOR WINDOWS + WSL2:${NC}"
+    echo -e "   Queue offers two rendering builds:"
+    echo -e "   1. ${GREEN}Standalone WSL Mode (Default):${NC} 60 FPS capped via WSLg Mesa D3D12. Zero Windows configuration."
+    echo -e "   2. ${YELLOW}Hybrid Boost Mode:${NC} Uncapped ${GREEN}120+ FPS 4K/8K${NC} Direct3D 11/12 with native host WASAPI audio!"
+
+    if [ "$has_win_mpv" = true ]; then
+        echo -e "${GREEN}✅ Native Windows MPV detected on host!${NC}"
+        echo -e "   👉 You can toggle between engines anytime with: ${CYAN}q -hybrid on${NC} or ${CYAN}q -hybrid off${NC}"
+    else
+        echo -e "${YELLOW}ℹ️  Native Windows MPV is not yet installed on Windows host.${NC}"
+        echo -e "   Standalone Mode is active and ready to play up to 60 FPS in WSLg."
+        
+        if cmd.exe /c "where winget" </dev/null >/dev/null 2>&1; then
+            echo -e "   Would you like to auto-install Windows MPV & yt-dlp now for 120+ FPS Hybrid Boost? [y/N]"
+            read -r -t 15 -n 1 -p "   > " install_win_choice || install_win_choice="n"
+            echo ""
+            if [[ "$install_win_choice" =~ ^[Yy]$ ]]; then
+                echo -e "${CYAN}🚀 Installing Windows MPV via winget...${NC}"
+                cmd.exe /c "winget install --id shinchiro.mpv -e" </dev/null || true
+                echo -e "${CYAN}🚀 Installing Windows yt-dlp via winget...${NC}"
+                cmd.exe /c "winget install --id yt-dlp.yt-dlp -e" </dev/null || true
+                if [ -f "$winget_ytdlp" ]; then
+                    cp "$winget_ytdlp" "$win_dir/yt-dlp.exe" 2>/dev/null || true
+                fi
+                echo -e "${GREEN}✅ Windows MPV installed! You can run 'q -hybrid on' anytime to switch!${NC}"
+            else
+                echo -e "${CYAN}⏭️  Skipped Windows MPV installation. Standalone WSL Mode is active.${NC}"
+                echo -e "${GRAY}   (To install manually later, run in Windows PowerShell: winget install shinchiro.mpv)${NC}"
+            fi
+        fi
+    fi
+fi
+
 # --- Cross-Platform sed In-Place Deletion Helper ---
 cross_sed_delete() {
     local pattern="$1"

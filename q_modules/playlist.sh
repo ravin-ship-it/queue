@@ -130,7 +130,8 @@ cmd_playlist_load() {
                 is_first_replace=false
             fi
 
-            local json_cmd=$(jq -nc --arg path "$clean_url" --arg m "$m" '{"command": ["loadfile", $path, $m]}')
+            local target_path=$(format_path_for_mpv "$clean_url")
+            local json_cmd=$(jq -nc --arg path "$target_path" --arg m "$m" '{"command": ["loadfile", $path, $m]}')
             send_ipc "$json_cmd" > /dev/null
         done < "$temp_list"
         
@@ -249,7 +250,8 @@ cmd_playlist_list() {
             
             local m="append-play"
             [ "$is_first" = true ] && { m="replace"; is_first=false; }
-            local json_cmd=$(jq -nc --arg path "$clean_url" --arg m "$m" '{"command": ["loadfile", $path, $m]}')
+            local target_path=$(format_path_for_mpv "$clean_url")
+            local json_cmd=$(jq -nc --arg path "$target_path" --arg m "$m" '{"command": ["loadfile", $path, $m]}')
             send_ipc "$json_cmd" > /dev/null
         done < <(echo "$selection" | awk -F'::' '{print $2}')
 
@@ -281,7 +283,8 @@ cmd_playlist_list() {
             clean_url="${clean_url%%[[:space:]]*}"
             clean_url=$(echo "$clean_url" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
         fi
-        local json_cmd=$(jq -nc --arg path "$clean_url" '{"command": ["loadfile", $path, "append-play"]}')
+        local target_path=$(format_path_for_mpv "$clean_url")
+        local json_cmd=$(jq -nc --arg path "$target_path" '{"command": ["loadfile", $path, "append-play"]}')
         send_ipc "$json_cmd" > /dev/null
     done < <(echo "$urls")
     

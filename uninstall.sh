@@ -20,10 +20,23 @@ else
     echo -e "You will be prompted to confirm removal for each component. Pass -y to skip prompts.\n"
 fi
 
-# Stop Q if running
+# --- Platform Detection ---
+IS_WSL=false
+if grep -qi "microsoft" /proc/version 2>/dev/null || [ -d "/usr/lib/wsl" ] || [ -d "/mnt/wslg" ]; then
+    IS_WSL=true
+fi
+
+# Stop Q and MPV if running
 if command -v q >/dev/null 2>&1; then
     q -stop >/dev/null 2>&1
 fi
+
+if [ "$IS_WSL" = true ]; then
+    taskkill.exe /F /IM mpv.exe 2>/dev/null || true
+    taskkill.exe /F /IM mpv.com 2>/dev/null || true
+    taskkill.exe /F /IM PipeRelay.exe 2>/dev/null || true
+fi
+pkill -f "hybrid_bridge.py" 2>/dev/null || true
 
 rm -f "$HOME/.mpv-socket"
 
@@ -71,6 +84,45 @@ prompt_remove "$HOME/.local/share/mpv/playlists" "Saved Playlists" "true"
 prompt_remove "$HOME/.config/mpv/mpv.conf" "MPV Configuration File" "false"
 prompt_remove "$HOME/.config/mpv/mpv.conf.bak" "MPV Backup Config" "false"
 prompt_remove "$HOME/.config/mpv/cookies.txt" "YouTube-DL Cookies" "false"
+prompt_remove "$HOME/.config/mpv/queue_mode" "Queue Engine Choice (queue_mode)" "false"
+
+# Windows Host Components (WSL2)
+if [ "$IS_WSL" = true ]; then
+    echo -e "${CYAN}--- Windows Host Components (WSL2) ---${NC}"
+    win_prof=$(cmd.exe /c "echo %USERPROFILE%" </dev/null 2>/dev/null | tail -n 1 | tr -d '\r\n')
+    win_dir=""
+    [ -n "$win_prof" ] && win_dir=$(wslpath -u "$win_prof" 2>/dev/null)
+    if [ -z "$win_dir" ] || [ ! -d "$win_dir" ]; then
+        for u in /mnt/c/Users/*; do
+            base=$(basename "$u")
+            if [ "$base" != "Public" ] && [ "$base" != "Default" ] && [ "$base" != "All Users" ] && [ "$base" != "Default User" ] && [ -d "$u" ]; then
+                win_dir="$u"
+                break
+            fi
+        done
+    fi
+    [ -z "$win_dir" ] && win_dir="/mnt/c/Users/HP"
+
+    prompt_remove "$win_dir/PipeRelay.exe" "Windows Pipe Relay Bridge (PipeRelay.exe)" "false"
+    prompt_remove "$win_dir/yt-dlp.exe" "Windows yt-dlp binary (yt-dlp.exe)" "false"
+
+    if [ -f "/mnt/c/Program Files/MPV Player/mpv.exe" ] || [ -f "/mnt/c/Program Files/MPV Player/mpv.com" ]; then
+        echo -e "${YELLOW}Found: Native Windows MPV Player${NC} (C:\\Program Files\\MPV Player)"
+        if [ "$AUTO_YES" = "true" ]; then
+            win_mpv_choice="n"
+        else
+            read -r -n 1 -p "Uninstall Native Windows MPV via winget? [y/N] > " win_mpv_choice
+            echo ""
+        fi
+        if [[ "$win_mpv_choice" =~ ^[Yy]$ ]]; then
+            echo -e "${CYAN}🗑️  Uninstalling Windows MPV via winget...${NC}"
+            cmd.exe /c "winget uninstall --id shinchiro.mpv -e" </dev/null || true
+            echo -e "${GREEN}✅ Uninstalled Windows MPV${NC}\n"
+        else
+            echo -e "${CYAN}⏭️  Kept Native Windows MPV${NC}\n"
+        fi
+    fi
+fi
 
 # YT-DLP config cleanup
 YTDLP_CONF="$HOME/.config/yt-dlp/config"

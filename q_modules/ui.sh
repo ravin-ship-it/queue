@@ -266,6 +266,7 @@ show_help() {
     print_boxed_line "  -i [N|url]      Metadata & Track Inspector (Synced Resolution)"
     print_boxed_line "  -vid [sz|N]     Toggle Desktop Video Window ${C_GRAY}(small|med|large|F11)${C_RESET}"
     print_boxed_line "  -res [val]      Set/Check Video Quality ${C_GRAY}(720|1080|1440|4k|auto)${C_RESET}"
+    print_boxed_line "  -hybrid [o|off] Toggle Dual-Engine: Standalone (60 FPS) vs Hybrid (120+ FPS)"
     print_boxed_line "  -d / -dl [N|u]  Interactive Downloader Hub (Format & Dir Wizard)"
     print_boxed_line "  -p [N]          Play/Pause or Jump to track N ${C_GRAY}(Supports: 10+5)${C_RESET}"
     print_boxed_line "  -next / -prev   Next/Prev track ${C_GRAY}(Synced Logs)${C_RESET}"
@@ -321,6 +322,10 @@ show_help() {
     print_boxed_line "${C_YELLOW}Searching:${C_RESET}"
     print_boxed_line "  q yt <q>        Force YouTube search"
     print_boxed_line "  q sc <q>        Force Soundcloud search"
+    if [ "$IS_WSL" = true ]; then
+        echo -e "${C_GRAY}${H_LINE}${C_RESET}"
+        print_boxed_line "${C_GRAY}💡 Tip: Use ${C_WHITE}q -hybrid on${C_GRAY} for 120+ FPS Direct3D & native WASAPI audio!${C_RESET}"
+    fi
     printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
     B_LINE=${B_LINE// /─}
     echo -e "${C_GRAY}${B_LINE}${C_RESET}"
