@@ -836,9 +836,38 @@ cmd_android_video_handoff() {
     if [ -z "$stream_url" ]; then
         if [[ "$track_url" =~ ^https?:// ]]; then
             echo -e "${C_CYAN}📱 Android Video Handoff: Resolving direct stream via yt-dlp...${C_RESET}"
-            stream_url=$(yt-dlp -g --no-warnings --extractor-args "youtube:player_client=android,web" -f "best[ext=mp4]/b/best" "$track_url" 2>/dev/null | head -n 1)
-            if [ -z "$stream_url" ]; then
-                stream_url=$(yt-dlp -g --no-warnings "$track_url" 2>/dev/null | head -n 1)
+            local bridge_port
+            bridge_port=$(ensure_android_bridge_running)
+            if [ -n "$bridge_port" ]; then
+                stream_url="http://127.0.0.1:${bridge_port}/track/${start_offset}.edl"
+            else
+                local res_pref="1080"
+                [ -f "$HOME/.config/mpv/queue_res" ] && res_pref=$(cat "$HOME/.config/mpv/queue_res" 2>/dev/null | tr -d '[:space:]')
+                local res_fmt="bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
+                case "$res_pref" in
+                    720|720p) res_fmt="bestvideo[height<=720]+bestaudio/best[height<=720]/best" ;;
+                    1080|1080p) res_fmt="bestvideo[height<=1080]+bestaudio/best[height<=1080]/best" ;;
+                    1440|1440p|2k) res_fmt="bestvideo[height<=1440]+bestaudio/best[height<=1440]/best" ;;
+                    2160|2160p|4k|max) res_fmt="bestvideo+bestaudio/best" ;;
+                esac
+                local stream_lines=()
+                mapfile -t stream_lines < <(yt-dlp -g --no-warnings --extractor-args "youtube:player_client=visionos,android,web" -f "$res_fmt" "$track_url" 2>/dev/null)
+                if [ ${#stream_lines[@]} -ge 2 ]; then
+                    local v_url="${stream_lines[0]}"
+                    local a_url="${stream_lines[1]}"
+                    local v_len=${#v_url}
+                    local a_len=${#a_url}
+                    mkdir -p "/sdcard/Download" 2>/dev/null || true
+                    cat <<EOF > "/sdcard/Download/queue_direct.edl"
+# mpv EDL v0
+%${v_len}%${v_url}
+!new_stream
+%${a_len}%${a_url}
+EOF
+                    stream_url="file:///sdcard/Download/queue_direct.edl"
+                elif [ ${#stream_lines[@]} -eq 1 ]; then
+                    stream_url="${stream_lines[0]}"
+                fi
             fi
             if [ -z "$stream_url" ]; then
                 echo -e "${C_PINK}❌ Failed to extract stream URL for mobile video player.${C_RESET}"
@@ -1440,34 +1469,63 @@ cmd_resolution() {
     local target="$1"
     target=$(echo "$target" | tr '[:upper:]' '[:lower:]')
 
-    ensure_mpv_running
-    if [ "$MPV_RUNNING" = false ] || [ ! -S "$SOCKET" ]; then
-        echo -e "${C_PINK}🔇 MPV player is not active.${C_RESET}"
-        return 1
-    fi
-
+    local clean_target="1080"
     local ytdl_fmt=""
     local label=""
 
     case "$target" in
         720|720p|hd)
+            clean_target="720"
             ytdl_fmt="bestvideo[height<=720][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][fps>=50]+bestaudio/bestvideo[height<=720]+bestaudio[acodec=opus]/bestvideo[height<=720]+bestaudio/best[height<=720]"
             label="720p HD (60 FPS fluid / bandwidth saver)"
             ;;
         1080|1080p|fhd)
+            clean_target="1080"
             ytdl_fmt="bestvideo[height<=1080][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50]+bestaudio/bestvideo[height<=1080]+bestaudio[acodec=opus]/bestvideo[height<=1080]+bestaudio/best[height<=1080]"
             label="1080p Full HD (60 FPS crisp)"
             ;;
         1440|1440p|2k|qhd)
+            clean_target="1440"
             ytdl_fmt="bestvideo[height<=1440][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][fps>=50]+bestaudio/bestvideo[height<=1440]+bestaudio[acodec=opus]/bestvideo[height<=1440]+bestaudio/best[height<=1440]"
             label="1440p 2K QHD (60 FPS ultra-crisp)"
             ;;
         2160|2160p|4k|uhd|max)
+            clean_target="4k"
             ytdl_fmt="bestvideo[fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo+bestaudio[acodec=opus]/bestvideo+bestaudio/best"
             label="Max / 4K UHD (Uncapped highest quality)"
             ;;
-        auto|smart|"")
-            if [ -z "$target" ]; then
+        auto|smart)
+            clean_target="auto"
+            ytdl_fmt="bestvideo[height<=1440][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080]+bestaudio[acodec=opus]/bestvideo[height<=1080]+bestaudio/bestvideo[height<=720]+bestaudio/bestvideo+bestaudio/best"
+            label="Auto / Smart 60FPS (Adapts to internet, max 1440p60, never blurry)"
+            ;;
+        "")
+            # Query / Show active resolution status
+            if [ "$IS_ANDROID" = true ] || [ "$(get_queue_mode)" == "hybrid" ]; then
+                local saved_res="1080"
+                [ -f "$HOME/.config/mpv/queue_res" ] && saved_res=$(cat "$HOME/.config/mpv/queue_res" 2>/dev/null | tr -d '[:space:]')
+                local res_desc="1080p Full HD (60 FPS crisp)"
+                case "$saved_res" in
+                    720|720p) res_desc="720p HD (60 FPS fluid / data saver)" ;;
+                    1080|1080p) res_desc="1080p Full HD (60 FPS crisp)" ;;
+                    1440|1440p|2k) res_desc="1440p 2K QHD (60 FPS ultra-crisp)" ;;
+                    4k|2160|max) res_desc="4K UHD (Uncapped highest quality)" ;;
+                    auto) res_desc="Auto / Smart 60FPS (max 1440p60)" ;;
+                esac
+                echo -e "╭─────────────────────────────────────────────────────────────────────────╮"
+                echo -e "│ 📱 ${C_PURPLE}Queue Video Quality Profile (Android Mobile)${C_RESET}                          │"
+                echo -e "├─────────────────────────────────────────────────────────────────────────┤"
+                echo -e "│ ${C_TEAL}Active Quality:${C_RESET}  ${C_PINK}${res_desc}${C_RESET}"
+                echo -e "│ ${C_TEAL}Video Pipeline:${C_RESET}  ${C_WHITE}Hardware MediaCodec GPU (is.xyz.mpv)${C_RESET}"
+                echo -e "│ ${C_TEAL}Audio Tunnel:${C_RESET}    ${C_WHITE}Pristine Opus 48kHz (AAudio / AudioTrack)${C_RESET}"
+                echo -e "│ ${C_TEAL}Stream Manifest:${C_RESET} ${C_WHITE}Dynamic EDL Multi-Stream (100% Uncompressed)${C_RESET}"
+                echo -e "╰─────────────────────────────────────────────────────────────────────────╯"
+                echo -e "${C_GRAY}💡 Quick Switch: ${C_WHITE}q -res 720${C_GRAY} | ${C_WHITE}q -res 1080${C_GRAY} | ${C_WHITE}q -res 1440${C_GRAY} | ${C_WHITE}q -res 4k${C_GRAY} | ${C_WHITE}q -res auto${C_RESET}"
+                return 0
+            fi
+
+            # Desktop Status
+            if [ -S "$SOCKET" ] && echo '{"command":["get_property","idle-active"]}' | nc $NC_OPTS -w 0.5 "$SOCKET" >/dev/null 2>&1; then
                 local cur_w cur_h cur_fps cur_codec
                 local res_info
                 res_info=$(echo -e '{"command":["get_property","video-params"]}\n{"command":["get_property","track-list"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
@@ -1485,18 +1543,55 @@ cmd_resolution() {
                 else
                     echo -e "${C_CYAN}📺 Active Video Quality:${C_RESET} ${C_WHITE}${cur_w}x${cur_h}${C_RESET} @ ${C_PINK}${cur_fps} FPS${C_RESET} (${C_GRAY}codec: ${cur_codec}${C_RESET})"
                 fi
-                echo -e "${C_GRAY}💡 Quick Switch: 'q -res 720' | 'q -res 1080' | 'q -res 1440' | 'q -res 4k' | 'q -res auto'${C_RESET}"
-                echo -e "${C_GRAY}   Or inside video window press keys: ${C_WHITE}0${C_GRAY} (Auto) | ${C_WHITE}1${C_GRAY} (720p) | ${C_WHITE}2${C_GRAY} (1080p60) | ${C_WHITE}3${C_GRAY} (2K) | ${C_WHITE}4${C_GRAY} (4K)${C_RESET}"
-                return 0
+            else
+                local saved_res="1080"
+                [ -f "$HOME/.config/mpv/queue_res" ] && saved_res=$(cat "$HOME/.config/mpv/queue_res" 2>/dev/null | tr -d '[:space:]')
+                echo -e "${C_CYAN}📺 Video Quality Profile:${C_RESET} ${C_PINK}${saved_res}p${C_RESET}"
             fi
-            ytdl_fmt="bestvideo[height<=1440][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080]+bestaudio[acodec=opus]/bestvideo[height<=1080]+bestaudio/bestvideo[height<=720]+bestaudio/bestvideo+bestaudio/best"
-            label="Auto / Smart 60FPS (Adapts to internet, max 1440p60, never blurry)"
+            echo -e "${C_GRAY}💡 Quick Switch: 'q -res 720' | 'q -res 1080' | 'q -res 1440' | 'q -res 4k' | 'q -res auto'${C_RESET}"
+            echo -e "${C_GRAY}   Or inside video window press keys: ${C_WHITE}0${C_GRAY} (Auto) | ${C_WHITE}1${C_GRAY} (720p) | ${C_WHITE}2${C_GRAY} (1080p60) | ${C_WHITE}3${C_GRAY} (2K) | ${C_WHITE}4${C_GRAY} (4K)${C_RESET}"
+            return 0
             ;;
         *)
             echo -e "${C_PINK}❓ Unknown resolution: '$target'. Use: 720, 1080, 1440, 4k, or auto.${C_RESET}"
             return 1
             ;;
     esac
+
+    # Persist choice to user config
+    mkdir -p "$HOME/.config/mpv"
+    echo "$clean_target" > "$HOME/.config/mpv/queue_res"
+
+    # Invalidate bridge stream cache to ensure next stream fetches fresh resolution
+    rm -f "$HOME/.cache/mpv/android_stream_cache.json"
+
+    # Android Mobile Handoff handler
+    if [ "$IS_ANDROID" = true ] || [ "$(get_queue_mode)" == "hybrid" ]; then
+        echo -e "${C_CYAN}📺 Mobile Video Quality set to:${C_RESET} ${C_PINK}${label}${C_RESET}"
+        if [ -f "$HOME/.cache/mpv/android_video_active" ]; then
+            local bridge_port
+            bridge_port=$(ensure_android_bridge_running)
+            local cur_pos=0
+            if [ -S "$SOCKET" ]; then
+                cur_pos=$(echo '{"command":["get_property","playlist-pos"]}' | nc $NC_OPTS -w 0.5 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
+            fi
+            [[ ! "$cur_pos" =~ ^[0-9]+$ ]] && cur_pos=0
+            if [ -n "$bridge_port" ]; then
+                send_android_mpv_cmd "loadfile http://127.0.0.1:${bridge_port}/track/${cur_pos}.edl replace"
+                echo -e "${C_GRAY}   Reloaded active video in MPV Android with fresh high-definition stream.${C_RESET}"
+            fi
+        else
+            echo -e "${C_GRAY}   Profile saved. Will be applied automatically on playback in MPV Android.${C_RESET}"
+        fi
+        return 0
+    fi
+
+    # Desktop Player (Linux / WSL2)
+    if [ ! -S "$SOCKET" ] || ! (echo '{"command":["get_property","idle-active"]}' | nc $NC_OPTS -w 0.5 "$SOCKET" >/dev/null 2>&1); then
+        echo -e "${C_CYAN}📺 Video Quality set to:${C_RESET} ${C_PINK}${label}${C_RESET}"
+        echo -e "${C_GRAY}   Default profile saved. Will be applied automatically on next playback.${C_RESET}"
+        return 0
+    fi
 
     # Capture current playback position to seamlessly restore without restarting track from 0:00
     local cur_time

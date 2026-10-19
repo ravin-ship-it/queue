@@ -19,18 +19,48 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 DEFAULT_PORT = 8989
 HOME = os.environ.get("HOME", "/data/data/com.termux/files/home")
 CACHE_DIR = os.path.join(HOME, ".cache", "mpv")
+CONFIG_DIR = os.path.join(HOME, ".config", "mpv")
 PID_FILE = os.path.join(CACHE_DIR, "android_bridge.pid")
 PORT_FILE = os.path.join(CACHE_DIR, "android_bridge.port")
 CACHE_FILE = os.path.join(CACHE_DIR, "android_stream_cache.json")
 TITLES_FILE = os.path.join(CACHE_DIR, "titles.txt")
+RES_FILE = os.path.join(CONFIG_DIR, "queue_res")
 DEFAULT_SOCKET = os.path.join(HOME, ".mpv-socket")
 LAST_PLAYLIST_FILE = os.path.join(CACHE_DIR, "last_playlist.txt")
 
-# Thread-safe stream URL cache: url -> {"stream_url": str, "expire": float, "title": str}
+# Thread-safe stream URL cache: url -> {"edl": str, "expire": float, "res": str, "title": str}
 stream_cache = {}
 cache_lock = threading.Lock()
 prefetch_queue = set()
 prefetch_lock = threading.Lock()
+
+def get_configured_resolution():
+    """Retrieve saved resolution preference from ~/.config/mpv/queue_res."""
+    if os.path.exists(RES_FILE):
+        try:
+            with open(RES_FILE, "r", encoding="utf-8") as f:
+                content = f.read().strip().lower()
+                if content:
+                    return content
+        except Exception:
+            pass
+    return "1080"
+
+def get_ytdl_format(res_pref=None):
+    """Generate optimal yt-dlp format string based on target resolution."""
+    if not res_pref:
+        res_pref = get_configured_resolution()
+    res_pref = res_pref.lower()
+    if res_pref in ("720", "720p", "hd"):
+        return "bestvideo[height<=720]+bestaudio/best[height<=720]/best"
+    elif res_pref in ("1080", "1080p", "fhd"):
+        return "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
+    elif res_pref in ("1440", "1440p", "2k", "qhd"):
+        return "bestvideo[height<=1440]+bestaudio/best[height<=1440]/best"
+    elif res_pref in ("2160", "2160p", "4k", "uhd", "max"):
+        return "bestvideo+bestaudio/best"
+    else:  # auto / smart 60fps
+        return "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
 
 def load_persistent_cache():
     global stream_cache
@@ -39,8 +69,9 @@ def load_persistent_cache():
             with open(CACHE_FILE, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 now = time.time()
-                # Only keep items that have at least 10 minutes before expiring
-                stream_cache = {k: v for k, v in data.items() if v.get("expire", 0) > now + 600}
+                current_res = get_configured_resolution()
+                # Only keep items that have at least 10 minutes before expiring and match current resolution
+                stream_cache = {k: v for k, v in data.items() if v.get("expire", 0) > now + 600 and v.get("res", "1080") == current_res}
         except Exception:
             stream_cache = {}
 
@@ -162,49 +193,69 @@ def get_current_playlist():
 
     return []
 
-def resolve_stream_url(raw_url):
-    """Resolve a raw track URL into a direct playable stream URL (with caching)."""
+def resolve_track_edl(raw_url):
+    """Resolve a raw track URL into an Edit Decision List (EDL) for MPV.
+    Combines high-res video (1080p60/4K) and pristine audio (Opus) into a single virtual stream."""
     now = time.time()
+    current_res = get_configured_resolution()
+
     with cache_lock:
         if raw_url in stream_cache:
             entry = stream_cache[raw_url]
-            if entry.get("expire", 0) > now + 300:
-                return entry["stream_url"]
+            if entry.get("res") == current_res and entry.get("expire", 0) > now + 300:
+                return entry.get("edl", "")
 
-    # Local file: return file:// URL directly
+    # Local file: return EDL pointing to local file path directly
     if not raw_url.startswith("http://") and not raw_url.startswith("https://"):
-        if os.path.exists(raw_url):
-            return f"file://{os.path.abspath(raw_url)}"
-        return raw_url
+        local_path = os.path.abspath(raw_url) if os.path.exists(raw_url) else raw_url
+        p_bytes = local_path.encode("utf-8")
+        return f"# mpv EDL v0\n%{len(p_bytes)}%{local_path}\n"
 
-    # Online stream: resolve via yt-dlp
+    # Online stream: resolve via yt-dlp with configured resolution format
+    fmt = get_ytdl_format(current_res)
     cmd = [
         "yt-dlp",
         "-g",
         "--no-warnings",
-        "--extractor-args", "youtube:player_client=android,web",
-        "-f", "best[ext=mp4]/best",
+        "--extractor-args", "youtube:player_client=visionos,android,web",
+        "-f", fmt,
         raw_url
     ]
     try:
-        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=12)
+        proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=14)
         if proc.returncode == 0 and proc.stdout.strip():
-            lines = proc.stdout.strip().splitlines()
-            stream_url = lines[0].strip()
-            expire = parse_expire_timestamp(stream_url)
-            with cache_lock:
-                stream_cache[raw_url] = {
-                    "stream_url": stream_url,
-                    "expire": expire,
-                    "cached_at": now
-                }
-            save_persistent_cache()
-            return stream_url
+            lines = [l.strip() for l in proc.stdout.strip().splitlines() if l.strip()]
+            expire = now + 18000.0
+            if len(lines) >= 2:
+                v_url, a_url = lines[0], lines[1]
+                v_bytes = v_url.encode("utf-8")
+                a_bytes = a_url.encode("utf-8")
+                edl_content = f"# mpv EDL v0\n%{len(v_bytes)}%{v_url}\n!new_stream\n%{len(a_bytes)}%{a_url}\n"
+                expire = parse_expire_timestamp(v_url)
+            elif len(lines) == 1:
+                u = lines[0]
+                u_bytes = u.encode("utf-8")
+                edl_content = f"# mpv EDL v0\n%{len(u_bytes)}%{u}\n"
+                expire = parse_expire_timestamp(u)
+            else:
+                edl_content = ""
+
+            if edl_content:
+                with cache_lock:
+                    stream_cache[raw_url] = {
+                        "edl": edl_content,
+                        "res": current_res,
+                        "expire": expire,
+                        "cached_at": now
+                    }
+                save_persistent_cache()
+                return edl_content
     except Exception as e:
         print(f"[Bridge] Error resolving {raw_url}: {e}", file=sys.stderr)
 
-    # Fallback to raw URL
-    return raw_url
+    # Fallback to single raw URL
+    r_bytes = raw_url.encode("utf-8")
+    return f"# mpv EDL v0\n%{len(r_bytes)}%{raw_url}\n"
 
 def background_prefetch_worker(raw_url):
     """Background worker to resolve upcoming tracks without blocking playback."""
@@ -215,11 +266,14 @@ def background_prefetch_worker(raw_url):
 
     try:
         now = time.time()
+        current_res = get_configured_resolution()
         with cache_lock:
-            if raw_url in stream_cache and stream_cache[raw_url].get("expire", 0) > now + 600:
-                return
+            if raw_url in stream_cache:
+                entry = stream_cache[raw_url]
+                if entry.get("res") == current_res and entry.get("expire", 0) > now + 600:
+                    return
 
-        resolve_stream_url(raw_url)
+        resolve_track_edl(raw_url)
     finally:
         with prefetch_lock:
             prefetch_queue.discard(raw_url)
@@ -275,7 +329,7 @@ class StreamBridgeHandler(BaseHTTPRequestHandler):
                 raw_title = item.get("title", f"Track {idx + 1}")
                 clean_title = raw_title.replace("\r", " ").replace("\n", " ").strip()
                 lines.append(f"#EXTINF:0,{clean_title}")
-                lines.append(f"{base_url}/track/{idx}")
+                lines.append(f"{base_url}/track/{idx}.edl")
 
             # Pre-fetch requested start track and upcoming track in background
             if playlist and 0 <= start_offset < len(playlist):
@@ -286,7 +340,7 @@ class StreamBridgeHandler(BaseHTTPRequestHandler):
             if len(lines) == 1:
                 # Empty playlist placeholder
                 lines.append("#EXTINF:0,Queue Idle")
-                lines.append(f"{base_url}/track/0")
+                lines.append(f"{base_url}/track/0.edl")
 
             content = "\n".join(lines) + "\n"
             content_bytes = content.encode("utf-8")
@@ -311,11 +365,13 @@ class StreamBridgeHandler(BaseHTTPRequestHandler):
                 self.wfile.write(content_bytes)
             return
 
-        # 2. TRACK STREAM ENDPOINT: /track/<idx>
+        # 2. TRACK STREAM ENDPOINT: /track/<idx> or /track/<idx>.edl
         if path.startswith("/track/"):
             try:
-                idx_str = path.split("/")[2]
-                idx = int(idx_str)
+                sub = path.split("/")[2]
+                if sub.endswith(".edl"):
+                    sub = sub[:-4]
+                idx = int(sub)
             except Exception:
                 self.send_error(400, "Invalid track index")
                 return
@@ -341,15 +397,21 @@ class StreamBridgeHandler(BaseHTTPRequestHandler):
             if next_idx < len(playlist):
                 schedule_prefetch(playlist[next_idx]["url"])
 
-            # Resolve direct stream URL
-            direct_url = resolve_stream_url(raw_url)
+            # Resolve direct EDL manifest
+            edl_content = resolve_track_edl(raw_url)
+            if not edl_content:
+                self.send_error(500, "Failed to resolve stream")
+                return
 
-            # Issue HTTP 302 Found redirect
-            self.send_response(302)
-            self.send_header("Location", direct_url)
+            edl_bytes = edl_content.encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Content-Length", str(len(edl_bytes)))
             self.send_header("Connection", "close")
             self.end_headers()
+            if not is_head:
+                self.wfile.write(edl_bytes)
             return
 
         # 3. STATUS ENDPOINT: /status
@@ -358,6 +420,7 @@ class StreamBridgeHandler(BaseHTTPRequestHandler):
             status_data = {
                 "status": "online",
                 "port": port,
+                "resolution": get_configured_resolution(),
                 "tracks_count": len(playlist),
                 "cached_urls": len(stream_cache),
                 "playlist": playlist
