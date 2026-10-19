@@ -1003,8 +1003,8 @@ cmd_dislike_list() {
                 local s_query=$(get_input "Search YouTube to Dislike" "Search > ")
                 if [ -n "$s_query" ]; then
                     echo -e "${C_GRAY}⏳ Searching YouTube for \"$s_query\"...${C_RESET}"
-                    local s_tmp=$(mktemp)
-                    run_with_timeout 25s yt-dlp --print "%(webpage_url)s\t%(title)s\t%(uploader)s\t%(duration_string)s" --flat-playlist --no-warnings --skip-download --playlist-end 15 "ytsearch15:${s_query}" > "$s_tmp" 2>/dev/null
+                    local s_tmp=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/q_dislike_$$.tmp")
+                    run_with_timeout 25 yt-dlp --extractor-args "youtube:player_client=visionos,android,web" --print "%(webpage_url)s\t%(title)s\t%(uploader)s\t%(duration_string)s" --flat-playlist --no-warnings --skip-download --playlist-end 15 "ytsearch15:${s_query}" > "$s_tmp" 2>/dev/null
                     if [ -s "$s_tmp" ]; then
                         local s_items=""
                         local s_idx=1
@@ -1237,10 +1237,16 @@ auto_queue_related() {
     local fields="%(webpage_url)s"$'\t'"%(title)s"$'\t'"%(uploader)s"$'\t'"%(duration_string)s"
     local candidates=""
 
+    local nice_cmd=()
+    command -v nice >/dev/null 2>&1 && nice_cmd=("nice" "-n" "19")
+    local ytdl_disc_opts=("--extractor-args" "youtube:player_client=visionos,android,web" "--no-warnings" "--skip-download")
+    command -v node >/dev/null 2>&1 && ytdl_disc_opts+=("--js-runtimes" "node")
+    [ -n "$COOKIES_FILE" ] && [ -f "$COOKIES_FILE" ] && ytdl_disc_opts+=("--cookies" "$COOKIES_FILE")
+
     # Strategy A: YouTube Song Radio Mix (RD<ID>) - NOT RDAMVM
     if [ -n "$seed_id" ]; then
         echo "[$(date +%T)] [Discovery] Radio Mix for Seed ID: $seed_id" >> "$debug_log"
-        candidates=$(run_with_timeout 25s nice -n 19 yt-dlp --print "$fields" --flat-playlist --no-warnings --skip-download --playlist-end 20 "https://www.youtube.com/watch?v=${seed_id}&list=RD${seed_id}" 2>/dev/null)
+        candidates=$(run_with_timeout 25 "${nice_cmd[@]}" yt-dlp "${ytdl_disc_opts[@]}" --print "$fields" --flat-playlist --playlist-end 20 "https://www.youtube.com/watch?v=${seed_id}&list=RD${seed_id}" 2>/dev/null)
     fi
 
     # Strategy B: Studio Search fallback or augment
@@ -1251,7 +1257,7 @@ auto_queue_related() {
             query="${clean_q:0:50} audio"
         fi
         echo "[$(date +%T)] [Discovery] Studio Search: $query" >> "$debug_log"
-        candidates=$(run_with_timeout 25s nice -n 19 yt-dlp --print "$fields" --no-warnings --skip-download --playlist-end 15 "ytsearch15:${query}" 2>/dev/null)
+        candidates=$(run_with_timeout 25 "${nice_cmd[@]}" yt-dlp "${ytdl_disc_opts[@]}" --print "$fields" --playlist-end 15 "ytsearch15:${query}" 2>/dev/null)
     fi
 
     if [ -z "$candidates" ]; then

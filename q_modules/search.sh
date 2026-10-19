@@ -296,9 +296,12 @@ for t, a, d in tracks:
         local clean_search_query
         clean_search_query=$(echo "$s_title $s_artist" | sed -E 's/[-_~/\\|"'"'"']/ /g' | tr -s ' ' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
 
+        local js_rt=()
+        command -v node >/dev/null 2>&1 && js_rt=("--js-runtimes" "node")
+
         # Fetch top 8 YouTube candidates for intelligent audio ranking
         local yt_cands
-        yt_cands=$(timeout 15s yt-dlp --js-runtimes node --extractor-args "youtube:player_client=android,web" \
+        yt_cands=$(run_with_timeout 15 yt-dlp "${js_rt[@]}" --extractor-args "youtube:player_client=visionos,android,web" \
             --default-search "ytsearch8" \
             --print "%(webpage_url)s${TAB}%(title)s${TAB}%(uploader)s${TAB}%(duration_string)s" \
             --no-warnings --skip-download -- "$clean_search_query" 2>/dev/null)
@@ -308,7 +311,7 @@ for t, a, d in tracks:
             local clean_query
             clean_query=$(echo "$s_title" | sed -E 's/\[[^]]*\]//g; s/\([^)]*\)//g; s/[-_~/\\|"'"'"']/ /g')
             clean_query="$(echo "$clean_query" | tr -s ' ' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//') $s_artist"
-            yt_cands=$(timeout 15s yt-dlp --js-runtimes node --extractor-args "youtube:player_client=android,web" \
+            yt_cands=$(run_with_timeout 15 yt-dlp "${js_rt[@]}" --extractor-args "youtube:player_client=visionos,android,web" \
                 --default-search "ytsearch8" \
                 --print "%(webpage_url)s${TAB}%(title)s${TAB}%(uploader)s${TAB}%(duration_string)s" \
                 --no-warnings --skip-download -- "$clean_query" 2>/dev/null)

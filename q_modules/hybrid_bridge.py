@@ -178,12 +178,17 @@ def main():
                             if not cmd:
                                 continue
                             if cmd.startswith(b'{') and cmd.endswith(b'}'):
-                                rid = next_req_id
-                                next_req_id += 1
-                                tagged = cmd[:-1] + f',\"request_id\":{rid}}}\n'.encode()
-                                pending_requests[rid] = s
-                                client_pending[s] = client_pending.get(s, 0) + 1
-                                proc_stdin_buf += tagged
+                                if b'"request_id"' not in cmd:
+                                    rid = next_req_id
+                                    next_req_id += 1
+                                    tagged = cmd[:-1] + f',\"request_id\":{rid}}}\n'.encode()
+                                    pending_requests[rid] = s
+                                    client_pending[s] = client_pending.get(s, 0) + 1
+                                    proc_stdin_buf += tagged
+                                else:
+                                    proc_stdin_buf += cmd + b'\n'
+                            elif cmd:
+                                proc_stdin_buf += cmd + b'\n'
                 except OSError:
                     close_client(s)
 

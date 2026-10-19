@@ -75,6 +75,7 @@ fi
 prompt_remove "/usr/local/bin/q" "Symlink (/usr/local/bin/q)" "false"
 prompt_remove "$HOME/.local/bin/mpv/q" "Core Executable" "false"
 prompt_remove "$HOME/.local/bin/mpv/q_modules" "Core Modules" "true"
+prompt_remove "$HOME/.local/bin/mpv/scripts" "Core Helper Scripts" "true"
 
 # Data
 prompt_remove "$HOME/.cache/mpv" "Cache & State Data" "true"
@@ -83,6 +84,9 @@ prompt_remove "$HOME/.local/share/mpv/playlists" "Saved Playlists" "true"
 # Configs
 prompt_remove "$HOME/.config/mpv/mpv.conf" "MPV Configuration File" "false"
 prompt_remove "$HOME/.config/mpv/mpv.conf.bak" "MPV Backup Config" "false"
+prompt_remove "$HOME/.config/mpv/input.conf" "MPV Input Configuration" "false"
+prompt_remove "$HOME/.config/mpv/input.conf.bak" "MPV Input Backup Config" "false"
+prompt_remove "$HOME/.config/mpv/scripts" "MPV Helper Scripts (~/.config/mpv/scripts)" "true"
 prompt_remove "$HOME/.config/mpv/cookies.txt" "YouTube-DL Cookies" "false"
 prompt_remove "$HOME/.config/mpv/queue_mode" "Queue Engine Choice (queue_mode)" "false"
 
@@ -93,6 +97,10 @@ if [ "$IS_WSL" = true ]; then
     win_dir=""
     [ -n "$win_prof" ] && win_dir=$(wslpath -u "$win_prof" 2>/dev/null)
     if [ -z "$win_dir" ] || [ ! -d "$win_dir" ]; then
+        ps_prof=$(powershell.exe -NoProfile -Command "[System.Environment]::GetFolderPath('UserProfile')" </dev/null 2>/dev/null | tr -d '\r\n')
+        [ -n "$ps_prof" ] && win_dir=$(wslpath -u "$ps_prof" 2>/dev/null)
+    fi
+    if [ -z "$win_dir" ] || [ ! -d "$win_dir" ]; then
         for u in /mnt/c/Users/*; do
             base=$(basename "$u")
             if [ "$base" != "Public" ] && [ "$base" != "Default" ] && [ "$base" != "All Users" ] && [ "$base" != "Default User" ] && [ -d "$u" ]; then
@@ -101,10 +109,14 @@ if [ "$IS_WSL" = true ]; then
             fi
         done
     fi
-    [ -z "$win_dir" ] && win_dir="/mnt/c/Users/HP"
+    if [ -z "$win_dir" ] || [ ! -d "$win_dir" ]; then
+        [ -n "$USER" ] && [ -d "/mnt/c/Users/$USER" ] && win_dir="/mnt/c/Users/$USER"
+    fi
 
-    prompt_remove "$win_dir/PipeRelay.exe" "Windows Pipe Relay Bridge (PipeRelay.exe)" "false"
-    prompt_remove "$win_dir/yt-dlp.exe" "Windows yt-dlp binary (yt-dlp.exe)" "false"
+    if [ -n "$win_dir" ]; then
+        prompt_remove "$win_dir/PipeRelay.exe" "Windows Pipe Relay Bridge (PipeRelay.exe)" "false"
+        prompt_remove "$win_dir/yt-dlp.exe" "Windows yt-dlp binary (yt-dlp.exe)" "false"
+    fi
 
     if [ -f "/mnt/c/Program Files/MPV Player/mpv.exe" ] || [ -f "/mnt/c/Program Files/MPV Player/mpv.com" ]; then
         echo -e "${YELLOW}Found: Native Windows MPV Player${NC} (C:\\Program Files\\MPV Player)"

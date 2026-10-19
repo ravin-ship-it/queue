@@ -106,6 +106,16 @@ get_windows_user_dir() {
                 return 0
             fi
         fi
+        local ps_prof
+        ps_prof=$(powershell.exe -NoProfile -Command "[System.Environment]::GetFolderPath('UserProfile')" </dev/null 2>/dev/null | tr -d '\r\n')
+        if [ -n "$ps_prof" ]; then
+            local u_dir
+            u_dir=$(wslpath -u "$ps_prof" 2>/dev/null)
+            if [ -d "$u_dir" ]; then
+                echo "$u_dir"
+                return 0
+            fi
+        fi
         for u in /mnt/c/Users/*; do
             local base
             base=$(basename "$u")
@@ -114,6 +124,10 @@ get_windows_user_dir() {
                 return 0
             fi
         done
+        if [ -n "$USER" ] && [ -d "/mnt/c/Users/$USER" ]; then
+            echo "/mnt/c/Users/$USER"
+            return 0
+        fi
     fi
     echo ""
 }
@@ -124,7 +138,7 @@ get_windows_user() {
     if [ -n "$u_dir" ]; then
         basename "$u_dir"
     else
-        echo "HP"
+        echo "${USER:-user}"
     fi
 }
 
@@ -145,12 +159,16 @@ find_windows_mpv() {
 find_windows_ytdlp() {
     local win_dir
     win_dir=$(get_windows_user_dir)
-    [ -z "$win_dir" ] && win_dir="/mnt/c/Users/HP"
-    if [ -f "$win_dir/yt-dlp.exe" ]; then
-        wslpath -w "$win_dir/yt-dlp.exe" 2>/dev/null
-    elif [ -f "$win_dir/AppData/Local/Microsoft/WinGet/Packages/yt-dlp.yt-dlp_Microsoft.Winget.Source_8wekyb3d8bbwe/yt-dlp.exe" ]; then
-        wslpath -w "$win_dir/AppData/Local/Microsoft/WinGet/Packages/yt-dlp.yt-dlp_Microsoft.Winget.Source_8wekyb3d8bbwe/yt-dlp.exe" 2>/dev/null
-    elif [ -f "/mnt/c/Program Files/MPV Player/yt-dlp.exe" ]; then
+    if [ -n "$win_dir" ]; then
+        if [ -f "$win_dir/yt-dlp.exe" ]; then
+            wslpath -w "$win_dir/yt-dlp.exe" 2>/dev/null
+            return 0
+        elif [ -f "$win_dir/AppData/Local/Microsoft/WinGet/Packages/yt-dlp.yt-dlp_Microsoft.Winget.Source_8wekyb3d8bbwe/yt-dlp.exe" ]; then
+            wslpath -w "$win_dir/AppData/Local/Microsoft/WinGet/Packages/yt-dlp.yt-dlp_Microsoft.Winget.Source_8wekyb3d8bbwe/yt-dlp.exe" 2>/dev/null
+            return 0
+        fi
+    fi
+    if [ -f "/mnt/c/Program Files/MPV Player/yt-dlp.exe" ]; then
         echo "C:\\Program Files\\MPV Player\\yt-dlp.exe"
     elif command -v yt-dlp.exe >/dev/null 2>&1; then
         echo "yt-dlp.exe"
@@ -173,7 +191,7 @@ format_path_for_mpv() {
 ensure_piperelay_compiled() {
     local win_dir
     win_dir=$(get_windows_user_dir)
-    [ -z "$win_dir" ] && win_dir="/mnt/c/Users/HP"
+    [ -z "$win_dir" ] && return 1
     local win_exe="$win_dir/PipeRelay.exe"
 
     if [ -f "$win_exe" ] && [ -x "$win_exe" ]; then
@@ -234,7 +252,7 @@ load_playlist_file_to_mpv() {
 ensure_windows_ytdlp_configured() {
     local win_dir
     win_dir=$(get_windows_user_dir)
-    [ -z "$win_dir" ] && win_dir="/mnt/c/Users/HP"
+    [ -z "$win_dir" ] && return 1
     local win_user="${win_dir##*/}"
 
     local win_ytdlp_dir="$win_dir/AppData/Roaming/yt-dlp"
@@ -301,6 +319,9 @@ ensure_mpv_running() {
     local pl_arg="$1"
     if [ "$MPV_RUNNING" = false ] || [ ! -S "$SOCKET" ]; then
         rm -f "$SOCKET"
+        if [ "$IS_ANDROID" = true ] || command -v termux-wake-lock >/dev/null 2>&1; then
+            termux-wake-lock 2>/dev/null || true
+        fi
         local initial_pl=()
         if [ -n "$pl_arg" ] && [ -f "$pl_arg" ] && [ -s "$pl_arg" ]; then
             initial_pl=("--playlist=$pl_arg")
@@ -551,8 +572,12 @@ get_file_mtime() {
 }
 
 run_with_timeout() {
-    local secs="${1%s}"
+    local raw="${1%s}"
     shift
+    local secs="${raw%.*}"
+    if [ -z "$secs" ] || [ "$secs" -le 0 ] 2>/dev/null; then
+        secs=1
+    fi
     if command -v timeout >/dev/null 2>&1; then
         timeout "$secs" "$@"
     elif command -v gtimeout >/dev/null 2>&1; then
@@ -635,10 +660,11 @@ fetch_title_bg() {
     local url="$1"
     (
         local COOKIES_FILE="$HOME/.config/mpv/cookies.txt"
-        local YTDL_OPTS=("--js-runtimes" "node" "--extractor-args" "youtube:player_client=android,web" "--print" "%(title)s\t%(uploader)s\t%(duration_string)s" "--no-warnings" "--skip-download")
+        local YTDL_OPTS=("--extractor-args" "youtube:player_client=visionos,android,web" "--print" "%(title)s\t%(uploader)s\t%(duration_string)s" "--no-warnings" "--skip-download")
+        command -v node >/dev/null 2>&1 && YTDL_OPTS+=("--js-runtimes" "node")
         [ -f "$COOKIES_FILE" ] && YTDL_OPTS+=("--cookies" "$COOKIES_FILE")
 
-        local info=$(run_with_timeout 30s yt-dlp "${YTDL_OPTS[@]}" -- "$url" 2>/dev/null | sed 's/\\t/\t/g')
+        local info=$(run_with_timeout 30 yt-dlp "${YTDL_OPTS[@]}" -- "$url" 2>/dev/null | sed 's/\\t/\t/g')
         if [ -n "$info" ]; then
             # info is "title\tartist\tduration"
             printf "%s\t%s\n" "$url" "$info" >> "$CACHE_FILE"
@@ -699,10 +725,14 @@ fetch_missing_background() {
              # Background fetch with lowest scheduling priority (nice 19) to never interrupt audio playback
              (
                  local COOKIES_FILE="$HOME/.config/mpv/cookies.txt"
-                 local YTDL_OPTS=("--js-runtimes" "node" "--extractor-args" "youtube:player_client=android,web" "--print" "%(title)s\t%(uploader)s\t%(duration_string)s" "--no-warnings" "--skip-download")
+                 local YTDL_OPTS=("--extractor-args" "youtube:player_client=visionos,android,web" "--print" "%(title)s\t%(uploader)s\t%(duration_string)s" "--no-warnings" "--skip-download")
+                 command -v node >/dev/null 2>&1 && YTDL_OPTS+=("--js-runtimes" "node")
                  [ -f "$COOKIES_FILE" ] && YTDL_OPTS+=("--cookies" "$COOKIES_FILE")
 
-                 local info=$(run_with_timeout 30s nice -n 19 yt-dlp "${YTDL_OPTS[@]}" -- "$url" 2>/dev/null | sed 's/\\t/\t/g')
+                 local nice_cmd=()
+                 command -v nice >/dev/null 2>&1 && nice_cmd=("nice" "-n" "19")
+
+                 local info=$(run_with_timeout 30 "${nice_cmd[@]}" yt-dlp "${YTDL_OPTS[@]}" -- "$url" 2>/dev/null | sed 's/\\t/\t/g')
                  if [ -n "$info" ]; then
                      { printf "%s\t%s\n" "$url" "$info"; } >> "$CACHE_FILE"
                  else

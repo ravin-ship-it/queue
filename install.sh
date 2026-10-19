@@ -69,7 +69,7 @@ install_deps() {
     
     if command -v pkg >/dev/null 2>&1; then # Termux
         pkg update
-        pkg install -y coreutils ca-certificates openssl-tool python python-pip
+        pkg install -y coreutils ca-certificates openssl-tool python python-pip termux-api
         for pkg in "${missing[@]}"; do
             [ "$pkg" == "netcat" ] && pkg="netcat-openbsd"
             [ "$pkg" == "yt-dlp" ] && continue # Handled via pip below
@@ -78,6 +78,24 @@ install_deps() {
         # Termux apt package for yt-dlp is often broken with Python 3.14; always install/heal via pip
         echo -e "${CYAN}🔧 Installing/Healing yt-dlp via pip for Termux Python...${NC}"
         pip install -U --force-reinstall yt-dlp || pkg install -y yt-dlp || true
+
+        # Create bulletproof yt-dlp binary wrapper for MPV ytdl-hook and Termux shell
+        mkdir -p "$HOME/.local/bin"
+        cat << 'EOF' > "$HOME/.local/bin/yt-dlp"
+#!/usr/bin/env sh
+exec python3 -m yt_dlp "$@"
+EOF
+        chmod +x "$HOME/.local/bin/yt-dlp"
+        if [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ] && [ -w "$PREFIX/bin" ]; then
+            cp -f "$HOME/.local/bin/yt-dlp" "$PREFIX/bin/yt-dlp" 2>/dev/null || true
+            chmod +x "$PREFIX/bin/yt-dlp" 2>/dev/null || true
+        fi
+
+        # Check Termux Android storage permission
+        if [ ! -d "$HOME/storage" ] && command -v termux-setup-storage >/dev/null 2>&1; then
+            echo -e "${YELLOW}📱 Initializing Termux storage access...${NC}"
+            termux-setup-storage </dev/null >/dev/null 2>&1 || true
+        fi
     elif command -v apt-get >/dev/null 2>&1; then # Debian/Ubuntu/Kali/WSL
         sudo apt-get update
         for pkg in "${missing[@]}"; do
@@ -229,6 +247,10 @@ if [ "$IS_WSL" = true ]; then
     win_dir=""
     [ -n "$win_prof" ] && win_dir=$(wslpath -u "$win_prof" 2>/dev/null)
     if [ -z "$win_dir" ] || [ ! -d "$win_dir" ]; then
+        ps_prof=$(powershell.exe -NoProfile -Command "[System.Environment]::GetFolderPath('UserProfile')" </dev/null 2>/dev/null | tr -d '\r\n')
+        [ -n "$ps_prof" ] && win_dir=$(wslpath -u "$ps_prof" 2>/dev/null)
+    fi
+    if [ -z "$win_dir" ] || [ ! -d "$win_dir" ]; then
         for u in /mnt/c/Users/*; do
             base=$(basename "$u")
             if [ "$base" != "Public" ] && [ "$base" != "Default" ] && [ "$base" != "All Users" ] && [ "$base" != "Default User" ] && [ -d "$u" ]; then
@@ -237,8 +259,11 @@ if [ "$IS_WSL" = true ]; then
             fi
         done
     fi
-    [ -z "$win_dir" ] && win_dir="/mnt/c/Users/HP"
-    win_user=$(basename "$win_dir")
+    if [ -z "$win_dir" ] || [ ! -d "$win_dir" ]; then
+        [ -n "$USER" ] && [ -d "/mnt/c/Users/$USER" ] && win_dir="/mnt/c/Users/$USER"
+    fi
+    win_user=""
+    [ -n "$win_dir" ] && win_user=$(basename "$win_dir")
 
     # 1. Compile Native PipeRelay.exe via Windows .NET compiler
     win_relay="$win_dir/PipeRelay.exe"

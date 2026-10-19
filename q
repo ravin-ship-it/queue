@@ -2,6 +2,16 @@
 # Advanced Queue Manager (Synced Fetch Edition) - Finalized
 
 # --- SELF-HEALING & ENVIRONMENT VALIDATION ---
+# Ensure TMPDIR fallback for Android / Termux and standard UNIX
+if [ -z "$TMPDIR" ]; then
+    if [ -d "/data/data/com.termux/files/usr/tmp" ]; then
+        export TMPDIR="/data/data/com.termux/files/usr/tmp"
+    else
+        export TMPDIR="/tmp"
+    fi
+fi
+mkdir -p "$TMPDIR" 2>/dev/null
+
 # Ensure essential directories exist
 mkdir -p "$HOME/.cache/mpv" 2>/dev/null
 mkdir -p "$HOME/.local/share/mpv/playlists" 2>/dev/null
@@ -40,13 +50,35 @@ if [ -S "$HOME/.mpv-socket" ]; then
 fi
 
 # Validate Dependencies
-for dep in mpv yt-dlp fzf jq; do
+for dep in mpv fzf jq; do
     if ! command -v "$dep" >/dev/null 2>&1; then
         echo -e "\033[0;31m❌ FATAL: Missing dependency: $dep\033[0m"
         echo -e "\033[0;36m👉 Fix: Please re-run 'install.sh' from your q-production folder to auto-install.\033[0m"
         exit 1
     fi
 done
+
+# Validate & Self-Heal yt-dlp (binary or python3 -m yt_dlp module)
+if ! command -v yt-dlp >/dev/null 2>&1 || ! yt-dlp --version >/dev/null 2>&1; then
+    if python3 -m yt_dlp --version >/dev/null 2>&1; then
+        mkdir -p "$HOME/.local/bin"
+        cat << 'EOF' > "$HOME/.local/bin/yt-dlp"
+#!/usr/bin/env sh
+exec python3 -m yt_dlp "$@"
+EOF
+        chmod +x "$HOME/.local/bin/yt-dlp"
+        export PATH="$HOME/.local/bin:$PATH"
+        if [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ] && [ -w "$PREFIX/bin" ]; then
+            cp -f "$HOME/.local/bin/yt-dlp" "$PREFIX/bin/yt-dlp" 2>/dev/null || true
+            chmod +x "$PREFIX/bin/yt-dlp" 2>/dev/null || true
+        fi
+    else
+        echo -e "\033[0;31m❌ FATAL: Missing dependency: yt-dlp\033[0m"
+        echo -e "\033[0;36m👉 Fix: Run 'pip install -U yt-dlp' or re-run 'install.sh'.\033[0m"
+        exit 1
+    fi
+fi
+
 if ! command -v nc >/dev/null 2>&1; then
     echo -e "\033[0;31m❌ FATAL: Missing dependency: netcat (nc)\033[0m"
     echo -e "\033[0;36m👉 Fix: Please re-run 'install.sh'.\033[0m"
@@ -937,9 +969,12 @@ if [ "$IS_BATCH" = true ]; then
             fi
 
             echo -e "${C_CYAN}🔍 Analyzing URL:${C_RESET} $input"
-            PL_TMP=$(mktemp)
+            PL_TMP=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/q_pl_$$.tmp")
             # Use strict 4-column format for analysis and caching
-            timeout 45s yt-dlp --js-runtimes node --extractor-args "youtube:player_client=android,web" --flat-playlist --print "%(webpage_url)s\t%(title)s\t%(uploader)s\t%(duration_string)s" --no-warnings --skip-download -- "$input" > "$PL_TMP" 2>/dev/null
+            local ytdl_batch_opts=("--extractor-args" "youtube:player_client=visionos,android,web" "--flat-playlist" "--print" "%(webpage_url)s\t%(title)s\t%(uploader)s\t%(duration_string)s" "--no-warnings" "--skip-download")
+            command -v node >/dev/null 2>&1 && ytdl_batch_opts+=("--js-runtimes" "node")
+            [ -n "$COOKIES_FILE" ] && [ -f "$COOKIES_FILE" ] && ytdl_batch_opts+=("--cookies" "$COOKIES_FILE")
+            run_with_timeout 45 yt-dlp "${ytdl_batch_opts[@]}" -- "$input" > "$PL_TMP" 2>/dev/null
             
             # Debug: Store last raw output
             cp "$PL_TMP" "$HOME/.cache/mpv/last_yt_dlp_raw" 2>/dev/null

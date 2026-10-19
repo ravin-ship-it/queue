@@ -31,9 +31,10 @@ fetch_and_display_url_info() {
     [ -n "$queue_idx" ] && [ "$queue_idx" != "null" ] && queue_status="Queued at #$queue_idx"
     
     # Fetch Metadata (Robustly)
-    local opts=("--js-runtimes" "node" "--extractor-args" "youtube:player_client=android,web" "--dump-json" "--no-warnings" "--skip-download" "--ignore-errors" "--flat-playlist")
+    local opts=("--extractor-args" "youtube:player_client=visionos,android,web" "--dump-json" "--no-warnings" "--skip-download" "--ignore-errors" "--flat-playlist")
+    command -v node >/dev/null 2>&1 && opts+=("--js-runtimes" "node")
     [ -n "$COOKIES_FILE" ] && [ -f "$COOKIES_FILE" ] && opts+=("--cookies" "$COOKIES_FILE")
-    local json_dump=$(run_with_timeout 30s yt-dlp "${opts[@]}" -- "$clean_url" 2>/dev/null)
+    local json_dump=$(run_with_timeout 30 yt-dlp "${opts[@]}" -- "$clean_url" 2>/dev/null)
     if [ -z "$json_dump" ]; then
         if [ -n "$force_title" ] || [ "$is_current" == "true" ]; then
             local display_t="${force_title:-$clean_url}"
@@ -705,6 +706,9 @@ cmd_video_toggle() {
             if [ -d "/mnt/wslg" ] || [ -S "/tmp/.X11-unix/X0" ]; then
                 export DISPLAY=":0"
                 export WAYLAND_DISPLAY="wayland-0"
+            elif [ "$IS_ANDROID" = true ]; then
+                echo -e "${C_PINK}📱 Desktop video window is disabled on Android/Termux (operates in high-fidelity headless audio mode).${C_RESET}"
+                return 1
             else
                 echo -e "${C_PINK}🚫 No graphical display found. Desktop video requires an active display (X11 / Wayland / WSLg).${C_RESET}"
                 return 1
@@ -799,7 +803,7 @@ cmd_video_toggle() {
     batch_keys+="{\"command\":[\"keybind\",\"2\",\"script-message change-resolution \\\"$hotkey_2\\\" \\\"1080p Full HD (60fps)\\\"\"]}\n"
     batch_keys+="{\"command\":[\"keybind\",\"3\",\"script-message change-resolution \\\"$hotkey_3\\\" \\\"1440p 2K QHD (60fps)\\\"\"]}\n"
     batch_keys+="{\"command\":[\"keybind\",\"4\",\"script-message change-resolution \\\"$hotkey_4\\\" \\\"Max / 4K UHD\\\"\"]}\n"
-    echo -e "$batch_keys" | timeout 0.5s nc $NC_OPTS "$SOCKET" >/dev/null 2>&1 || true
+    echo -e "$batch_keys" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1 || true
 
     local target_autofit="50%x50%"
     local target_scale="0.5"
@@ -862,7 +866,7 @@ cmd_video_toggle() {
     # 12. video=auto & vid=auto -> Demux & render video stream
     # 13. force-window=yes -> Keep window persistent across playlist transitions
     # 14. pause=false -> Resume/continue playback
-    echo -e "{\"command\":[\"set_property\",\"window-minimized\",false]}\n{\"command\":[\"set_property\",\"autofit\",\"$target_autofit\"]}\n{\"command\":[\"set_property\",\"window-scale\",$target_scale]}\n{\"command\":[\"set_property\",\"geometry\",\"50%:50%\"]}\n{\"command\":[\"set_property\",\"auto-window-resize\",false]}\n{\"command\":[\"set_property\",\"keepaspect-window\",false]}\n{\"command\":[\"apply-profile\",\"fast\"]}\n{\"command\":[\"set_property\",\"hwdec\",\"auto-safe\"]}\n{\"command\":[\"set_property\",\"opengl-pbo\",true]}\n{\"command\":[\"set_property\",\"swapchain-depth\",3]}\n{\"command\":[\"set_property\",\"video-sync\",\"audio\"]}\n{\"command\":[\"set_property\",\"gpu-context\",\"$gpu_ctx\"]}\n{\"command\":[\"set_property\",\"vo\",\"$vo_opt\"]}\n{\"command\":[\"set_property\",\"video\",\"auto\"]}\n{\"command\":[\"set_property\",\"vid\",\"auto\"]}\n{\"command\":[\"set_property\",\"fullscreen\",$target_fs]}\n{\"command\":[\"set_property\",\"force-window\",\"yes\"]}\n{\"command\":[\"set_property\",\"pause\",false]}" | timeout 0.5s nc $NC_OPTS "$SOCKET" >/dev/null 2>&1 || true
+    echo -e "{\"command\":[\"set_property\",\"window-minimized\",false]}\n{\"command\":[\"set_property\",\"autofit\",\"$target_autofit\"]}\n{\"command\":[\"set_property\",\"window-scale\",$target_scale]}\n{\"command\":[\"set_property\",\"geometry\",\"50%:50%\"]}\n{\"command\":[\"set_property\",\"auto-window-resize\",false]}\n{\"command\":[\"set_property\",\"keepaspect-window\",false]}\n{\"command\":[\"apply-profile\",\"fast\"]}\n{\"command\":[\"set_property\",\"hwdec\",\"auto-safe\"]}\n{\"command\":[\"set_property\",\"opengl-pbo\",true]}\n{\"command\":[\"set_property\",\"swapchain-depth\",3]}\n{\"command\":[\"set_property\",\"video-sync\",\"audio\"]}\n{\"command\":[\"set_property\",\"gpu-context\",\"$gpu_ctx\"]}\n{\"command\":[\"set_property\",\"vo\",\"$vo_opt\"]}\n{\"command\":[\"set_property\",\"video\",\"auto\"]}\n{\"command\":[\"set_property\",\"vid\",\"auto\"]}\n{\"command\":[\"set_property\",\"fullscreen\",$target_fs]}\n{\"command\":[\"set_property\",\"force-window\",\"yes\"]}\n{\"command\":[\"set_property\",\"pause\",false]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1 || true
     touch "$HOME/.cache/mpv/video_active"
     local cur_vid=$(echo '{"command":["get_property","vid"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // false')
     if [ "$cur_vid" == "false" ] || [ "$cur_vid" == "no" ]; then

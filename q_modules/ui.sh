@@ -110,9 +110,22 @@ cmd_update_ytdlp() {
     # 2. Update Queue Engine directly into ~/.local/bin/mpv/
     echo -e "${C_CYAN}📦 [2/2] Updating Queue Engine from GitHub...${C_RESET}"
     local dest_dir="$HOME/.local/bin/mpv"
-    mkdir -p "$dest_dir/q_modules"
+    mkdir -p "$dest_dir/q_modules" "$dest_dir/scripts" "$HOME/.config/mpv/scripts"
     
-    local files=("q" "q_modules/ui.sh" "q_modules/utils.sh" "q_modules/media.sh" "q_modules/queue.sh" "q_modules/search.sh" "q_modules/batch.sh" "q_modules/playlist.sh" "q_modules/download.sh")
+    local files=(
+        "q"
+        "q_modules/ui.sh"
+        "q_modules/utils.sh"
+        "q_modules/media.sh"
+        "q_modules/queue.sh"
+        "q_modules/search.sh"
+        "q_modules/batch.sh"
+        "q_modules/playlist.sh"
+        "q_modules/download.sh"
+        "q_modules/hybrid_bridge.py"
+        "scripts/PipeRelay.cs"
+        "scripts/queue_video.lua"
+    )
     local success=true
     local base_url="https://raw.githubusercontent.com/ravin-ship-it/queue/main"
     
@@ -125,8 +138,13 @@ cmd_update_ytdlp() {
         fi
     done
     
+    # Sync updated scripts to active mpv config
+    if [ -f "$dest_dir/scripts/queue_video.lua" ]; then
+        cp -f "$dest_dir/scripts/queue_video.lua" "$HOME/.config/mpv/scripts/queue_video.lua" 2>/dev/null || true
+    fi
+
     # Always ensure executable permissions and symlinks
-    chmod +x "$dest_dir/q" 2>/dev/null || true
+    chmod +x "$dest_dir/q" "$dest_dir/q_modules/hybrid_bridge.py" 2>/dev/null || true
     mkdir -p "$HOME/.local/bin"
     ln -sf "$dest_dir/q" "$HOME/.local/bin/q"
     if [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ] && [ -w "$PREFIX/bin" ]; then
