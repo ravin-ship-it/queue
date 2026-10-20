@@ -142,7 +142,7 @@ fi
 # --- Command Parsing ---
 
 PROCESSED_ANY_FLAG=false
-SMART_CMDS="^(play|pause|stop|next|prev|vol|info|list|clear|shuffle|remove|move|swap|help|save|load|auto|fx|deps|up|uninstall|download|dl|d|dislike|dis|disl|rmd|undis|undislike|like|vid|video|watch|version|ver|res|quality|hybrid|hy)$"
+SMART_CMDS="^(play|pause|stop|next|prev|vol|info|list|clear|shuffle|remove|move|swap|help|save|load|auto|fx|deps|up|install|setup|uninstall|remove-setup|download|dl|d|dislike|dis|disl|rmd|undis|undislike|like|vid|video|watch|version|ver|res|quality|hybrid|hy)$"
 
 while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
     PROCESSED_ANY_FLAG=true
@@ -170,6 +170,8 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
             fx) CMD="-fx" ;;
             deps) CMD="-deps" ;;
             up) CMD="-up" ;;
+            install|setup) CMD="-install" ;;
+            remove-setup) CMD="-remove-setup" ;;
             uninstall) CMD="-uninstall" ;;
             download|dl|d) CMD="-d" ;;
             dislike|dis) CMD="-dis" ;;
@@ -459,6 +461,22 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
             ;; 
         -deps) check_dependencies; shift ;;
         -up) cmd_update_ytdlp; shift ;;
+        -install|--install)
+            shift
+            echo -e "${C_GREEN}✨ Queue is already installed and running active (v${QUEUE_VERSION}).${C_RESET}"
+            echo -e "${C_GRAY}   • To update Queue to the latest version: run ${C_CYAN}q -up${C_RESET}"
+            echo -e "${C_GRAY}   • To re-run installer with new flags: run ${C_CYAN}bash ~/.local/bin/mpv/install.sh $@${C_RESET}"
+            exit 0
+            ;;
+        -remove-setup|--remove-setup)
+            shift
+            echo -e "${C_ORANGE}🛡️ Safety Guard: Queue is actively installed on this system.${C_RESET}"
+            echo -e "${C_GRAY}The setup engine is required for 'q -up', engine self-healing, and lifecycle operations.${C_RESET}"
+            echo -e "${C_GRAY}Deleting the setup file while Queue is installed could cause lifecycle operations to fail.${C_RESET}\n"
+            echo -e "${C_CYAN}👉 To safely uninstall Queue first, run:${C_RESET} ${C_GREEN}q -uninstall${C_RESET}"
+            echo -e "${C_GRAY}   (You can purge the setup file during uninstallation with 'q -uninstall --purge' or run 'q -remove-setup' afterwards.)${C_RESET}"
+            exit 1
+            ;;
         -uninstall|--uninstall)
             shift
             cmd_uninstall "$@"

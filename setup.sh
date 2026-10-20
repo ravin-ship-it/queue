@@ -20,7 +20,7 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd || echo "")"
 
 # If running inside full repository clone, delegate directly to local install.sh
-if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/install.sh" ] && [ -d "$SCRIPT_DIR/q_modules" ]; then
+if [ -n "$SCRIPT_DIR" ] && [ "$SCRIPT_DIR" != "$HOME/.local/bin/mpv" ] && [ -f "$SCRIPT_DIR/install.sh" ] && [ -d "$SCRIPT_DIR/q_modules" ] && [ -f "$SCRIPT_DIR/q" ]; then
     echo -e "${CYAN}🚀 Local repository detected. Launching local install engine...${NC}"
     exec bash "$SCRIPT_DIR/install.sh" "$@"
 fi
@@ -131,4 +131,5 @@ echo -e "${CYAN}💡 Useful Commands:${NC}"
 echo -e "   • Type ${GREEN}q${NC} to start interactive player"
 echo -e "   • Run ${GREEN}q -deps${NC} to view full system & multi-engine diagnostics"
 echo -e "   • Run ${GREEN}q -up${NC} anytime to auto-update Queue and yt-dlp"
-echo -e "   • Run ${GREEN}q -uninstall${NC} anytime to cleanly remove Queue"
+echo -e "   • Run ${GREEN}q -uninstall${NC} anytime to cleanly remove Queue (with instant reinstall preservation)"
+echo -e "   • Run ${GREEN}q -remove-setup${NC} to permanently wipe the setup file after uninstallation"

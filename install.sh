@@ -169,13 +169,15 @@ mkdir -p "$DEST_DIR"
 mkdir -p "$HOME/.local/bin"
 
 echo -e "${CYAN}📦 Installing Queue engine into $DEST_DIR...${NC}"
-# Clean existing symlinks/files in destination before copying permanent files
-rm -rf "$DEST_DIR/q" "$DEST_DIR/q_modules" "$DEST_DIR/scripts"
-cp -r "$REPO_DIR/q" "$REPO_DIR/q_modules" "$REPO_DIR/scripts" "$DEST_DIR/"
-cp -f "$REPO_DIR/install.sh" "$REPO_DIR/uninstall.sh" "$DEST_DIR/" 2>/dev/null || true
-[ -f "$REPO_DIR/setup.sh" ] && cp -f "$REPO_DIR/setup.sh" "$DEST_DIR/" 2>/dev/null || true
-[ -f "$REPO_DIR/input.conf.example" ] && cp -f "$REPO_DIR/input.conf.example" "$DEST_DIR/" 2>/dev/null || true
-[ -f "$REPO_DIR/mpv.conf.example" ] && cp -f "$REPO_DIR/mpv.conf.example" "$DEST_DIR/" 2>/dev/null || true
+if [ "$REPO_DIR" != "$DEST_DIR" ]; then
+    # Clean existing symlinks/files in destination before copying permanent files
+    rm -rf "$DEST_DIR/q" "$DEST_DIR/q_modules" "$DEST_DIR/scripts"
+    cp -r "$REPO_DIR/q" "$REPO_DIR/q_modules" "$REPO_DIR/scripts" "$DEST_DIR/"
+    cp -f "$REPO_DIR/install.sh" "$REPO_DIR/uninstall.sh" "$DEST_DIR/" 2>/dev/null || true
+    [ -f "$REPO_DIR/setup.sh" ] && cp -f "$REPO_DIR/setup.sh" "$DEST_DIR/" 2>/dev/null || true
+    [ -f "$REPO_DIR/input.conf.example" ] && cp -f "$REPO_DIR/input.conf.example" "$DEST_DIR/" 2>/dev/null || true
+    [ -f "$REPO_DIR/mpv.conf.example" ] && cp -f "$REPO_DIR/mpv.conf.example" "$DEST_DIR/" 2>/dev/null || true
+fi
 chmod +x "$DEST_DIR/q" "$DEST_DIR/install.sh" "$DEST_DIR/uninstall.sh" "$DEST_DIR/setup.sh" 2>/dev/null || true
 chmod +x "$DEST_DIR/q_modules/hybrid_bridge.py" "$DEST_DIR/q_modules/android_stream_bridge.py" 2>/dev/null || true
 
