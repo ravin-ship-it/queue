@@ -313,7 +313,13 @@ local function change_quality(target, is_auto_adaptive)
 
     local fmt = get_quality_format(target, current_lang)
     mp.set_property("ytdl-format", fmt)
-    mp.commandv("playlist-play-index", "current")
+    local cur_path = mp.get_property("path", "")
+    if cur_path and cur_path ~= "" and (cur_path:match("^https?://") or cur_path:match("^ytdl://")) then
+        local start_sec = math.max(0, math.floor(cur_time or 0))
+        mp.commandv("loadfile", cur_path, "replace", "-1", "start=" .. tostring(start_sec))
+    else
+        mp.commandv("playlist-play-index", "current")
+    end
 
     local banner = "Quality: " .. profile.label
     if is_auto_adaptive then
@@ -333,7 +339,13 @@ local function change_resolution(fmt, label)
     end
 
     mp.set_property("ytdl-format", fmt)
-    mp.commandv("playlist-play-index", "current")
+    local cur_path = mp.get_property("path", "")
+    if cur_path and cur_path ~= "" and (cur_path:match("^https?://") or cur_path:match("^ytdl://")) then
+        local start_sec = math.max(0, math.floor(cur_time or 0))
+        mp.commandv("loadfile", cur_path, "replace", "-1", "start=" .. tostring(start_sec))
+    else
+        mp.commandv("playlist-play-index", "current")
+    end
     if label and label ~= "" then
         mp.commandv("show-text", "Quality: " .. label, 2500)
     end
@@ -375,10 +387,16 @@ local function change_language(lang, label)
         return
     end
 
-    -- 2. Remote / YouTube DASH stream reload
+    -- 2. Remote / YouTube DASH stream reload (preserve exact position)
     local fmt = get_quality_format(current_tier, current_lang)
     mp.set_property("ytdl-format", fmt)
-    mp.commandv("playlist-play-index", "current")
+    local cur_path = mp.get_property("path", "")
+    if cur_path and cur_path ~= "" and (cur_path:match("^https?://") or cur_path:match("^ytdl://")) then
+        local start_sec = math.max(0, math.floor(cur_time or 0))
+        mp.commandv("loadfile", cur_path, "replace", "-1", "start=" .. tostring(start_sec))
+    else
+        mp.commandv("playlist-play-index", "current")
+    end
 
     local display = label or string.format("[%s] %s", lang, get_lang_label(lang))
     mp.commandv("show-text", "🔊 Audio Language: " .. display, 2500)

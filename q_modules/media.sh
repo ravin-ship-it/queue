@@ -2178,6 +2178,92 @@ start_idle_monitor() {
     export IDLE_MONITOR_ACTIVE=true
 }
 
+prompt_multi_audio_if_available() {
+    local target_url="$1"
+    local title="$2"
+    [ -z "$target_url" ] && return
+    [[ ! "$target_url" =~ ^http.* ]] && return
+    if [ ! -t 0 ] || [ ! -t 1 ]; then return; fi
+
+    local cur_pref="en"
+    [ -f "$HOME/.config/mpv/queue_lang" ] && cur_pref=$(cat "$HOME/.config/mpv/queue_lang" 2>/dev/null | tr -d '[:space:]')
+    [ -z "$cur_pref" ] && cur_pref="en"
+
+    # Check cache first for instant response
+    local audio_langs_json=""
+    if [ -f "$HOME/.cache/mpv/current_audio_langs.json" ] && [ -s "$HOME/.cache/mpv/current_audio_langs.json" ]; then
+        audio_langs_json=$(cat "$HOME/.cache/mpv/current_audio_langs.json" 2>/dev/null)
+    fi
+
+    if [ -z "$audio_langs_json" ] || [ "$audio_langs_json" == "[]" ]; then
+        local ytdl_meta=("yt-dlp" "--dump-json" "--skip-download" "--flat-playlist" "--no-warnings")
+        command -v node >/dev/null 2>&1 && ytdl_meta+=("--js-runtimes" "node")
+        local raw_json
+        raw_json=$(run_with_timeout 8 "${ytdl_meta[@]}" -- "$target_url" 2>/dev/null)
+        if [ -n "$raw_json" ]; then
+            audio_langs_json=$(echo "$raw_json" | jq -c '[.formats[]? | select(.vcodec == "none" and .acodec != "none") | {lang: (.language // "auto"), note: (.format_note // "")}] | unique_by(.lang)' 2>/dev/null)
+            if [ -n "$audio_langs_json" ] && [ "$audio_langs_json" != "[]" ]; then
+                mkdir -p "$HOME/.cache/mpv"
+                echo "$audio_langs_json" > "$HOME/.cache/mpv/current_audio_langs.json"
+                if [ "$IS_WSL" = true ]; then
+                    local win_u_dir
+                    win_u_dir=$(get_windows_user_dir)
+                    [ -n "$win_u_dir" ] && cp -f "$HOME/.cache/mpv/current_audio_langs.json" "$win_u_dir/.cache/mpv/current_audio_langs.json" 2>/dev/null
+                fi
+            fi
+        fi
+    fi
+
+    local audio_cnt
+    audio_cnt=$(echo "$audio_langs_json" | jq 'length // 0' 2>/dev/null)
+    if [ "$audio_cnt" -gt 1 ]; then
+        print_header_box "${C_PINK}🌐 Multi-Language Audio Available${C_RESET}"
+        [ -n "$title" ] && print_boxed_line "${C_TEAL}Track:    ${C_CYAN}${title:0:$((INNER_WIDTH-12))}${C_RESET}"
+        print_boxed_line "${C_TEAL}Available Audio Languages:${C_RESET}"
+        local p_idx=0
+        declare -a p_langs=()
+        while IFS=$'\t' read -r a_lang a_note; do
+            [ -z "$a_lang" ] && continue
+            ((p_idx++))
+            p_langs+=("$a_lang")
+            local h_name
+            h_name=$(get_human_lang_name "$a_lang")
+            local desc="$h_name"
+            [ -n "$a_note" ] && desc="$desc ($a_note)"
+            local def_tag=""
+            if [ "$a_lang" == "$cur_pref" ]; then
+                def_tag=" ${C_GREEN}★ Active [Default]${C_RESET}"
+            fi
+            print_boxed_line "  ${C_ORANGE}${p_idx}.${C_RESET} ${C_WHITE}[${C_PINK}${a_lang}${C_WHITE}] ${desc}${def_tag}"
+        done < <(echo "$audio_langs_json" | jq -r '.[] | "\(.lang)\t\(.note)"')
+        printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
+        B_LINE=${B_LINE// /─}
+        echo -e "${C_PURPLE}${B_LINE}${C_RESET}"
+        echo -ne "${C_PINK}👉 Select audio language [1-${p_idx}] (press ENTER for default): ${C_RESET}"
+        local user_pick=""
+        read -r user_pick || read -r user_pick < /dev/tty 2>/dev/null || true
+        local chosen_lang=""
+        if [[ "$user_pick" =~ ^[0-9]+$ ]] && [ "$user_pick" -ge 1 ] && [ "$user_pick" -le "$p_idx" ]; then
+            chosen_lang="${p_langs[$((user_pick - 1))]}"
+        elif [ -n "$user_pick" ]; then
+            local norm
+            norm=$(normalize_lang_code "$user_pick")
+            [ -n "$norm" ] && chosen_lang="$norm"
+        fi
+        if [ -n "$chosen_lang" ]; then
+            echo "$chosen_lang" > "$HOME/.config/mpv/queue_lang"
+            if [ "$IS_WSL" = true ]; then
+                local win_u_dir
+                win_u_dir=$(get_windows_user_dir)
+                [ -n "$win_u_dir" ] && cp -f "$HOME/.config/mpv/queue_lang" "$win_u_dir/.config/mpv/queue_lang" 2>/dev/null
+            fi
+            if [ -S "$SOCKET" ]; then
+                echo "{\"command\":[\"script-message\",\"change-language\",\"$chosen_lang\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+            fi
+        fi
+    fi
+}
+
 cmd_play() {
     local index=$1
     index=${index%.}
@@ -2373,6 +2459,11 @@ cmd_play() {
         log_now_playing "|> Playing: "
         cmd_android_video_handoff "$index"
     else
+        local track_url track_title
+        track_url=$(echo "{\"command\":[\"get_property\",\"playlist/$((index - 1))/filename\"]}" | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // empty')
+        track_title=$(echo "{\"command\":[\"get_property\",\"playlist/$((index - 1))/title\"]}" | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // empty')
+        prompt_multi_audio_if_available "$track_url" "$track_title"
+
         # Set pos AND force unpause and reset seek to 0 (Separate commands for maximum compatibility)
         echo "{\"command\":[\"playlist-play-index\",$((index - 1))]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
         echo "{\"command\":[\"seek\",0,\"absolute\"]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
@@ -2451,9 +2542,23 @@ cmd_blind_play() {
     elif [[ "$target" =~ ^http.* ]]; then
         play_target="$target"
         echo -e "${C_CYAN}🔍 Inspecting stream metadata...${C_RESET}"
-        local ytdl_title_cmd=("yt-dlp" "--no-warnings" "--skip-download" "--print" "%(title)s")
-        command -v node >/dev/null 2>&1 && ytdl_title_cmd+=("--js-runtimes" "node")
-        display_title=$(run_with_timeout 10 "${ytdl_title_cmd[@]}" -- "$play_target" 2>/dev/null | head -n 1)
+        local raw_json
+        local ytdl_meta_cmd=("yt-dlp" "--dump-json" "--skip-download" "--flat-playlist" "--no-warnings")
+        command -v node >/dev/null 2>&1 && ytdl_meta_cmd+=("--js-runtimes" "node")
+        raw_json=$(run_with_timeout 15 "${ytdl_meta_cmd[@]}" -- "$play_target" 2>/dev/null)
+        local blind_audio_langs_json=""
+        if [ -n "$raw_json" ]; then
+            display_title=$(echo "$raw_json" | jq -r '.title // empty')
+            blind_audio_langs_json=$(echo "$raw_json" | jq -c '[.formats[]? | select(.vcodec == "none" and .acodec != "none") | {lang: (.language // "auto"), note: (.format_note // "")}] | unique_by(.lang)' 2>/dev/null)
+            if [ -n "$blind_audio_langs_json" ] && [ "$blind_audio_langs_json" != "[]" ]; then
+                mkdir -p "$HOME/.cache/mpv"
+                echo "$blind_audio_langs_json" > "$HOME/.cache/mpv/current_audio_langs.json"
+                if [ "$IS_WSL" = true ]; then
+                    local win_u_dir=$(get_windows_user_dir)
+                    [ -n "$win_u_dir" ] && cp -f "$HOME/.cache/mpv/current_audio_langs.json" "$win_u_dir/.cache/mpv/current_audio_langs.json" 2>/dev/null
+                fi
+            fi
+        fi
         [ -z "$display_title" ] && display_title="$play_target"
     # 4. Search Query (e.g. "q -pb funny cat video" or "q -pb yt lofi hip hop")
     else
@@ -2478,10 +2583,49 @@ cmd_blind_play() {
         [ -z "$display_title" ] && display_title="$search_query"
     fi
 
-    # Display Boxed TUI Header
+    # Multi-Audio Selection Prompt if multiple audio dubs exist
     local blind_lang="en"
     [ -f "$HOME/.config/mpv/queue_lang" ] && blind_lang=$(cat "$HOME/.config/mpv/queue_lang" 2>/dev/null | tr -d '[:space:]')
     [ -z "$blind_lang" ] && blind_lang="en"
+
+    local b_audio_cnt
+    b_audio_cnt=$(echo "$blind_audio_langs_json" | jq 'length // 0' 2>/dev/null)
+    if [ "$b_audio_cnt" -gt 1 ] && [ -t 0 ] && [ -t 1 ]; then
+        print_header_box "${C_PINK}🌐 Multi-Language Audio Available${C_RESET}"
+        print_boxed_line "${C_TEAL}Track:    ${C_CYAN}${display_title:0:$((INNER_WIDTH-12))}${C_RESET}"
+        print_boxed_line "${C_TEAL}Available Audio Languages:${C_RESET}"
+        local b_idx=0
+        declare -a b_langs=()
+        while IFS=$'\t' read -r a_lang a_note; do
+            [ -z "$a_lang" ] && continue
+            ((b_idx++))
+            b_langs+=("$a_lang")
+            local h_name
+            h_name=$(get_human_lang_name "$a_lang")
+            local desc="$h_name"
+            [ -n "$a_note" ] && desc="$desc ($a_note)"
+            local def_tag=""
+            if [ "$a_lang" == "$blind_lang" ]; then
+                def_tag=" ${C_GREEN}★ Active [Default]${C_RESET}"
+            elif [ "$b_idx" -eq 1 ] && [ "$blind_lang" == "en" ]; then
+                def_tag=" ${C_GREEN}★ Default${C_RESET}"
+            fi
+            print_boxed_line "  ${C_ORANGE}${b_idx}.${C_RESET} ${C_WHITE}[${C_PINK}${a_lang}${C_WHITE}] ${desc}${def_tag}"
+        done < <(echo "$blind_audio_langs_json" | jq -r '.[] | "\(.lang)\t\(.note)"')
+        printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
+        B_LINE=${B_LINE// /─}
+        echo -e "${C_PURPLE}${B_LINE}${C_RESET}"
+        echo -ne "${C_PINK}👉 Select audio language [1-${b_idx}] (press ENTER for default): ${C_RESET}"
+        local user_pick=""
+        read -r user_pick || read -r user_pick < /dev/tty 2>/dev/null || true
+        if [[ "$user_pick" =~ ^[0-9]+$ ]] && [ "$user_pick" -ge 1 ] && [ "$user_pick" -le "$b_idx" ]; then
+            blind_lang="${b_langs[$((user_pick - 1))]}"
+        elif [ -n "$user_pick" ]; then
+            local norm
+            norm=$(normalize_lang_code "$user_pick")
+            [ -n "$norm" ] && blind_lang="$norm"
+        fi
+    fi
 
     local blind_audio_fmt=""
     if [ "$blind_lang" == "auto" ]; then
