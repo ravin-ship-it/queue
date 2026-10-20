@@ -141,41 +141,93 @@ local function update_state()
 end
 
 -- =========================================================================
--- 3. Seamless Quality Profiles & Resilient Timestamp Seeking
+-- 3. Audio Language & Quality Profile Engine
 -- =========================================================================
 
--- Prioritize English dubbed audio if available, smoothly falling back to original audio
-local AUDIO_FMT = "(bestaudio[language=en][acodec=opus]/bestaudio[language^=en][acodec=opus]/bestaudio[language=en]/bestaudio[language^=en]/bestaudio[acodec=opus]/bestaudio)"
+local lang_file = home ~= "" and (home .. "/.config/mpv/queue_lang") or nil
+local langs_cache_file = home ~= "" and (home .. "/.cache/mpv/current_audio_langs.json") or nil
+
+local function get_saved_lang()
+    if not lang_file then return "en" end
+    local f = io.open(lang_file, "r")
+    if not f then return "en" end
+    local content = f:read("*a")
+    f:close()
+    if content then
+        local trimmed = content:match("^%s*(.-)%s*$")
+        if trimmed and trimmed ~= "" then return trimmed:lower() end
+    end
+    return "en"
+end
+
+local function save_lang_pref(lang)
+    if not lang_file or not lang then return end
+    local f = io.open(lang_file, "w")
+    if f then
+        f:write(lang .. "\n")
+        f:close()
+    end
+end
+
+local current_lang = get_saved_lang()
+local cached_track_url = ""
+local cached_audio_langs = {}
+
+local function get_lang_label(code)
+    code = (code or "auto"):lower()
+    if code == "en" then return "English"
+    elseif code == "zh" then return "Chinese (中文)"
+    elseif code == "ja" then return "Japanese (日本語)"
+    elseif code == "ko" then return "Korean (한국어)"
+    elseif code == "es" then return "Spanish (Español)"
+    elseif code == "fr" then return "French (Français)"
+    elseif code == "de" then return "German (Deutsch)"
+    elseif code == "ru" then return "Russian (Русский)"
+    elseif code == "hi" then return "Hindi (हिन्दी)"
+    elseif code == "pt" then return "Portuguese (Português)"
+    elseif code == "it" then return "Italian (Italiano)"
+    elseif code == "auto" or code == "orig" or code == "original" then return "Original Audio (Auto)"
+    else return code:upper() end
+end
+
+local function get_audio_format(lang)
+    lang = (lang or current_lang or "en"):lower()
+    if lang == "auto" or lang == "orig" or lang == "original" then
+        return "(bestaudio[acodec=opus]/bestaudio)"
+    end
+    return string.format("(bestaudio[language=%s][acodec=opus]/bestaudio[language^=%s][acodec=opus]/bestaudio[language=%s]/bestaudio[language^=%s]/bestaudio[acodec=opus]/bestaudio)", lang, lang, lang, lang)
+end
+
+local function get_quality_format(tier, lang)
+    tier = (tier or "auto"):lower()
+    local audio_fmt = get_audio_format(lang)
+    if tier == "auto" then
+        return "bestvideo[height<=1080][fps<=60][vcodec^=avc1][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=1080][fps<=60][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=720]+" .. audio_fmt .. "/best"
+    elseif tier == "720" then
+        return "bestvideo[height<=720][fps>=50][vcodec^=avc1][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=720][fps>=50][vcodec^=vp9][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=720]+" .. audio_fmt .. "/best[height<=720]"
+    elseif tier == "1080" then
+        return "bestvideo[height<=1080][fps>=50][vcodec^=avc1][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=1080][fps>=50][vcodec^=vp9][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=1080]+" .. audio_fmt .. "/best[height<=1080]"
+    elseif tier == "1440" then
+        return "bestvideo[height<=1440][fps>=50][vcodec^=avc1][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=1440][fps>=50][vcodec^=vp9][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=1440]+" .. audio_fmt .. "/best[height<=1440]"
+    elseif tier == "4k" then
+        return "bestvideo[fps>=50][vcodec^=avc1][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[fps>=50][vcodec^=vp9][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo+" .. audio_fmt .. "/best"
+    elseif tier == "480" then
+        return "bestvideo[height<=480]+" .. audio_fmt .. "/best[height<=480]"
+    elseif tier == "360" then
+        return "bestvideo[height<=360]+" .. audio_fmt .. "/best[height<=360]"
+    else
+        return "bestvideo[height<=1080]+" .. audio_fmt .. "/best"
+    end
+end
 
 local QUALITY_PROFILES = {
-    ["auto"] = {
-        label = "Auto / Smart 60FPS (Adapts to internet)",
-        fmt = "bestvideo[height<=1080][fps<=60][vcodec^=avc1][format_note!*=Premium]+" .. AUDIO_FMT .. "/bestvideo[height<=1080][fps<=60][format_note!*=Premium]+" .. AUDIO_FMT .. "/bestvideo[height<=720]+" .. AUDIO_FMT .. "/best"
-    },
-    ["720"] = {
-        label = "720p HD (60fps fluid / bandwidth saver)",
-        fmt = "bestvideo[height<=720][fps>=50][vcodec^=avc1][format_note!*=Premium]+" .. AUDIO_FMT .. "/bestvideo[height<=720][fps>=50][vcodec^=vp9][format_note!*=Premium]+" .. AUDIO_FMT .. "/bestvideo[height<=720]+" .. AUDIO_FMT .. "/best[height<=720]"
-    },
-    ["1080"] = {
-        label = "1080p Full HD (60fps crisp)",
-        fmt = "bestvideo[height<=1080][fps>=50][vcodec^=avc1][format_note!*=Premium]+" .. AUDIO_FMT .. "/bestvideo[height<=1080][fps>=50][vcodec^=vp9][format_note!*=Premium]+" .. AUDIO_FMT .. "/bestvideo[height<=1080]+" .. AUDIO_FMT .. "/best[height<=1080]"
-    },
-    ["1440"] = {
-        label = "1440p 2K QHD (60fps ultra-crisp)",
-        fmt = "bestvideo[height<=1440][fps>=50][vcodec^=avc1][format_note!*=Premium]+" .. AUDIO_FMT .. "/bestvideo[height<=1440][fps>=50][vcodec^=vp9][format_note!*=Premium]+" .. AUDIO_FMT .. "/bestvideo[height<=1440]+" .. AUDIO_FMT .. "/best[height<=1440]"
-    },
-    ["4k"] = {
-        label = "Max / 4K UHD (Uncapped highest quality)",
-        fmt = "bestvideo[fps>=50][vcodec^=avc1][format_note!*=Premium]+" .. AUDIO_FMT .. "/bestvideo[fps>=50][vcodec^=vp9][format_note!*=Premium]+" .. AUDIO_FMT .. "/bestvideo+" .. AUDIO_FMT .. "/best"
-    },
-    ["480"] = {
-        label = "480p SD (Low-bandwidth smooth)",
-        fmt = "bestvideo[height<=480]+" .. AUDIO_FMT .. "/best[height<=480]"
-    },
-    ["360"] = {
-        label = "360p Low (Emergency smooth)",
-        fmt = "bestvideo[height<=360]+" .. AUDIO_FMT .. "/best[height<=360]"
-    }
+    ["auto"] = { label = "Auto / Smart 60FPS (Adapts to internet)" },
+    ["720"] = { label = "720p HD (60fps fluid / bandwidth saver)" },
+    ["1080"] = { label = "1080p Full HD (60fps crisp)" },
+    ["1440"] = { label = "1440p 2K QHD (60fps ultra-crisp)" },
+    ["4k"] = { label = "Max / 4K UHD (Uncapped highest quality)" },
+    ["480"] = { label = "480p SD (Low-bandwidth smooth)" },
+    ["360"] = { label = "360p Low (Emergency smooth)" }
 }
 
 local pending_resume_pos = nil
@@ -259,7 +311,8 @@ local function change_quality(target, is_auto_adaptive)
         queue_resume_seek(cur_time)
     end
 
-    mp.set_property("ytdl-format", profile.fmt)
+    local fmt = get_quality_format(target, current_lang)
+    mp.set_property("ytdl-format", fmt)
     mp.commandv("playlist-play-index", "current")
 
     local banner = "Quality: " .. profile.label
@@ -284,6 +337,169 @@ local function change_resolution(fmt, label)
     if label and label ~= "" then
         mp.commandv("show-text", "Quality: " .. label, 2500)
     end
+end
+
+local function change_language(lang, label)
+    if not lang or lang == "" then lang = "auto" end
+    lang = string.lower(lang)
+    current_lang = lang
+    save_lang_pref(lang)
+
+    -- Capture current playback timestamp to seamlessly resume without restarting
+    local cur_time = mp.get_property_number("time-pos")
+    if (not cur_time or cur_time < 1.0) and last_valid_time > 1.0 then
+        cur_time = last_valid_time
+    end
+    if cur_time and cur_time > 1.0 then
+        queue_resume_seek(cur_time)
+    end
+
+    -- 1. Check for native multi-track audio container (MKV / MP4 / local file)
+    local tracks = mp.get_property_native("track-list", {})
+    local local_audio_count = 0
+    local matched_track = nil
+    for _, t in ipairs(tracks) do
+        if t.type == "audio" then
+            local_audio_count = local_audio_count + 1
+            local t_lang = string.lower(t.lang or "")
+            if t_lang == lang or (lang == "auto" and t.default) then
+                matched_track = t
+            end
+        end
+    end
+
+    if local_audio_count > 1 and matched_track then
+        mp.set_property("aid", matched_track.id)
+        local display = label or string.format("[%s] %s", matched_track.lang or "und", matched_track.title or ("Audio Track " .. matched_track.id))
+        mp.commandv("show-text", "🔊 Audio Track: " .. display, 2500)
+        return
+    end
+
+    -- 2. Remote / YouTube DASH stream reload
+    local fmt = get_quality_format(current_tier, current_lang)
+    mp.set_property("ytdl-format", fmt)
+    mp.commandv("playlist-play-index", "current")
+
+    local display = label or string.format("[%s] %s", lang, get_lang_label(lang))
+    mp.commandv("show-text", "🔊 Audio Language: " .. display, 2500)
+end
+
+local function get_available_langs_cached()
+    local path = mp.get_property("path", "")
+    if path == "" then return {} end
+
+    if cached_track_url == path and #cached_audio_langs > 0 then
+        return cached_audio_langs
+    end
+
+    if langs_cache_file then
+        local f = io.open(langs_cache_file, "r")
+        if f then
+            local content = f:read("*a")
+            f:close()
+            if content and content ~= "" then
+                local u = require("mp.utils")
+                local parsed = u.parse_json(content)
+                if parsed and type(parsed) == "table" and #parsed > 0 then
+                    cached_track_url = path
+                    cached_audio_langs = parsed
+                    return cached_audio_langs
+                end
+            end
+        end
+    end
+
+    return {}
+end
+
+local function cycle_audio_language()
+    -- Check local tracks first
+    local tracks = mp.get_property_native("track-list", {})
+    local local_audio_count = 0
+    for _, t in ipairs(tracks) do
+        if t.type == "audio" then local_audio_count = local_audio_count + 1 end
+    end
+
+    if local_audio_count > 1 then
+        mp.commandv("cycle", "audio")
+        local aid = mp.get_property("aid")
+        local alang = mp.get_property("current-tracks/audio/lang") or "und"
+        local atitle = mp.get_property("current-tracks/audio/title") or ""
+        mp.commandv("show-text", string.format("🔊 Audio Track: #%s [%s] %s", tostring(aid), alang, atitle), 2000)
+        return
+    end
+
+    local langs = get_available_langs_cached()
+    if #langs <= 1 then
+        mp.commandv("show-text", "🔊 Audio: Single track (no alternate dubs)", 2000)
+        return
+    end
+
+    local cur_idx = 1
+    for i, item in ipairs(langs) do
+        if item.lang == current_lang then
+            cur_idx = i
+            break
+        end
+    end
+
+    local next_idx = (cur_idx % #langs) + 1
+    local next_item = langs[next_idx]
+    local banner = string.format("[%s] %s (%d/%d)", next_item.lang, (next_item.note ~= "" and next_item.note or get_lang_label(next_item.lang)), next_idx, #langs)
+    change_language(next_item.lang, banner)
+end
+
+local function fetch_stream_languages_async(url)
+    if not url or not (url:match("^http://") or url:match("^https://")) then return end
+    if cached_track_url == url and #cached_audio_langs > 0 then return end
+
+    local ytdl = "yt-dlp"
+    local raw_h = os.getenv("USERPROFILE") or ""
+    if raw_h ~= "" and (raw_h:find("^[a-zA-Z]:") ~= nil) then
+        local w_ytdl = home .. "/AppData/Local/Microsoft/WinGet/Packages/yt-dlp.yt-dlp_Microsoft.Winget.Source_8wekyb3d8bbwe/yt-dlp.exe"
+        local f = io.open(w_ytdl, "r")
+        if f then f:close(); ytdl = w_ytdl end
+    end
+
+    mp.command_native_async({
+        name = "subprocess",
+        args = { ytdl, "--dump-json", "--skip-download", "--flat-playlist", "--no-warnings", url },
+        capture_stdout = true,
+        playback_only = false
+    }, function(success, res)
+        if success and res and res.status == 0 and res.stdout and res.stdout ~= "" then
+            local u = require("mp.utils")
+            local d = u.parse_json(res.stdout)
+            if d and d.formats then
+                local found = {}
+                local list = {}
+                for _, fmt in ipairs(d.formats) do
+                    if fmt.vcodec == "none" and fmt.acodec and fmt.acodec ~= "none" then
+                        local l = fmt.language or "default"
+                        if not found[l] then
+                            found[l] = true
+                            table.insert(list, {
+                                lang = l,
+                                note = fmt.format_note or ""
+                            })
+                        end
+                    end
+                end
+                if #list > 0 then
+                    cached_track_url = url
+                    cached_audio_langs = list
+                    if langs_cache_file then
+                        local out_json = u.format_json(list)
+                        local fw = io.open(langs_cache_file, "w")
+                        if fw then
+                            fw:write(out_json .. "\n")
+                            fw:close()
+                        end
+                    end
+                end
+            end
+        end
+    end)
 end
 
 -- =========================================================================
@@ -487,8 +703,16 @@ end
 -- 6. Event Registrations & Script Messages
 -- =========================================================================
 
+local function on_file_loaded()
+    do_resume_seek()
+    local path = mp.get_property("path", "")
+    if path and path ~= "" then
+        fetch_stream_languages_async(path)
+    end
+end
+
 mp.register_event("end-file", on_file_end)
-mp.register_event("file-loaded", do_resume_seek)
+mp.register_event("file-loaded", on_file_loaded)
 mp.register_event("playback-restart", do_resume_seek)
 mp.observe_property("shuffle", "bool", on_shuffle_change)
 mp.observe_property("window-minimized", "bool", update_state)
@@ -501,6 +725,8 @@ mp.register_script_message("safe-hide-video", safe_hide)
 mp.register_script_message("safe-show-video", safe_show)
 mp.register_script_message("change-quality", function(target) change_quality(target, false) end)
 mp.register_script_message("change-resolution", change_resolution)
+mp.register_script_message("change-language", function(target) change_language(target) end)
+mp.register_script_message("cycle-language", cycle_audio_language)
 mp.register_script_message("smart-next", function() smart_next(false) end)
 mp.register_script_message("smart-prev", smart_prev)
 
@@ -508,6 +734,11 @@ mp.register_script_message("smart-prev", smart_prev)
 mp.add_key_binding(">", "smart_next_key", function() smart_next(false) end)
 mp.add_key_binding("ENTER", "smart_next_enter", function() smart_next(false) end)
 mp.add_key_binding("<", "smart_prev_key", smart_prev)
+
+-- Audio Language & Track Keybindings (YouTube Multi-Dub & Multi-Track)
+mp.add_key_binding("a", "cycle_audio_a", cycle_audio_language)
+mp.add_key_binding("A", "cycle_audio_A", cycle_audio_language)
+mp.add_key_binding("#", "cycle_audio_hash", cycle_audio_language)
 
 -- Fullscreen Hotkeys (F11, f, ESC)
 mp.add_key_binding("F11", "toggle_fullscreen_f11", function()

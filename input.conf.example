@@ -33,5 +33,10 @@ Ctrl+WHEEL_DOWN add window-scale -0.05 ; show-text "Window Scale: ${window-scale
 3 script-message change-quality 1440
 4 script-message change-quality 4k
 
+# Audio Language Switcher (YouTube Multi-Audio Dubs & Multi-Track Audio)
+a script-message cycle-language
+A script-message cycle-language
+# script-message cycle-language
+
 Ctrl+s cycle shuffle
 r playlist-shuffle

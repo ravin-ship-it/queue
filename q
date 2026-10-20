@@ -142,7 +142,7 @@ fi
 # --- Command Parsing ---
 
 PROCESSED_ANY_FLAG=false
-SMART_CMDS="^(play|pause|stop|next|prev|vol|info|list|clear|shuffle|remove|move|swap|help|save|load|auto|fx|deps|up|install|setup|uninstall|remove-setup|pb|blind|download|dl|d|dislike|dis|disl|rmd|undis|undislike|like|vid|video|watch|version|ver|res|quality|hybrid|hy)$"
+SMART_CMDS="^(play|pause|stop|next|prev|vol|info|list|clear|shuffle|remove|move|swap|help|save|load|auto|fx|deps|up|install|setup|uninstall|remove-setup|pb|blind|download|dl|d|dislike|dis|disl|rmd|undis|undislike|like|vid|video|watch|version|ver|res|quality|hybrid|hy|lang|audio)$"
 
 while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
     PROCESSED_ANY_FLAG=true
@@ -183,6 +183,7 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
             version|ver) CMD="-version" ;;
             res|quality) CMD="-res" ;;
             hybrid|hy) CMD="-hybrid" ;;
+            lang|audio) CMD="-lang" ;;
         esac
     fi
 
@@ -505,6 +506,15 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
                 shift
             else
                 cmd_resolution ""
+            fi
+            ;;
+        -lang|--lang|-audio|--audio)
+            shift
+            if [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]] && [[ ! "$1" =~ $SMART_CMDS ]]; then
+                cmd_language "$1"
+                shift
+            else
+                cmd_language ""
             fi
             ;;
         -hybrid|--hybrid)

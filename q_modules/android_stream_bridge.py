@@ -25,6 +25,7 @@ PORT_FILE = os.path.join(CACHE_DIR, "android_bridge.port")
 CACHE_FILE = os.path.join(CACHE_DIR, "android_stream_cache.json")
 TITLES_FILE = os.path.join(CACHE_DIR, "titles.txt")
 RES_FILE = os.path.join(CONFIG_DIR, "queue_res")
+LANG_FILE = os.path.join(CONFIG_DIR, "queue_lang")
 DEFAULT_SOCKET = os.path.join(HOME, ".mpv-socket")
 LAST_PLAYLIST_FILE = os.path.join(CACHE_DIR, "last_playlist.txt")
 
@@ -46,12 +47,32 @@ def get_configured_resolution():
             pass
     return "1080"
 
-def get_ytdl_format(res_pref=None):
-    """Generate optimal yt-dlp format string based on target resolution."""
+def get_configured_language():
+    """Retrieve saved language preference from ~/.config/mpv/queue_lang."""
+    if os.path.exists(LANG_FILE):
+        try:
+            with open(LANG_FILE, "r", encoding="utf-8") as f:
+                content = f.read().strip().lower()
+                if content:
+                    return content
+        except Exception:
+            pass
+    return "en"
+
+def get_audio_selection(lang_pref=None):
+    if not lang_pref:
+        lang_pref = get_configured_language()
+    lang_pref = lang_pref.lower()
+    if lang_pref in ("auto", "orig", "original"):
+        return "(bestaudio[acodec=opus]/bestaudio)"
+    return f"(bestaudio[language={lang_pref}][acodec=opus]/bestaudio[language^={lang_pref}]/bestaudio[language={lang_pref}]/bestaudio[language^={lang_pref}]/bestaudio[acodec=opus]/bestaudio)"
+
+def get_ytdl_format(res_pref=None, lang_pref=None):
+    """Generate optimal yt-dlp format string based on target resolution and language."""
     if not res_pref:
         res_pref = get_configured_resolution()
     res_pref = res_pref.lower()
-    audio_sel = "(bestaudio[language=en][acodec=opus]/bestaudio[language^=en]/bestaudio[acodec=opus]/bestaudio)"
+    audio_sel = get_audio_selection(lang_pref)
     if res_pref in ("720", "720p", "hd"):
         return f"bestvideo[height<=720]+{audio_sel}/best[height<=720]/best"
     elif res_pref in ("1080", "1080p", "fhd"):

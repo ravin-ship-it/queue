@@ -580,6 +580,7 @@ show_help() {
     print_boxed_line "  -i [N|url]      Metadata & Track Inspector (Synced Resolution)"
     print_boxed_line "  -vid [sz|N]     Toggle Desktop Video Window ${C_GRAY}(small|med|large|F11)${C_RESET}"
     print_boxed_line "  -res [val]      Set/Check Video Quality ${C_GRAY}(720|1080|1440|4k|auto)${C_RESET}"
+    print_boxed_line "  -lang [code]    Set/Inspect Audio Language & Dubs ${C_GRAY}(en|zh|ja|auto)${C_RESET}"
     if [ "$IS_ANDROID" = true ]; then
         print_boxed_line "  -hybrid [o|off] Toggle Dual-Engine: Standalone (Termux Audio) vs Hybrid (MPV App)"
     else
