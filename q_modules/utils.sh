@@ -370,15 +370,21 @@ hwdec=auto-safe
 ao=wasapi
 audio-channels=stereo
 
-# Smooth Caching & Performance
+# Smooth Caching & Performance (Resilient against internet fluctuations)
+network-timeout=30
+stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5
 cache=yes
+cache-secs=180
+cache-pause=yes
+cache-pause-wait=2
+cache-pause-initial=yes
 demuxer-max-bytes=256MiB
 demuxer-max-back-bytes=64MiB
 demuxer-readahead-secs=60
 
-# YouTube / Streaming
+# YouTube / Streaming (Smart Adaptive default)
 ytdl=yes
-ytdl-format=bestvideo[height<=1440][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080]+bestaudio[acodec=opus]/bestvideo[height<=1080]+bestaudio/bestvideo[height<=720]+bestaudio/bestvideo+bestaudio/best
+ytdl-format=bestvideo[height<=1080][fps<=60][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps<=60][format_note!*=Premium]+bestaudio/bestvideo[height<=720]+bestaudio/best
 script-opts=ytdl_hook-ytdl_path=yt-dlp
 ytdl-raw-options=extractor-args="youtube:player_client=visionos,android,web"
 tls-verify=no
@@ -600,6 +606,11 @@ vo=gpu-next
 audio-channels=stereo
 
 # Network caching & fast playback start buffer
+network-timeout=30
+cache=yes
+cache-secs=120
+cache-pause=yes
+cache-pause-wait=2
 demuxer-max-bytes=128MiB
 demuxer-readahead-secs=30
 
@@ -847,9 +858,9 @@ ensure_mpv_running() {
     # Enforce silent background mode on Android if Hybrid Mode is active
     if [ "$IS_ANDROID" = true ] && [ "$MPV_RUNNING" = true ] && [ -S "$SOCKET" ]; then
         if [ "$(get_queue_mode)" == "hybrid" ]; then
-            echo '{"command":["set_property","mute",true]}' | nc $NC_OPTS -w 0.5 "$SOCKET" >/dev/null 2>&1
-            echo '{"command":["set_property","ao","null"]}' | nc $NC_OPTS -w 0.5 "$SOCKET" >/dev/null 2>&1
-            echo '{"command":["set_property","pause",true]}' | nc $NC_OPTS -w 0.5 "$SOCKET" >/dev/null 2>&1
+            echo '{"command":["set_property","mute",true]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+            echo '{"command":["set_property","ao","null"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+            echo '{"command":["set_property","pause",true]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
         fi
     fi
 }

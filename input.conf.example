@@ -26,13 +26,12 @@ _ add window-scale -0.05 ; show-text "Window Scale: ${window-scale}" 1500
 Ctrl+WHEEL_UP add window-scale 0.05 ; show-text "Window Scale: ${window-scale}" 1500
 Ctrl+WHEEL_DOWN add window-scale -0.05 ; show-text "Window Scale: ${window-scale}" 1500
 
-# Quick Quality / Resolution Switchers (AVC1/VP9 60 FPS Prioritized + Opus Audio)
-0 set ytdl-format "bestvideo[height<=1440][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo+bestaudio/best" ; playlist-play-index current ; show-text "Quality: Auto / Smart 60FPS" 2500
-1 set ytdl-format "bestvideo[height<=720][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=720][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720]+bestaudio/best[height<=720]" ; playlist-play-index current ; show-text "Quality: 720p HD (60fps)" 2500
-2 set ytdl-format "bestvideo[height<=1080][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=1080][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080]+bestaudio/best" ; playlist-play-index current ; show-text "Quality: 1080p Full HD (60fps)" 2500
-3 set ytdl-format "bestvideo[height<=1440][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][fps>=50][format_note!*=Premium]+bestaudio/bestvideo[height<=1440][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440]+bestaudio/best" ; playlist-play-index current ; show-text "Quality: 1440p 2K QHD (60fps)" 2500
-4 set ytdl-format "bestvideo[fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo+bestaudio/best" ; playlist-play-index current ; show-text "Quality: Max / 4K UHD" 2500
+# Quick Quality / Resolution Switchers (Seamless position memory & smart adaptive)
+0 script-message change-quality auto
+1 script-message change-quality 720
+2 script-message change-quality 1080
+3 script-message change-quality 1440
+4 script-message change-quality 4k
 
 Ctrl+s cycle shuffle
 r playlist-shuffle
-

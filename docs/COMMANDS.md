@@ -112,21 +112,32 @@ q -vid large
 * `ESC`: Exit fullscreen
 * `w` / `W`: Cycle window presets (Small 480p ➔ Medium 720p ➔ Large 1080p)
 * `+` / `-`: Scale window size up or down by 5%
-* `0` - `4`: Quick quality presets (Auto, 480p, 720p, 1080p, 1440p/4K)
+* `0`: Auto / Smart Adaptive (YouTube-like ABR with automatic buffer downshift)
+* `1`: 720p HD (60 FPS fluid / bandwidth saver)
+* `2`: 1080p Full HD (60 FPS crisp)
+* `3`: 1440p 2K QHD (60 FPS ultra-crisp)
+* `4`: Max / 4K UHD (Uncapped highest quality)
 * `q`: Hide video window and return smoothly to background audio mode
 
-### Video Resolution Control (`q -res`)
+### Video Resolution & Adaptive Network Engine (`q -res`)
 ```bash
 # View active video resolution and format selector
 q -res
 
-# Set target resolution cap
-q -res 720    # 720p HD
-q -res 1080   # 1080p Full HD (60 FPS prioritized)
-q -res 1440   # 2K Quad HD
-q -res 4k     # 4K Ultra HD
-q -res auto   # Best available
+# Set target resolution cap (seamless position memory: never restarts from 0:00)
+q -res 720    # 720p HD (Fluid 60 FPS / bandwidth saver)
+q -res 1080   # 1080p Full HD (Crisp 60 FPS)
+q -res 1440   # 2K Quad HD (Ultra-crisp)
+q -res 4k     # 4K Ultra HD (Uncapped)
+q -res 480    # 480p SD (Low-bandwidth smooth)
+q -res 360    # 360p Low (Emergency smooth)
+q -res auto   # Smart Adaptive (Adapts dynamically to network fluctuations)
 ```
+
+#### 🧠 YouTube-like Smart Adaptive Bitrate (ABR):
+* **Buffer Underrun Detection**: When in `auto` mode, Queue continuously monitors player cache and buffer health. If your internet fluctuates or starves the buffer, Queue automatically downshifts to a lighter resolution (e.g., 1080p -> 720p -> 480p) without stopping playback.
+* **Seamless Position Memory**: Any resolution switch (via keypress `0-4` or `q -res`) preserves your exact timestamp down to the second.
+* **Anti-Suicide Network Safeguard**: If your internet drops completely, MPV normally skips and "suicides" through your entire playlist. Queue's network safeguard immediately freezes playback, holds your place at the exact second, probes for internet in the background, and automatically resumes playback as soon as your connection restores.
 
 ---
 

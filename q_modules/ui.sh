@@ -428,9 +428,12 @@ cmd_update_ytdlp() {
     # 3. Mode-Specific & Host Re-Synchronization
     print_boxed_line "${C_BOLD}${C_CYAN}📦 [3/3] Synchronizing Environment & Engine Profiles...${C_RESET}"
 
-    # Sync scripts to user config
+    # Sync scripts and configs to user config
     if [ -f "$dest_dir/scripts/queue_video.lua" ]; then
         cp -f "$dest_dir/scripts/queue_video.lua" "$HOME/.config/mpv/scripts/queue_video.lua" 2>/dev/null || true
+    fi
+    if [ -f "$dest_dir/input.conf.example" ]; then
+        cp -f "$dest_dir/input.conf.example" "$HOME/.config/mpv/input.conf" 2>/dev/null || true
     fi
 
     # Windows WSL2 Hybrid Sync
@@ -440,7 +443,7 @@ cmd_update_ytdlp() {
             local win_mpv_dir="$win_u_dir/AppData/Roaming/mpv"
             mkdir -p "$win_mpv_dir/scripts" 2>/dev/null
             cp -f "$dest_dir/scripts/queue_video.lua" "$win_mpv_dir/scripts/queue_video.lua" 2>/dev/null || true
-            if [ -f "$dest_dir/input.conf.example" ] && [ ! -f "$win_mpv_dir/input.conf" ]; then
+            if [ -f "$dest_dir/input.conf.example" ]; then
                 cp -f "$dest_dir/input.conf.example" "$win_mpv_dir/input.conf" 2>/dev/null || true
             fi
             # Recompile PipeRelay if needed

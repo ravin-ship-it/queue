@@ -59,8 +59,12 @@ def get_ytdl_format(res_pref=None):
         return "bestvideo[height<=1440]+bestaudio/best[height<=1440]/best"
     elif res_pref in ("2160", "2160p", "4k", "uhd", "max"):
         return "bestvideo+bestaudio/best"
-    else:  # auto / smart 60fps
-        return "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
+    elif res_pref in ("480", "480p", "sd"):
+        return "bestvideo[height<=480]+bestaudio/best[height<=480]/best"
+    elif res_pref in ("360", "360p", "low"):
+        return "bestvideo[height<=360]+bestaudio/best[height<=360]/best"
+    else:  # auto / smart adaptive
+        return "bestvideo[height<=1080][fps<=60]+bestaudio/bestvideo[height<=720]+bestaudio/best"
 
 def load_persistent_cache():
     global stream_cache

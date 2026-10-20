@@ -210,7 +210,7 @@ wait_for_playback_start() {
     # Wait for playback start (Buffering)
     echo -ne "${C_GRAY}⏳ Buffering...${C_RESET}\r"
     for w in {1..80}; do
-        local raw=$(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","time-pos"]}\n{"command":["get_property","playlist-pos"]}\n{"command":["get_property","pause"]}' | nc $NC_OPTS -w 0.5 "$SOCKET" 2>/dev/null | jq -s -j -r 'map(select(.event == null)) | (.[0].data // 0), "\t", (.[1].data // "false"), "\t", (.[2].data // ""), "\t", (if .[3].data == null then -1 else .[3].data end), "\t", (.[4].data // "false")')
+        local raw=$(echo -e '{"command":["get_property","playlist-count"]}\n{"command":["get_property","idle-active"]}\n{"command":["get_property","time-pos"]}\n{"command":["get_property","playlist-pos"]}\n{"command":["get_property","pause"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r 'map(select(.event == null)) | (.[0].data // 0), "\t", (.[1].data // "false"), "\t", (.[2].data // ""), "\t", (if .[3].data == null then -1 else .[3].data end), "\t", (.[4].data // "false")')
         [ -z "$raw" ] && { sleep 0.1; continue; }
         IFS=$'\t' read -r count idle tpos pos paused <<< "$raw"
         
@@ -304,7 +304,7 @@ format_track_log() {
     
     # Fallback: fetch live duration from mpv if cache miss
     if { [ -z "$cached_duration" ] || [ "$cached_duration" == "null" ] || [ "$cached_duration" == "0:00" ]; } && [ -S "$SOCKET" ]; then
-        local raw_mpv_dur=$(echo '{"command":["get_property","duration"]}' | nc $NC_OPTS -w 0.5 "$SOCKET" 2>/dev/null | jq -r '.data // empty')
+        local raw_mpv_dur=$(echo '{"command":["get_property","duration"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // empty')
         if [ -n "$raw_mpv_dur" ] && [[ "$raw_mpv_dur" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
             local dur_secs=${raw_mpv_dur%.*}
             if [ "$dur_secs" -ge 3600 ]; then
@@ -796,9 +796,9 @@ cmd_android_video_handoff() {
     if [ "$(get_queue_mode)" == "hybrid" ]; then
         # In Hybrid Mode, MPV Android is the sole audio & video player; Termux MPV must stay paused and silent
         if [ "$MPV_RUNNING" = true ] && [ -S "$SOCKET" ]; then
-            echo '{"command":["set_property","pause",true]}' | nc $NC_OPTS -w 0.5 "$SOCKET" >/dev/null 2>&1
-            echo '{"command":["set_property","mute",true]}' | nc $NC_OPTS -w 0.5 "$SOCKET" >/dev/null 2>&1
-            echo '{"command":["set_property","ao","null"]}' | nc $NC_OPTS -w 0.5 "$SOCKET" >/dev/null 2>&1
+            echo '{"command":["set_property","pause",true]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+            echo '{"command":["set_property","mute",true]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+            echo '{"command":["set_property","ao","null"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
         fi
     else
         # Standalone Mode: Toggle OFF if video was active and no new target index was requested
@@ -1145,11 +1145,11 @@ cmd_video_toggle() {
     local hotkey_3="bestvideo[height<=1440][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][fps>=50]+bestaudio/bestvideo[height<=1440]+bestaudio[acodec=opus]/bestvideo[height<=1440]+bestaudio/best"
     local hotkey_4="bestvideo[fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo+bestaudio[acodec=opus]/bestvideo+bestaudio/best"
 
-    batch_keys+="{\"command\":[\"keybind\",\"0\",\"script-message change-resolution \\\"$hotkey_0\\\" \\\"Auto / Smart 60FPS\\\"\"]}\n"
-    batch_keys+="{\"command\":[\"keybind\",\"1\",\"script-message change-resolution \\\"$hotkey_1\\\" \\\"720p HD (60fps)\\\"\"]}\n"
-    batch_keys+="{\"command\":[\"keybind\",\"2\",\"script-message change-resolution \\\"$hotkey_2\\\" \\\"1080p Full HD (60fps)\\\"\"]}\n"
-    batch_keys+="{\"command\":[\"keybind\",\"3\",\"script-message change-resolution \\\"$hotkey_3\\\" \\\"1440p 2K QHD (60fps)\\\"\"]}\n"
-    batch_keys+="{\"command\":[\"keybind\",\"4\",\"script-message change-resolution \\\"$hotkey_4\\\" \\\"Max / 4K UHD\\\"\"]}\n"
+    batch_keys+="{\"command\":[\"keybind\",\"0\",\"script-message change-quality auto\"]}\n"
+    batch_keys+="{\"command\":[\"keybind\",\"1\",\"script-message change-quality 720\"]}\n"
+    batch_keys+="{\"command\":[\"keybind\",\"2\",\"script-message change-quality 1080\"]}\n"
+    batch_keys+="{\"command\":[\"keybind\",\"3\",\"script-message change-quality 1440\"]}\n"
+    batch_keys+="{\"command\":[\"keybind\",\"4\",\"script-message change-quality 4k\"]}\n"
     echo -e "$batch_keys" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1 || true
 
     local target_autofit="50%x50%"
@@ -1364,9 +1364,9 @@ cmd_hybrid_toggle() {
 
                 # In Hybrid Mode, Termux MPV must stay paused and silent
                 if [ "$MPV_RUNNING" = true ] && [ -S "$SOCKET" ]; then
-                    echo '{"command":["set_property","pause",true]}' | nc $NC_OPTS -w 0.5 "$SOCKET" >/dev/null 2>&1
-                    echo '{"command":["set_property","mute",true]}' | nc $NC_OPTS -w 0.5 "$SOCKET" >/dev/null 2>&1
-                    echo '{"command":["set_property","ao","null"]}' | nc $NC_OPTS -w 0.5 "$SOCKET" >/dev/null 2>&1
+                    echo '{"command":["set_property","pause",true]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+                    echo '{"command":["set_property","mute",true]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+                    echo '{"command":["set_property","ao","null"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
                     echo -e "${C_PINK}🔄 Migrating active playback to Play Store MPV Android...${C_RESET}"
                     cmd_android_video_handoff ""
                 fi
@@ -1382,8 +1382,8 @@ cmd_hybrid_toggle() {
                 send_android_mpv_cmd "pause"
                 rm -f "$HOME/.cache/mpv/android_video_active"
                 if [ "$MPV_RUNNING" = true ] && [ -S "$SOCKET" ]; then
-                    echo '{"command":["set_property","mute",false]}' | nc $NC_OPTS -w 0.5 "$SOCKET" >/dev/null 2>&1
-                    echo '{"command":["set_property","ao","opensles,pulse,alsa"]}' | nc $NC_OPTS -w 0.5 "$SOCKET" >/dev/null 2>&1
+                    echo '{"command":["set_property","mute",false]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+                    echo '{"command":["set_property","ao","opensles,pulse,alsa"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
                     echo '{"command":["set_property","pause",false]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
                     echo -e "🎧 ${C_PINK}Resumed background audio in Termux MPV${C_RESET}"
                 fi
@@ -1570,10 +1570,20 @@ cmd_resolution() {
             ytdl_fmt="bestvideo[fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo+bestaudio[acodec=opus]/bestvideo+bestaudio/best"
             label="Max / 4K UHD (Uncapped highest quality)"
             ;;
+        480|480p|sd)
+            clean_target="480"
+            ytdl_fmt="bestvideo[height<=480]+bestaudio/best[height<=480]/best"
+            label="480p SD (Low-bandwidth smooth)"
+            ;;
+        360|360p|low)
+            clean_target="360"
+            ytdl_fmt="bestvideo[height<=360]+bestaudio/best[height<=360]/best"
+            label="360p Low (Emergency smooth)"
+            ;;
         auto|smart)
             clean_target="auto"
-            ytdl_fmt="bestvideo[height<=1440][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080]+bestaudio[acodec=opus]/bestvideo[height<=1080]+bestaudio/bestvideo[height<=720]+bestaudio/bestvideo+bestaudio/best"
-            label="Auto / Smart 60FPS (Adapts to internet, max 1440p60, never blurry)"
+            ytdl_fmt="bestvideo[height<=1080][fps<=60][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps<=60][format_note!*=Premium]+bestaudio/bestvideo[height<=720]+bestaudio/best"
+            label="Auto / Smart 60FPS (Adapts to internet, downshifts on buffer underrun)"
             ;;
         "")
             # Query / Show active resolution status
@@ -1586,7 +1596,9 @@ cmd_resolution() {
                     1080|1080p) res_desc="1080p Full HD (60 FPS crisp)" ;;
                     1440|1440p|2k) res_desc="1440p 2K QHD (60 FPS ultra-crisp)" ;;
                     4k|2160|max) res_desc="4K UHD (Uncapped highest quality)" ;;
-                    auto) res_desc="Auto / Smart 60FPS (max 1440p60)" ;;
+                    480|480p) res_desc="480p SD (Low-bandwidth smooth)" ;;
+                    360|360p) res_desc="360p Low (Emergency smooth)" ;;
+                    auto) res_desc="Auto / Smart 60FPS (Adapts to internet)" ;;
                 esac
                 echo -e "╭─────────────────────────────────────────────────────────────────────────╮"
                 echo -e "│ 📱 ${C_PURPLE}Queue Video Quality Profile (Android Mobile)${C_RESET}                          │"
@@ -1601,7 +1613,7 @@ cmd_resolution() {
             fi
 
             # Desktop Status
-            if [ -S "$SOCKET" ] && echo '{"command":["get_property","idle-active"]}' | nc $NC_OPTS -w 0.5 "$SOCKET" >/dev/null 2>&1; then
+            if [ -S "$SOCKET" ] && echo '{"command":["get_property","idle-active"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1; then
                 local cur_w cur_h cur_fps cur_codec
                 local res_info
                 res_info=$(echo -e '{"command":["get_property","video-params"]}\n{"command":["get_property","track-list"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
@@ -1629,7 +1641,7 @@ cmd_resolution() {
             return 0
             ;;
         *)
-            echo -e "${C_PINK}❓ Unknown resolution: '$target'. Use: 720, 1080, 1440, 4k, or auto.${C_RESET}"
+            echo -e "${C_PINK}❓ Unknown resolution: '$target'. Use: 720, 1080, 1440, 4k, 480, 360, or auto.${C_RESET}"
             return 1
             ;;
     esac
@@ -1648,13 +1660,24 @@ cmd_resolution() {
             local bridge_port
             bridge_port=$(ensure_android_bridge_running)
             local cur_pos=0
+            local cur_time=0
             if [ -S "$SOCKET" ]; then
-                cur_pos=$(echo '{"command":["get_property","playlist-pos"]}' | nc $NC_OPTS -w 0.5 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
+                cur_pos=$(echo '{"command":["get_property","playlist-pos"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
+                cur_time=$(echo '{"command":["get_property","time-pos"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
             fi
             [[ ! "$cur_pos" =~ ^[0-9]+$ ]] && cur_pos=0
             if [ -n "$bridge_port" ]; then
                 send_android_mpv_cmd "loadfile http://127.0.0.1:${bridge_port}/track/${cur_pos}.edl replace"
-                echo -e "${C_GRAY}   Reloaded active video in MPV Android with fresh high-definition stream.${C_RESET}"
+                if [ -n "$cur_time" ] && [[ "$cur_time" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+                    local cur_int="${cur_time%.*}"
+                    if [ "$cur_int" -ge 2 ]; then
+                        (
+                            sleep 0.8
+                            send_android_mpv_cmd "seek $cur_time absolute"
+                        ) & disown
+                    fi
+                fi
+                echo -e "${C_GRAY}   Reloaded active video in MPV Android with fresh stream (playback position preserved).${C_RESET}"
             fi
         else
             echo -e "${C_GRAY}   Profile saved. Will be applied automatically on playback in MPV Android.${C_RESET}"
@@ -1663,7 +1686,7 @@ cmd_resolution() {
     fi
 
     # Desktop Player (Linux / WSL2)
-    if [ ! -S "$SOCKET" ] || ! (echo '{"command":["get_property","idle-active"]}' | nc $NC_OPTS -w 0.5 "$SOCKET" >/dev/null 2>&1); then
+    if [ ! -S "$SOCKET" ] || ! (echo '{"command":["get_property","idle-active"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1); then
         echo -e "${C_CYAN}📺 Video Quality set to:${C_RESET} ${C_PINK}${label}${C_RESET}"
         echo -e "${C_GRAY}   Default profile saved. Will be applied automatically on next playback.${C_RESET}"
         return 0
@@ -1673,25 +1696,18 @@ cmd_resolution() {
     local cur_time
     cur_time=$(echo '{"command":["get_property","time-pos"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // empty' 2>/dev/null)
 
-    # Use queue_video.lua handler (zero-restart position resume via playback-restart event)
-    local res_resp
-    res_resp=$(echo "{\"command\":[\"script-message\",\"change-resolution\",\"$ytdl_fmt\",\"$label\"]}" | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
+    # Use queue_video.lua handler (zero-restart position resume via playback-restart / file-loaded events)
+    echo "{\"command\":[\"script-message\",\"change-quality\",\"$clean_target\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    echo "{\"command\":[\"script-message\",\"change-resolution\",\"$ytdl_fmt\",\"$label\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
 
-    # Fallback ONLY if script-message was not handled (prevents duplicate reload restarting track from 0:00)
-    if ! echo "$res_resp" | grep -q '"error":"success"'; then
-        echo "{\"command\":[\"set_property\",\"ytdl-format\",\"$ytdl_fmt\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-        echo '{"command":["playlist-play-index","current"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-        echo "{\"command\":[\"show-text\",\"Quality: $label\",2500]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-
-        # Detached seek watcher guarantees position restoration across any engine or script state
-        if [ -n "$cur_time" ] && [[ "$cur_time" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-            local cur_int="${cur_time%.*}"
-            if [ "$cur_int" -ge 2 ]; then
-                (
-                    wait_for_playback_start >/dev/null 2>&1
-                    echo "{\"command\":[\"seek\",$cur_time,\"absolute+exact\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-                ) & disown
-            fi
+    # Detached seek watcher fallback guarantees position restoration across any engine or script state
+    if [ -n "$cur_time" ] && [[ "$cur_time" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+        local cur_int="${cur_time%.*}"
+        if [ "$cur_int" -ge 2 ]; then
+            (
+                wait_for_playback_start >/dev/null 2>&1
+                echo "{\"command\":[\"seek\",$cur_time,\"absolute\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+            ) & disown
         fi
     fi
 
@@ -2014,7 +2030,7 @@ cmd_play() {
                     
                     # Check if stream timed out during long pause (e.g. 50 mins idle/EOF)
                     sleep 0.2
-                    local check_idle=$(echo '{"command":["get_property","idle-active"]}' | nc $NC_OPTS -w 0.5 "$SOCKET" 2>/dev/null | jq -r '.data // false')
+                    local check_idle=$(echo '{"command":["get_property","idle-active"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // false')
                     if [ "$check_idle" == "true" ] && [ "$cur_pos" -ge 0 ] 2>/dev/null; then
                         # Stream connection dropped/expired! Force reload current track index with fresh token
                         echo "{\"command\":[\"playlist-play-index\",$cur_pos]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1

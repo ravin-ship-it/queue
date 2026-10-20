@@ -67,8 +67,15 @@ local function check_and_execute_cmd()
     end
 end
 
--- Natural EOF Shuffle Handler for Android MPV
+-- Natural EOF & Network Failure Protection for Android MPV
 local function on_android_file_end(event)
+    if event.reason == "error" then
+        -- Freeze playback on network/stream errors to prevent rapid skipping suicide
+        mp.set_property_bool("pause", true)
+        mp.commandv("show-text", "⚠️ Stream Error / Network Issue: Playback paused to prevent track skipping.", 5000)
+        return
+    end
+
     if event.reason ~= "eof" then return end
     local lf = mp.get_property("loop-file", "no")
     if lf ~= "no" and lf ~= "false" then return end

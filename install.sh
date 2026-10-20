@@ -410,8 +410,10 @@ EOF
     win_mpv_dir="$win_dir/AppData/Roaming/mpv"
     mkdir -p "$win_mpv_dir/scripts" 2>/dev/null
     cp -rf "$REPO_DIR"/scripts/*.lua "$win_mpv_dir/scripts/" 2>/dev/null || true
-    if [ ! -f "$win_mpv_dir/mpv.conf" ] && [ -f "$SCRIPT_DIR/mpv.conf.example" ]; then
-        cp "$SCRIPT_DIR/mpv.conf.example" "$win_mpv_dir/mpv.conf" 2>/dev/null
+    if [ -f "$REPO_DIR/mpv.conf.example" ]; then
+        if [ ! -f "$win_mpv_dir/mpv.conf" ] || grep -q "cache-pause=no" "$win_mpv_dir/mpv.conf" 2>/dev/null; then
+            cp -f "$REPO_DIR/mpv.conf.example" "$win_mpv_dir/mpv.conf" 2>/dev/null
+        fi
     fi
     if [ -f "$REPO_DIR/input.conf.example" ]; then
         cp -f "$REPO_DIR/input.conf.example" "$win_mpv_dir/input.conf" 2>/dev/null
