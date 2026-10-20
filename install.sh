@@ -338,13 +338,17 @@ if [ "$IS_WSL" = true ]; then
             echo "standalone" > "$HOME/.config/mpv/queue_mode"
             echo -e "${CYAN}🐧 Standalone WSL Mode set as active default!${NC}"
         else
+            if [ -f "$HOME/.config/mpv/queue_mode" ]; then
+                current_saved_mode=$(cat "$HOME/.config/mpv/queue_mode" 2>/dev/null | tr -d '[:space:]')
+                echo -e "   Active mode preserved: ${GREEN}${current_saved_mode}${NC}"
+            fi
             echo -e "   👉 You can toggle between engines anytime with: ${CYAN}q -hybrid on${NC} or ${CYAN}q -hybrid off${NC}"
         fi
     else
         echo -e "${YELLOW}ℹ️  Native Windows MPV is not yet installed on Windows host.${NC}"
         echo -e "   Standalone Mode is active and ready to play up to 60 FPS in WSLg."
         
-        local install_win_choice="n"
+        install_win_choice="n"
         if [ "$ENABLE_HYBRID" = true ] || [ "$AUTO_YES" = true ]; then
             install_win_choice="y"
         elif cmd.exe /c "where winget" </dev/null >/dev/null 2>&1; then
