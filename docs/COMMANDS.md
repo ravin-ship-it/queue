@@ -55,6 +55,7 @@ q ~/Music/Albums/
 | Command | Alias | Description |
 | :--- | :--- | :--- |
 | `q -p [N]` | `q play [N]` | Toggle Play/Pause, or jump directly to track `N` (Supports: `q -p 5`, `q -p +2`) |
+| `q -pb [target]` | `q pb` / `q blind` | **Blind Mode**: One-time isolated play (pauses queue, never touches history, auto-resumes on exit) |
 | `q -next` | `q next` | Skip to the next track |
 | `q -prev` | `q prev` | Return to the previous track |
 | `q -stop` | `q stop` | Terminate the MPV background daemon and release audio sinks |
@@ -126,6 +127,32 @@ q -res 1440   # 2K Quad HD
 q -res 4k     # 4K Ultra HD
 q -res auto   # Best available
 ```
+
+---
+
+## 🕶️ Blind Mode (`q -pb` / `q pb`)
+
+Blind Mode is designed for times when you want to quickly watch or listen to a one-off video or audio clip without cluttering your carefully crafted queue, interrupting shuffle history, or saving temporary links to disk:
+
+```bash
+# Play a YouTube video blindly (pauses active queue, auto-resumes when done)
+q -pb "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+
+# Search and play directly in blind mode
+q -pb "funny cat meme"
+
+# Pull URL directly from clipboard
+q -pb
+
+# Play local file blindly
+q -pb ~/Downloads/preview.mp4
+```
+
+### How Blind Mode Works:
+1. **Queue Snapshot**: Checks if a Queue playback session is active. If so, pauses it immediately.
+2. **Pristine State Guarantee**: The target track/video is **never** added to your playlist files (`yt_cache.txt`) and **never** recorded in your shuffle history stack.
+3. **Dedicated Video Window**: Automatically opens a resizable video window (supporting `F11` fullscreen, `w`/`W` sizing presets, `+/-` scaling, and `0-4` quality switches).
+4. **Instant Queue Restoration**: When the video finishes (EOF) or when you close the window (`q` or `ESC`), Queue automatically unpauses your previous session, resuming playback at the exact second where you left off.
 
 ---
 

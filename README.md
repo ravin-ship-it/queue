@@ -153,6 +153,7 @@ Queue adapts its rendering and audio engine based on the host platform:
 | `q` | Open Interactive FZF Queue (TAB to select, ENTER to play) |
 | `q <query>` | Search YouTube & select track |
 | `q -p [N]` | Play/Pause or jump to track `N` |
+| `q -pb [target]` | **Blind Mode**: One-time isolated play (pauses queue, restores on exit) |
 | `q -next` / `-prev` | Skip to next or previous track |
 | `q -stop` | Stop playback and kill MPV background daemon |
 | `q -shuf` | Toggle Smart Virtual Shuffle (Zero-repeat history stack) |

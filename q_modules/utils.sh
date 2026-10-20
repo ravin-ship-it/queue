@@ -48,6 +48,14 @@ if [ -z "$NC_OPTS" ]; then
     export NC_OPTS
 fi
 
+if [ -z "$NC_OPTS" ]; then
+    NC_OPTS="-U"
+    if nc -h 2>&1 | grep -q -- "-N"; then
+        NC_OPTS="-N -U"
+    fi
+    export NC_OPTS
+fi
+
 SOCKET="$HOME/.mpv-socket"
 MPV_RUNNING=false
 if [ -S "$SOCKET" ]; then
@@ -62,6 +70,10 @@ fi
 
 check_socket() {
     [ -S "$SOCKET" ] && echo '{ "command": ["get_property", "idle-active"] }' | nc $NC_OPTS -w 1 "$SOCKET" &>/dev/null
+}
+
+is_mpv_running() {
+    check_socket
 }
 
 is_online() {
@@ -807,6 +819,9 @@ ensure_mpv_running() {
         if [ "$IS_ANDROID" = true ] && [ "$mode" == "hybrid" ]; then
             extra_android_opts=("--ao=null" "--audio=no")
         fi
+
+        # Ensure no stale headless daemon is hanging around
+        pkill -u "$(whoami)" -f "mpv --idle" 2>/dev/null || true
 
         if command -v setsid >/dev/null 2>&1; then
             setsid mpv --idle --keep-open=yes --no-terminal --vo=null --video=no \

@@ -584,6 +584,7 @@ show_help() {
     fi
     print_boxed_line "  -d / -dl [N|u]  Interactive Downloader Hub (Format & Dir Wizard)"
     print_boxed_line "  -p [N]          Play/Pause or Jump to track N ${C_GRAY}(Supports: 10+5)${C_RESET}"
+    print_boxed_line "  -pb [target]    Blind Mode: One-time isolated play ${C_GRAY}(pauses & auto-resumes queue)${C_RESET}"
     print_boxed_line "  -next / -prev   Next/Prev track ${C_GRAY}(Synced Logs)${C_RESET}"
     print_boxed_line "  -stop           Stop (Quit) MPV"
     print_boxed_line "  -v [N]          Volume Control (Show or Set to N)"

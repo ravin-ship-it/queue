@@ -142,7 +142,7 @@ fi
 # --- Command Parsing ---
 
 PROCESSED_ANY_FLAG=false
-SMART_CMDS="^(play|pause|stop|next|prev|vol|info|list|clear|shuffle|remove|move|swap|help|save|load|auto|fx|deps|up|install|setup|uninstall|remove-setup|download|dl|d|dislike|dis|disl|rmd|undis|undislike|like|vid|video|watch|version|ver|res|quality|hybrid|hy)$"
+SMART_CMDS="^(play|pause|stop|next|prev|vol|info|list|clear|shuffle|remove|move|swap|help|save|load|auto|fx|deps|up|install|setup|uninstall|remove-setup|pb|blind|download|dl|d|dislike|dis|disl|rmd|undis|undislike|like|vid|video|watch|version|ver|res|quality|hybrid|hy)$"
 
 while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
     PROCESSED_ANY_FLAG=true
@@ -173,6 +173,7 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
             install|setup) CMD="-install" ;;
             remove-setup) CMD="-remove-setup" ;;
             uninstall) CMD="-uninstall" ;;
+            pb|blind) CMD="-pb" ;;
             download|dl|d) CMD="-d" ;;
             dislike|dis) CMD="-dis" ;;
             disl) CMD="-disl" ;;
@@ -480,6 +481,11 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
         -uninstall|--uninstall)
             shift
             cmd_uninstall "$@"
+            exit $?
+            ;;
+        -pb|--pb|-blind|--blind)
+            shift
+            cmd_blind_play "$@"
             exit $?
             ;;
         -d|-dl)

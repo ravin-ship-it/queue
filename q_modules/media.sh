@@ -2084,3 +2084,207 @@ cmd_play() {
         log_now_playing "|> Playing: "
     fi
 }
+
+cmd_blind_play() {
+    local target="$*"
+
+    # If target is empty, inspect clipboard or ask via fzf input
+    if [ -z "$target" ]; then
+        local clip
+        clip=$(get_clipboard)
+        if [[ "$clip" =~ ^http.* ]] || [[ "$clip" =~ ^spotify:.* ]] || [ -f "$clip" ]; then
+            echo -e "${C_CYAN}📋 Detected media URL from clipboard:${C_RESET} ${C_YELLOW}${clip}${C_RESET}"
+            target="$clip"
+        else
+            target=$(get_input "🕶️ Blind Mode (One-Time Isolated Playback)" "URL, Search Query, or File > ")
+        fi
+    fi
+
+    if [ -z "$target" ]; then
+        echo -e "${C_ORANGE}⚠️ No target provided for Blind Mode.${C_RESET}"
+        echo -e "${C_GRAY}Usage: q -pb <url | search query | file>${C_RESET}"
+        return 1
+    fi
+
+    # Snapshot main queue daemon state and pause if currently active
+    local was_main_playing=false
+    local main_socket="${SOCKET:-$HOME/.mpv-socket}"
+    if [ -S "$main_socket" ] && echo '{"command":["get_property","idle-active"]}' | nc $NC_OPTS -w 1 "$main_socket" >/dev/null 2>&1; then
+        local is_paused
+        is_paused=$(echo '{"command":["get_property","pause"]}' | nc $NC_OPTS -w 1 "$main_socket" 2>/dev/null | jq -r 'if .data == null then "false" else (.data | tostring) end')
+        local is_idle
+        is_idle=$(echo '{"command":["get_property","idle-active"]}' | nc $NC_OPTS -w 1 "$main_socket" 2>/dev/null | jq -r 'if .data == null then "true" else (.data | tostring) end')
+        if [ "$is_idle" == "false" ] && [ "$is_paused" == "false" ]; then
+            was_main_playing=true
+            echo '{"command":["set_property","pause",true]}' | nc $NC_OPTS -w 1 "$main_socket" >/dev/null 2>&1
+            echo -e "${C_PINK}⏸️  Paused active Queue session.${C_RESET} ${C_GRAY}(Your playlist, shuffle history, and queue remain 100% untouched)${C_RESET}"
+        fi
+    fi
+
+    # Safety cleanup trap to guarantee unpausing the previous session on exit or Ctrl-C
+    cleanup_blind_mode() {
+        trap - EXIT INT TERM
+        rm -f "/tmp/mpv-blind-$$.sock" 2>/dev/null || true
+        echo -e "\n${C_GREEN}🎬 Blind playback finished.${C_RESET}"
+        if [ "$was_main_playing" = true ] && [ -S "$main_socket" ]; then
+            echo -e "${C_CYAN}🎧 Resuming your previous queue playback...${C_RESET}"
+            echo '{"command":["set_property","pause",false]}' | nc $NC_OPTS -w 1 "$main_socket" >/dev/null 2>&1
+            log_now_playing "|> Resumed: "
+        fi
+    }
+    trap cleanup_blind_mode EXIT INT TERM
+
+    local play_target="$target"
+    local display_title=""
+
+    # 1. Local File Check
+    if [ -f "$target" ]; then
+        play_target=$(realpath "$target")
+        display_title=$(basename "$play_target")
+    # 2. Spotify URL Resolution
+    elif is_spotify_url "$target"; then
+        echo -e "${C_CYAN}🎵 Resolving Spotify track to YouTube audio...${C_RESET}"
+        resolve_spotify_to_youtube "$target"
+        if [ "${#PLAYLIST_URLS[@]}" -gt 0 ]; then
+            play_target="${PLAYLIST_URLS[0]}"
+            display_title="${PLAYLIST_TITLES[0]}"
+        fi
+    # 3. Direct HTTP/HTTPS URL
+    elif [[ "$target" =~ ^http.* ]]; then
+        play_target="$target"
+        echo -e "${C_CYAN}🔍 Inspecting stream metadata...${C_RESET}"
+        local ytdl_title_cmd=("yt-dlp" "--no-warnings" "--skip-download" "--print" "%(title)s")
+        command -v node >/dev/null 2>&1 && ytdl_title_cmd+=("--js-runtimes" "node")
+        display_title=$(run_with_timeout 10 "${ytdl_title_cmd[@]}" -- "$play_target" 2>/dev/null | head -n 1)
+        [ -z "$display_title" ] && display_title="$play_target"
+    # 4. Search Query (e.g. "q -pb funny cat video" or "q -pb yt lofi hip hop")
+    else
+        local search_query="$target"
+        local search_prefix="ytsearch1:"
+        if [[ "$search_query" =~ ^yt[[:space:]]+(.*) ]]; then
+            search_query="${BASH_REMATCH[1]}"
+            search_prefix="ytsearch1:"
+        elif [[ "$search_query" =~ ^sc[[:space:]]+(.*) ]]; then
+            search_query="${BASH_REMATCH[1]}"
+            search_prefix="scsearch1:"
+        fi
+        echo -e "${C_CYAN}🔍 Searching for blind media:${C_RESET} ${C_WHITE}$search_query${C_RESET}..."
+        local ytdl_search_cmd=("yt-dlp" "--no-warnings" "--skip-download" "--flat-playlist" "--print" "%(webpage_url)s\t%(title)s")
+        command -v node >/dev/null 2>&1 && ytdl_search_cmd+=("--js-runtimes" "node")
+        local res_line
+        res_line=$(run_with_timeout 15 "${ytdl_search_cmd[@]}" -- "${search_prefix}${search_query}" 2>/dev/null | head -n 1)
+        if [ -n "$res_line" ]; then
+            play_target=$(echo "$res_line" | awk -F'\t' '{print $1}')
+            display_title=$(echo "$res_line" | awk -F'\t' '{print $2}')
+        fi
+        [ -z "$display_title" ] && display_title="$search_query"
+    fi
+
+    # Display Boxed TUI Header
+    print_header_box "${C_PINK}🕶️ Queue Blind Mode (One-Time Isolated Playback)${C_RESET}"
+    print_boxed_line "${C_TEAL}Playing:   ${C_CYAN}${display_title:0:$((INNER_WIDTH-12))}${C_RESET}"
+    print_boxed_line "${C_TEAL}Source:    ${C_VIOLET}${play_target:0:$((INNER_WIDTH-12))}${C_RESET}"
+    print_boxed_line "${C_TEAL}Status:    ${C_GREEN}Isolated Session ✅ (Zero queue or history modification)${C_RESET}"
+    print_boxed_line "${C_TEAL}Controls:  ${C_GRAY}Press 'q' in window / Ctrl-C in terminal to exit & resume queue${C_RESET}"
+    print_boxed_line "${C_TEAL}Hotkeys:   ${C_GRAY}F11 Fullscreen • w/W scale presets • +/- zoom • 0-4 quality${C_RESET}"
+    printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
+    B_LINE=${B_LINE// /─}
+    echo -e "${C_PURPLE}${B_LINE}${C_RESET}"
+
+    # Execution according to platform & mode
+    local cur_mode
+    cur_mode=$(get_queue_mode)
+
+    # Windows WSL2 Hybrid Boost Mode Execution
+    if [ "$IS_WSL" = true ] && [ "$cur_mode" == "hybrid" ]; then
+        local win_mpv
+        win_mpv=$(find_windows_mpv)
+        local win_ytdl
+        win_ytdl=$(find_windows_ytdlp)
+
+        if [ -n "$win_mpv" ] && [ -f "$win_mpv" ]; then
+            local win_u_dir
+            win_u_dir=$(get_windows_user_dir)
+            local win_opts=(
+                "--force-window=yes"
+                "--keep-open=no"
+                "--title=Queue [Blind Mode]: $display_title"
+                "--geometry=50%x50%"
+                "--input-ipc-server=\\\\.\\pipe\\mpv-blind-$RANDOM"
+            )
+            [ -n "$win_ytdl" ] && win_opts+=("--script-opts=ytdl_hook-ytdl_path=$win_ytdl")
+            if [ -n "$win_u_dir" ] && [ -f "$win_u_dir/AppData/Roaming/mpv/scripts/queue_video.lua" ]; then
+                local win_lua
+                win_lua=$(wslpath -w "$win_u_dir/AppData/Roaming/mpv/scripts/queue_video.lua" 2>/dev/null)
+                [ -n "$win_lua" ] && win_opts+=("--script=$win_lua")
+            fi
+            if [ -n "$win_u_dir" ] && [ -f "$win_u_dir/AppData/Roaming/mpv/input.conf" ]; then
+                local win_input
+                win_input=$(wslpath -w "$win_u_dir/AppData/Roaming/mpv/input.conf" 2>/dev/null)
+                [ -n "$win_input" ] && win_opts+=("--input-conf=$win_input")
+            fi
+
+            # Run Windows MPV synchronously (blocks until window closed or video ends)
+            "$win_mpv" "${win_opts[@]}" "$play_target" </dev/null
+            cleanup_blind_mode
+            return 0
+        fi
+    fi
+
+    # Android Termux Execution
+    if [ "$IS_ANDROID" = true ]; then
+        if [ "$cur_mode" == "hybrid" ] && command -v am >/dev/null 2>&1; then
+            echo -e "${C_CYAN}📱 Launching MPV Android App in Blind Mode...${C_RESET}"
+            am start -a android.intent.action.VIEW -d "$play_target" -t "video/*" -p "is.xyz.mpv" >/dev/null 2>&1
+            echo -e "${C_GRAY}Press ENTER once you finish watching to resume queue playback...${C_RESET}"
+            read -r
+            cleanup_blind_mode
+            return 0
+        else
+            mpv "$play_target"
+            cleanup_blind_mode
+            return 0
+        fi
+    fi
+
+    # Standalone Linux / macOS / WSLg Execution
+    local has_display=true
+    if [ -z "$DISPLAY" ] && [ -z "$WAYLAND_DISPLAY" ]; then
+        if [ -d "/mnt/wslg" ] || [ -S "/tmp/.X11-unix/X0" ]; then
+            export DISPLAY=":0"
+            export WAYLAND_DISPLAY="wayland-0"
+        else
+            has_display=false
+        fi
+    fi
+    if [ "$IS_WSL" = true ]; then
+        export GALLIUM_DRIVER="${GALLIUM_DRIVER:-d3d12}"
+        export XCURSOR_THEME="${XCURSOR_THEME:-Adwaita}"
+        export XCURSOR_SIZE="${XCURSOR_SIZE:-36}"
+    fi
+
+    local standalone_opts=(
+        "--keep-open=no"
+        "--title=Queue [Blind Mode]: $display_title"
+        "--input-ipc-server=/tmp/mpv-blind-$$.sock"
+    )
+    if [ "$has_display" = true ]; then
+        standalone_opts+=(
+            "--force-window=yes"
+            "--geometry=50%x50%"
+            "--ytdl-format=bestvideo[height<=1080][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
+        )
+    else
+        standalone_opts+=(
+            "--force-window=no"
+            "--vo=null"
+        )
+    fi
+    [ -f "$HOME/.config/mpv/scripts/queue_video.lua" ] && standalone_opts+=("--script=$HOME/.config/mpv/scripts/queue_video.lua")
+    [ -f "$HOME/.config/mpv/input.conf" ] && standalone_opts+=("--input-conf=$HOME/.config/mpv/input.conf")
+
+    mpv "${standalone_opts[@]}" "$play_target"
+
+    cleanup_blind_mode
+    return 0
+}
