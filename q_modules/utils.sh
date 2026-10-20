@@ -689,13 +689,20 @@ ensure_mpv_running() {
             local win_user_dir
             win_user_dir=$(get_windows_user_dir)
             if [ -n "$win_user_dir" ] && [ -d "$win_user_dir" ]; then
-                local win_mpv_scripts_dir="$win_user_dir/AppData/Roaming/mpv/scripts"
+                local win_mpv_dir="$win_user_dir/AppData/Roaming/mpv"
+                local win_mpv_scripts_dir="$win_mpv_dir/scripts"
                 mkdir -p "$win_mpv_scripts_dir" 2>/dev/null
                 if [ -f "$script_path" ]; then
                     cp -f "$script_path" "$win_mpv_scripts_dir/queue_video.lua" 2>/dev/null
                     local win_native_script
                     win_native_script=$(wslpath -w "$win_mpv_scripts_dir/queue_video.lua" 2>/dev/null)
                     [ -n "$win_native_script" ] && script_arg="'--script=$win_native_script',"
+                fi
+                local in_conf="$HOME/.config/mpv/input.conf"
+                [ ! -f "$in_conf" ] && in_conf="$SCRIPT_DIR/input.conf.example"
+                [ ! -f "$in_conf" ] && in_conf="$(dirname "$MODULE_DIR")/input.conf.example"
+                if [ -f "$in_conf" ] && [ ! -f "$win_mpv_dir/input.conf" ]; then
+                    cp -f "$in_conf" "$win_mpv_dir/input.conf" 2>/dev/null
                 fi
             elif [ -f "$script_path" ]; then
                 local win_script

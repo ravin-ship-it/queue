@@ -116,6 +116,11 @@ if [ "$IS_WSL" = true ]; then
     if [ -n "$win_dir" ]; then
         prompt_remove "$win_dir/PipeRelay.exe" "Windows Pipe Relay Bridge (PipeRelay.exe)" "false"
         prompt_remove "$win_dir/yt-dlp.exe" "Windows yt-dlp binary (yt-dlp.exe)" "false"
+        prompt_remove "$win_dir/yt-dlp.conf" "Windows yt-dlp configuration (yt-dlp.conf)" "false"
+        prompt_remove "$win_dir/AppData/Roaming/mpv/scripts/queue_video.lua" "Windows MPV Helper Script (queue_video.lua)" "false"
+        prompt_remove "$win_dir/AppData/Roaming/mpv/input.conf" "Windows MPV Input Config (input.conf)" "false"
+        prompt_remove "$win_dir/AppData/Roaming/yt-dlp/config" "Windows yt-dlp Roaming Config" "false"
+        prompt_remove "$win_dir/.cache/mpv" "Windows Host MPV Cache & Shuffle History" "true"
     fi
 
     if [ -f "/mnt/c/Program Files/MPV Player/mpv.exe" ] || [ -f "/mnt/c/Program Files/MPV Player/mpv.com" ]; then
@@ -134,6 +139,26 @@ if [ "$IS_WSL" = true ]; then
             echo -e "${CYAN}⏭️  Kept Native Windows MPV${NC}\n"
         fi
     fi
+fi
+
+# Android / Termux Host Components
+if [ -n "$PREFIX" ] && [[ "$PREFIX" == *"com.termux"* ]] || [ -d "/sdcard/mpv" ] || [ -d "$HOME/storage/shared/mpv" ]; then
+    echo -e "${CYAN}--- Android / Termux Mobile Components ---${NC}"
+    for mpv_dir in "/sdcard/mpv" "/storage/emulated/0/mpv" "$HOME/storage/shared/mpv"; do
+        if [ -d "$mpv_dir" ]; then
+            prompt_remove "$mpv_dir/scripts/queue_bridge.lua" "Android MPV Lua Command Bridge" "false"
+            prompt_remove "$mpv_dir/queue_cmd.txt" "Android MPV Command Relay Buffer" "false"
+            if [ -f "$mpv_dir/mpv.conf" ] && grep -q "queue_bridge.lua" "$mpv_dir/mpv.conf" 2>/dev/null; then
+                echo -e "${YELLOW}Found Queue bridge script reference in $mpv_dir/mpv.conf${NC}"
+                if [ "$AUTO_YES" = "true" ]; then choice="y"; else read -r -n 1 -p "Remove the Queue bridge injection from mpv.conf? [y/N] > " choice; echo ""; fi
+                if [[ "$choice" =~ ^[Yy]$ ]]; then
+                    sed -i '/queue_bridge\.lua/d' "$mpv_dir/mpv.conf" 2>/dev/null || true
+                    echo -e "${GREEN}✅ Cleaned up $mpv_dir/mpv.conf${NC}\n"
+                fi
+            fi
+            break
+        fi
+    done
 fi
 
 # YT-DLP config cleanup

@@ -22,6 +22,8 @@
   <a href="#-what-is-queue-q"><b>What is Queue?</b></a> •
   <a href="#-interactive-tui-preview"><b>TUI Showcase</b></a> •
   <a href="#-quick-start"><b>Quick Start</b></a> •
+  <a href="#-step-by-step-installation-by-os"><b>Install by OS</b></a> •
+  <a href="#-dual-engine-architecture--multiple-modes"><b>Dual-Engine Modes</b></a> •
   <a href="#-cheat-sheet"><b>Commands</b></a> •
   <a href="#-spotify-track-resolver-q-spotify_url"><b>Spotify Resolver</b></a> •
   <a href="#-desktop-video-window-q--vid--q--video"><b>Desktop Video Window</b></a> •
@@ -152,6 +154,141 @@ q "blinding lights the weeknd"
 
 ---
 
+## 📦 Step-by-Step Installation by OS
+
+Queue is designed to be 100% self-contained and automatically configures its environment. Below are step-by-step instructions tailored for each operating system:
+
+<details open>
+<summary><b>🐧 Ubuntu / Debian / Kali / Linux Mint / Pop!_OS</b></summary>
+
+```bash
+# 1. Install prerequisites (optional, installer will auto-detect & offer)
+sudo apt update && sudo apt install -y git mpv fzf jq netcat-openbsd nodejs python3 python3-pip
+
+# 2. Clone and run installer
+git clone https://github.com/ravin-ship-it/queue.git
+cd queue
+./install.sh
+
+# 3. Reload shell
+source ~/.bashrc   # or: source ~/.zshrc
+```
+</details>
+
+<details>
+<summary><b>🏔️ Arch Linux / Manjaro / EndeavourOS</b></summary>
+
+```bash
+# 1. Install prerequisites
+sudo pacman -S --needed git mpv yt-dlp fzf jq gnu-netcat nodejs python
+
+# 2. Clone and run installer
+git clone https://github.com/ravin-ship-it/queue.git
+cd queue
+./install.sh
+
+# 3. Reload shell
+source ~/.bashrc   # or: source ~/.zshrc
+```
+</details>
+
+<details>
+<summary><b>🎩 Fedora / RHEL / CentOS</b></summary>
+
+```bash
+# 1. Install prerequisites
+sudo dnf install -y git mpv yt-dlp fzf jq nc nodejs python3
+
+# 2. Clone and run installer
+git clone https://github.com/ravin-ship-it/queue.git
+cd queue
+./install.sh
+
+# 3. Reload shell
+source ~/.bashrc   # or: source ~/.zshrc
+```
+</details>
+
+<details>
+<summary><b>🍏 macOS (Homebrew)</b></summary>
+
+```bash
+# 1. Install prerequisites via Homebrew
+brew install git mpv yt-dlp fzf jq netcat node
+
+# 2. Clone and run installer
+git clone https://github.com/ravin-ship-it/queue.git
+cd queue
+./install.sh
+
+# 3. Reload shell
+source ~/.zshrc
+```
+</details>
+
+<details open>
+<summary><b>🪟 Windows 11 / 10 (WSL2) — Standalone vs Hybrid Boost</b></summary>
+
+Queue in WSL2 supports two rendering engines:
+1. **Standalone WSL Mode (Default)**: 60 FPS capped via WSLg Mesa D3D12. Zero Windows configuration required.
+2. **Hybrid Boost Mode (Recommended)**: Uncapped **120+ FPS 4K/8K** Direct3D 11/12 with native host **WASAPI bit-perfect audio**!
+
+```bash
+# In your WSL2 terminal (Ubuntu / Debian / Arch):
+git clone https://github.com/ravin-ship-it/queue.git
+cd queue
+
+# Option A: Standard Interactive Install (Prompts to auto-install Windows MPV if missing)
+./install.sh
+
+# Option B: Fully Automated Hybrid Install (Zero intervention, auto-runs winget)
+./install.sh --hybrid
+
+# Reload shell
+source ~/.bashrc   # or: source ~/.zshrc
+```
+
+> 💡 **Manual Windows Host Setup (Optional)**: If you prefer to install Windows host components yourself, open PowerShell:
+> ```powershell
+> winget install shinchiro.mpv
+> winget install yt-dlp.yt-dlp
+> ```
+</details>
+
+<details open>
+<summary><b>📱 Android (Termux) — Standalone Audio vs Hybrid Mobile</b></summary>
+
+Queue turns your Android device into a powerhouse mobile streaming engine with two modes:
+1. **Standalone Termux Mode**: Ultra-low battery consumption, headless MPV audio daemon, screen-off background playback with CPU wake-lock.
+2. **Hybrid Mobile Mode**: Hardware **MediaCodec GPU video**, **AudioTrack / AAudio hardware audio tunneling**, lock-screen playback controls, Picture-in-Picture (PiP), and dynamic queue sync via the official **[MPV Android App](https://play.google.com/store/apps/details?id=is.xyz.mpv)**!
+
+```bash
+# 1. Install Termux & Termux:API from F-Droid (DO NOT use outdated Google Play Termux)
+# https://f-droid.org/en/packages/com.termux/
+# https://f-droid.org/en/packages/com.termux.api/
+
+# 2. Inside Termux, grant storage permission (REQUIRED):
+termux-setup-storage
+
+# 3. Update packages and install git:
+pkg update && pkg install -y git termux-api
+
+# 4. Clone and install Queue:
+git clone https://github.com/ravin-ship-it/queue.git
+cd queue
+./install.sh
+
+# Option for automated Hybrid Mobile default:
+./install.sh --hybrid
+
+# 5. For Hybrid Mobile Mode, install MPV Android App:
+# - Google Play: https://play.google.com/store/apps/details?id=is.xyz.mpv
+# - F-Droid: https://f-droid.org/en/packages/is.xyz.mpv/
+```
+</details>
+
+---
+
 ## 🕹️ Everyday Usage & Examples
 
 ### 🔍 Instant Streaming & Ingestion
@@ -234,7 +371,7 @@ You can use standard short flags (`q -p`) or clean smart commands (`q play`).
 | `q stop` | `q -stop` | Gracefully quit MPV and unhook audio |
 | `q vid [N\|url]`| `q -vid` / `q -video` | **Toggle Desktop Video Window** *(WSLg / X11 / Wayland, Resizable, F11)* |
 | `q res [val]`   | `q -res` / `q -quality` | **Video Stream Quality** *(720\|1080\|1440\|4k\|auto)* |
-| `q hybrid [on\|off]` | `q -hybrid` | **Dual-Engine Toggle**: Standalone (60 FPS) vs Hybrid Boost (120+ FPS Direct3D) |
+| `q hybrid [on\|off]` | `q -hybrid` | **Dual-Engine Toggle**: Standalone vs Hybrid (120+ FPS on Windows / MPV App on Android) |
 | `q vol [0-130]` | `q -v [N]` | View or set playback volume |
 | `q fx [on\|off]`| `q -fx` | Toggle spatial Dolby-like audio profile |
 | `q shuffle` | `q -shuf [list]` | Toggle shuffle mode *(or randomize queue entries)* |
@@ -385,24 +522,25 @@ q -vid 5
 
 ---
 
-## ⚡ Dual-Engine Architecture (Windows + WSL2 Boost Mode)
+## ⚡ Dual-Engine Architecture & Multiple Modes
 
-For users running **Windows 11 / 10 + WSL2**, Queue features an intelligent **Dual-Engine Architecture** giving you complete freedom of choice:
+Queue features a multi-tiered execution architecture that automatically adapts to your host operating system and hardware:
 
-| Feature | 🐧 Standalone WSL Mode *(Default)* | ⚡ Hybrid Boost Mode |
+### 🪟 1. Windows + WSL2 Dual-Engine (Standalone vs Hybrid Boost)
+
+For users running **Windows 11 / 10 + WSL2**, Queue gives you complete freedom between zero-setup standalone playback and uncapped desktop hardware acceleration:
+
+| Feature | 🐧 Standalone WSL Mode *(Default)* | ⚡ Hybrid Boost Mode *(Recommended)* |
 | :--- | :--- | :--- |
 | **Target Audience** | Zero setup / users without Windows MPV | Uncapped 120+ FPS & zero virtualization latency |
 | **Max Framerate** | Capped at **60 FPS** *(WSLg compositor limit)* | **120+ FPS / 144 FPS / 240 FPS** *(Direct host GPU)* |
 | **Renderer** | Mesa Gallium D3D12 via WSLg Wayland | **Native Windows Direct3D 11 / 12 / Vulkan** |
 | **Audio Pipeline** | WSL PulseAudio Virtual Audio Sink | **Native Windows WASAPI** *(Host hardware direct)* |
 | **CPU / GPU Overhead**| Small hypervisor overhead | **Zero overhead** *(Native Windows host execution)* |
-| **IPC Channel** | Direct UNIX socket (`~/.mpv-socket`) | Zero-dependency native `PipeRelay.exe` *(<1ms latency)* |
+| **IPC Channel** | Direct UNIX socket (`~/.mpv-socket`) | Zero-dependency native `PipeRelay.exe` *(<0.5ms latency)* |
 | **Prerequisites** | None *(100% automated in WSL)* | Native Windows MPV (`winget install shinchiro.mpv`) |
 
-### 🔄 1-Command Switching Between Builds:
-
-Switch between Standalone and Hybrid modes instantly with zero downtime:
-
+#### 🔄 How to Switch & Check Status in Windows:
 ```bash
 # Enable Hybrid Boost Mode (120+ FPS Direct3D & WASAPI)
 q -hybrid on       # or: q hybrid on
@@ -421,11 +559,47 @@ q -hybrid status   # or: q hybrid status
 > **Active Playback Migration**: When toggling engines while music or video is playing, Queue automatically snapshot-migrates your active track, exact seek position, pause state, and video window to the new engine seamlessly!
 
 ```powershell
-# To install Windows MPV & yt-dlp for Hybrid Boost mode:
+# Optional: To install Windows MPV & yt-dlp manually for Hybrid Boost mode:
 # Run in Windows PowerShell (Admin or User):
 winget install shinchiro.mpv
 winget install yt-dlp.yt-dlp
 ```
+
+---
+
+### 📱 2. Android / Termux Dual-Engine (Standalone Audio vs Hybrid Mobile)
+
+For users running **Android via Termux**, Queue bridges lightweight command-line music management with mobile hardware acceleration:
+
+| Feature | 🐧 Standalone Termux Mode *(Default)* | 🤖 Hybrid Mobile Mode *(Recommended)* |
+| :--- | :--- | :--- |
+| **Playback Engine** | Headless Termux MPV binary | Official Play Store / F-Droid MPV App (`is.xyz.mpv`) |
+| **Video Decoding** | Software CPU / Terminal | **MediaCodec GPU Hardware Acceleration** (`vo=gpu-next`) |
+| **Audio Pipeline** | OpenSLES / PulseAudio | **Android AudioTrack / AAudio Hardware Tunneling** |
+| **Battery Life** | **Ultra-Low Battery Saver** (Screen-off audio) | High Efficiency (Hardware offloaded decoding) |
+| **Multitasking** | Background CLI Daemon | **Picture-in-Picture (PiP)** & Lock-Screen Notifications |
+| **Command Bridge** | Direct UNIX IPC socket | Local Dynamic Stream Bridge (`127.0.0.1:8989`) + Lua Relay |
+| **Prerequisites** | Termux + `termux-api` | MPV Android App (`is.xyz.mpv`) + `termux-setup-storage` |
+
+#### 🔄 How to Switch & Check Status in Android / Termux:
+```bash
+# Enable Hybrid Mobile Mode (Play Store MPV app with MediaCodec GPU & PiP)
+q -hybrid on       # or: q hybrid on
+
+# Switch back to Standalone Termux Mode (Ultra-low battery headless audio)
+q -hybrid off      # or: q hybrid off
+
+# Toggle between modes
+q -hybrid          # or: q hybrid
+
+# Inspect active mobile engine status
+q -hybrid status   # or: q hybrid status
+```
+
+---
+
+### 🐧 3. Native Linux & 🍏 macOS Direct Engine
+Native Linux (Arch, Ubuntu, Fedora) and macOS systems run directly on host bare metal with direct kernel access to Mesa DRM (Wayland/X11) and Apple Metal/Cocoa (`ao=coreaudio`), automatically achieving uncapped 120+ FPS hardware acceleration out-of-the-box without requiring a secondary hybrid engine.
 
 ---
 

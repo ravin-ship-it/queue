@@ -26,6 +26,26 @@ elif [ "$(uname -s 2>/dev/null)" = "Linux" ]; then
     IS_LINUX=true
 fi
 
+# --- Non-Interactive & Build Flags ---
+AUTO_YES=false
+ENABLE_HYBRID=false
+FORCE_STANDALONE=false
+
+for arg in "$@"; do
+    case "$arg" in
+        -y|--yes|--auto) AUTO_YES=true ;;
+        --hybrid|-hybrid) ENABLE_HYBRID=true ;;
+        --standalone|-standalone) FORCE_STANDALONE=true ;;
+        -h|--help)
+            echo "Usage: ./install.sh [options]"
+            echo "  -y, --yes        Non-interactive mode (accept all defaults without prompting)"
+            echo "  --hybrid         Auto-install & activate Hybrid Boost Mode without intervention"
+            echo "  --standalone     Force Standalone Mode"
+            exit 0
+            ;;
+    esac
+done
+
 echo -e "${CYAN}🚀 Starting Advanced Installation of q...${NC}"
 
 # --- Dependency Resolution Engine ---
@@ -301,28 +321,47 @@ if [ "$IS_WSL" = true ]; then
 
     if [ "$has_win_mpv" = true ]; then
         echo -e "${GREEN}✅ Native Windows MPV detected on host!${NC}"
-        echo -e "   👉 You can toggle between engines anytime with: ${CYAN}q -hybrid on${NC} or ${CYAN}q -hybrid off${NC}"
+        if [ "$ENABLE_HYBRID" = true ]; then
+            mkdir -p "$HOME/.config/mpv"
+            echo "hybrid" > "$HOME/.config/mpv/queue_mode"
+            echo -e "${GREEN}⚡ Hybrid Boost Mode set as active default!${NC}"
+        elif [ "$FORCE_STANDALONE" = true ]; then
+            mkdir -p "$HOME/.config/mpv"
+            echo "standalone" > "$HOME/.config/mpv/queue_mode"
+            echo -e "${CYAN}🐧 Standalone WSL Mode set as active default!${NC}"
+        else
+            echo -e "   👉 You can toggle between engines anytime with: ${CYAN}q -hybrid on${NC} or ${CYAN}q -hybrid off${NC}"
+        fi
     else
         echo -e "${YELLOW}ℹ️  Native Windows MPV is not yet installed on Windows host.${NC}"
         echo -e "   Standalone Mode is active and ready to play up to 60 FPS in WSLg."
         
-        if cmd.exe /c "where winget" </dev/null >/dev/null 2>&1; then
+        local install_win_choice="n"
+        if [ "$ENABLE_HYBRID" = true ] || [ "$AUTO_YES" = true ]; then
+            install_win_choice="y"
+        elif cmd.exe /c "where winget" </dev/null >/dev/null 2>&1; then
             echo -e "   Would you like to auto-install Windows MPV & yt-dlp now for 120+ FPS Hybrid Boost? [y/N]"
             read -r -t 15 -n 1 -p "   > " install_win_choice || install_win_choice="n"
             echo ""
-            if [[ "$install_win_choice" =~ ^[Yy]$ ]]; then
-                echo -e "${CYAN}🚀 Installing Windows MPV via winget...${NC}"
-                cmd.exe /c "winget install --id shinchiro.mpv -e" </dev/null || true
-                echo -e "${CYAN}🚀 Installing Windows yt-dlp via winget...${NC}"
-                cmd.exe /c "winget install --id yt-dlp.yt-dlp -e" </dev/null || true
-                if [ -f "$winget_ytdlp" ]; then
-                    cp "$winget_ytdlp" "$win_dir/yt-dlp.exe" 2>/dev/null || true
-                fi
-                echo -e "${GREEN}✅ Windows MPV installed! You can run 'q -hybrid on' anytime to switch!${NC}"
-            else
-                echo -e "${CYAN}⏭️  Skipped Windows MPV installation. Standalone WSL Mode is active.${NC}"
-                echo -e "${GRAY}   (To install manually later, run in Windows PowerShell: winget install shinchiro.mpv)${NC}"
+        fi
+
+        if [[ "$install_win_choice" =~ ^[Yy]$ ]]; then
+            echo -e "${CYAN}🚀 Installing Windows MPV via winget...${NC}"
+            cmd.exe /c "winget install --id shinchiro.mpv -e --accept-source-agreements --accept-package-agreements" </dev/null || true
+            echo -e "${CYAN}🚀 Installing Windows yt-dlp via winget...${NC}"
+            cmd.exe /c "winget install --id yt-dlp.yt-dlp -e --accept-source-agreements --accept-package-agreements" </dev/null || true
+            if [ -f "$winget_ytdlp" ]; then
+                cp "$winget_ytdlp" "$win_dir/yt-dlp.exe" 2>/dev/null || true
             fi
+            echo -e "${GREEN}✅ Windows MPV installed! You can run 'q -hybrid on' anytime to switch!${NC}"
+            if [ "$ENABLE_HYBRID" = true ]; then
+                mkdir -p "$HOME/.config/mpv"
+                echo "hybrid" > "$HOME/.config/mpv/queue_mode"
+                echo -e "${GREEN}⚡ Hybrid Boost Mode set as active default!${NC}"
+            fi
+        else
+            echo -e "${CYAN}⏭️  Skipped Windows MPV installation. Standalone WSL Mode is active.${NC}"
+            echo -e "${GRAY}   (To install manually later, run in Windows PowerShell: winget install shinchiro.mpv)${NC}"
         fi
     fi
 
@@ -365,6 +404,9 @@ EOF
     cp -rf "$REPO_DIR"/scripts/*.lua "$win_mpv_dir/scripts/" 2>/dev/null || true
     if [ ! -f "$win_mpv_dir/mpv.conf" ] && [ -f "$SCRIPT_DIR/mpv.conf.example" ]; then
         cp "$SCRIPT_DIR/mpv.conf.example" "$win_mpv_dir/mpv.conf" 2>/dev/null
+    fi
+    if [ -f "$REPO_DIR/input.conf.example" ]; then
+        cp -f "$REPO_DIR/input.conf.example" "$win_mpv_dir/input.conf" 2>/dev/null
     fi
 fi
 
@@ -415,7 +457,17 @@ EOF
             break
         fi
     done
-    echo -e "   👉 You can toggle between engines anytime with: ${CYAN}q -hybrid on${NC} or ${CYAN}q -hybrid off${NC}"
+    if [ "$ENABLE_HYBRID" = true ]; then
+        mkdir -p "$HOME/.config/mpv"
+        echo "hybrid" > "$HOME/.config/mpv/queue_mode"
+        echo -e "${GREEN}⚡ Android Hybrid Mobile Mode set as active default!${NC}"
+    elif [ "$FORCE_STANDALONE" = true ]; then
+        mkdir -p "$HOME/.config/mpv"
+        echo "standalone" > "$HOME/.config/mpv/queue_mode"
+        echo -e "${CYAN}🐧 Standalone Termux Mode set as active default!${NC}"
+    else
+        echo -e "   👉 You can toggle between engines anytime with: ${CYAN}q -hybrid on${NC} or ${CYAN}q -hybrid off${NC}"
+    fi
 fi
 
 # --- Cross-Platform sed In-Place Deletion Helper ---

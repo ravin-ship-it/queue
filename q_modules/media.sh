@@ -1109,7 +1109,7 @@ cmd_video_toggle() {
 
     # Ensure MPV input configuration & keybindings are active
     local batch_keys=""
-    if [ -f "$HOME/.config/mpv/input.conf" ]; then
+    if [ "$mode" != "hybrid" ] && [ -f "$HOME/.config/mpv/input.conf" ]; then
         batch_keys+="{\"command\":[\"load-input-conf\",\"$HOME/.config/mpv/input.conf\"]}\n"
     fi
     batch_keys+='{"command":["keybind","F11","cycle fullscreen"]}\n'

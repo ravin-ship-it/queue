@@ -184,6 +184,40 @@ mp.add_key_binding(">", "smart_next_key", function() smart_next(false) end)
 mp.add_key_binding("ENTER", "smart_next_enter", function() smart_next(false) end)
 mp.add_key_binding("<", "smart_prev_key", smart_prev)
 
+-- Fullscreen Hotkeys (F11, f, ESC)
+mp.add_key_binding("F11", "toggle_fullscreen_f11", function()
+    mp.commandv("cycle", "fullscreen")
+end)
+mp.add_key_binding("f", "toggle_fullscreen_f", function()
+    mp.commandv("cycle", "fullscreen")
+end)
+mp.add_key_binding("ESC", "exit_fullscreen_esc", function()
+    mp.set_property_bool("fullscreen", false)
+end)
+
+-- In-Window Window Scale Hotkeys (w/W presets, +/- 5% steps)
+local function adjust_scale(delta)
+    local cur = mp.get_property_number("window-scale", 1.0)
+    local target = math.max(0.1, math.min(2.5, cur + delta))
+    mp.set_property_number("window-scale", target)
+    mp.commandv("show-text", string.format("Window Scale: %.2f", target), 1500)
+end
+
+mp.add_key_binding("w", "scale_cycle_w", function()
+    mp.commandv("cycle_values", "window-scale", "0.35", "0.5", "0.75", "1.0")
+    local scale = mp.get_property("window-scale") or ""
+    mp.commandv("show-text", "Window Scale: " .. scale, 1500)
+end)
+mp.add_key_binding("W", "scale_cycle_W", function()
+    mp.commandv("cycle_values", "window-scale", "1.0", "0.75", "0.5", "0.35")
+    local scale = mp.get_property("window-scale") or ""
+    mp.commandv("show-text", "Window Scale: " .. scale, 1500)
+end)
+mp.add_key_binding("+", "scale_add_plus", function() adjust_scale(0.05) end)
+mp.add_key_binding("=", "scale_add_equal", function() adjust_scale(0.05) end)
+mp.add_key_binding("-", "scale_sub_minus", function() adjust_scale(-0.05) end)
+mp.add_key_binding("_", "scale_sub_underscore", function() adjust_scale(-0.05) end)
+
 -- Linux / Windows / WSL Close Hotkeys
 mp.add_key_binding("q", "safe_hide_q", safe_hide)
 mp.add_key_binding("Q", "safe_hide_Q", safe_hide)
