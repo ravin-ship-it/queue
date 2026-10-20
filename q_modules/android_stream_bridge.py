@@ -51,20 +51,21 @@ def get_ytdl_format(res_pref=None):
     if not res_pref:
         res_pref = get_configured_resolution()
     res_pref = res_pref.lower()
+    audio_sel = "(bestaudio[language=en][acodec=opus]/bestaudio[language^=en]/bestaudio[acodec=opus]/bestaudio)"
     if res_pref in ("720", "720p", "hd"):
-        return "bestvideo[height<=720]+bestaudio/best[height<=720]/best"
+        return f"bestvideo[height<=720]+{audio_sel}/best[height<=720]/best"
     elif res_pref in ("1080", "1080p", "fhd"):
-        return "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
+        return f"bestvideo[height<=1080]+{audio_sel}/best[height<=1080]/best"
     elif res_pref in ("1440", "1440p", "2k", "qhd"):
-        return "bestvideo[height<=1440]+bestaudio/best[height<=1440]/best"
+        return f"bestvideo[height<=1440]+{audio_sel}/best[height<=1440]/best"
     elif res_pref in ("2160", "2160p", "4k", "uhd", "max"):
-        return "bestvideo+bestaudio/best"
+        return f"bestvideo+{audio_sel}/best"
     elif res_pref in ("480", "480p", "sd"):
-        return "bestvideo[height<=480]+bestaudio/best[height<=480]/best"
+        return f"bestvideo[height<=480]+{audio_sel}/best[height<=480]/best"
     elif res_pref in ("360", "360p", "low"):
-        return "bestvideo[height<=360]+bestaudio/best[height<=360]/best"
+        return f"bestvideo[height<=360]+{audio_sel}/best[height<=360]/best"
     else:  # auto / smart adaptive
-        return "bestvideo[height<=1080][fps<=60]+bestaudio/bestvideo[height<=720]+bestaudio/best"
+        return f"bestvideo[height<=1080][fps<=60]+{audio_sel}/bestvideo[height<=720]+{audio_sel}/best"
 
 def load_persistent_cache():
     global stream_cache

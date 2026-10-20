@@ -382,9 +382,11 @@ demuxer-max-bytes=256MiB
 demuxer-max-back-bytes=64MiB
 demuxer-readahead-secs=60
 
-# YouTube / Streaming (Smart Adaptive default)
+# YouTube / Streaming (Smart Adaptive default & English language prioritization)
+alang=en,eng,enUS,en-US
+slang=en,eng,enUS,en-US
 ytdl=yes
-ytdl-format=bestvideo[height<=1080][fps<=60][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps<=60][format_note!*=Premium]+bestaudio/bestvideo[height<=720]+bestaudio/best
+ytdl-format=bestvideo[height<=1080][fps<=60][vcodec^=avc1][format_note!*=Premium]+(bestaudio[language=en][acodec=opus]/bestaudio[language^=en]/bestaudio[acodec=opus]/bestaudio)/bestvideo[height<=1080][fps<=60][format_note!*=Premium]+(bestaudio[language=en]/bestaudio)/bestvideo[height<=720]+(bestaudio[language=en]/bestaudio)/best
 script-opts=ytdl_hook-ytdl_path=yt-dlp
 ytdl-raw-options=extractor-args="youtube:player_client=visionos,android,web"
 tls-verify=no

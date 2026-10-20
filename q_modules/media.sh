@@ -2229,6 +2229,9 @@ cmd_blind_play() {
                 "--gpu-context=auto"
                 "--hwdec=auto-safe"
                 "--keep-open=no"
+                "--alang=en,eng,enUS,en-US"
+                "--slang=en,eng,enUS,en-US"
+                "--ytdl-format=bestvideo[height<=1080][fps<=60][vcodec^=avc1][format_note!*=Premium]+(bestaudio[language=en][acodec=opus]/bestaudio[language^=en]/bestaudio[acodec=opus]/bestaudio)/bestvideo[height<=1080]+(bestaudio[language=en]/bestaudio)/best"
                 "--title=Queue [Blind Mode]: $display_title"
                 "--geometry=50%x50%"
                 "--input-ipc-server=\\\\.\\pipe\\mpv-blind-$RANDOM"
@@ -2290,6 +2293,8 @@ cmd_blind_play() {
         "--title=Queue [Blind Mode]: $display_title"
         "--input-ipc-server=/tmp/mpv-blind-$$.sock"
         "--msg-level=all=warn,ao=error,pw.conf=error"
+        "--alang=en,eng,enUS,en-US"
+        "--slang=en,eng,enUS,en-US"
     )
     if [ "$has_display" = true ]; then
         standalone_opts+=(
@@ -2300,7 +2305,7 @@ cmd_blind_play() {
             "--gpu-context=auto"
             "--hwdec=auto-safe"
             "--geometry=50%x50%"
-            "--ytdl-format=bestvideo[height<=1080][fps<=60][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
+            "--ytdl-format=bestvideo[height<=1080][fps<=60][vcodec^=avc1][format_note!*=Premium]+(bestaudio[language=en][acodec=opus]/bestaudio[language^=en]/bestaudio[acodec=opus]/bestaudio)/bestvideo[height<=1080]+(bestaudio[language=en]/bestaudio)/best"
         )
     else
         standalone_opts+=(

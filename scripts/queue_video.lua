@@ -144,34 +144,37 @@ end
 -- 3. Seamless Quality Profiles & Resilient Timestamp Seeking
 -- =========================================================================
 
+-- Prioritize English dubbed audio if available, smoothly falling back to original audio
+local AUDIO_FMT = "(bestaudio[language=en][acodec=opus]/bestaudio[language^=en][acodec=opus]/bestaudio[language=en]/bestaudio[language^=en]/bestaudio[acodec=opus]/bestaudio)"
+
 local QUALITY_PROFILES = {
     ["auto"] = {
         label = "Auto / Smart 60FPS (Adapts to internet)",
-        fmt = "bestvideo[height<=1080][fps<=60][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps<=60][format_note!*=Premium]+bestaudio/bestvideo[height<=720]+bestaudio/best"
+        fmt = "bestvideo[height<=1080][fps<=60][vcodec^=avc1][format_note!*=Premium]+" .. AUDIO_FMT .. "/bestvideo[height<=1080][fps<=60][format_note!*=Premium]+" .. AUDIO_FMT .. "/bestvideo[height<=720]+" .. AUDIO_FMT .. "/best"
     },
     ["720"] = {
         label = "720p HD (60fps fluid / bandwidth saver)",
-        fmt = "bestvideo[height<=720][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][fps>=50]+bestaudio/bestvideo[height<=720]+bestaudio[acodec=opus]/bestvideo[height<=720]+bestaudio/best[height<=720]"
+        fmt = "bestvideo[height<=720][fps>=50][vcodec^=avc1][format_note!*=Premium]+" .. AUDIO_FMT .. "/bestvideo[height<=720][fps>=50][vcodec^=vp9][format_note!*=Premium]+" .. AUDIO_FMT .. "/bestvideo[height<=720]+" .. AUDIO_FMT .. "/best[height<=720]"
     },
     ["1080"] = {
         label = "1080p Full HD (60fps crisp)",
-        fmt = "bestvideo[height<=1080][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50]+bestaudio/bestvideo[height<=1080]+bestaudio[acodec=opus]/bestvideo[height<=1080]+bestaudio/best"
+        fmt = "bestvideo[height<=1080][fps>=50][vcodec^=avc1][format_note!*=Premium]+" .. AUDIO_FMT .. "/bestvideo[height<=1080][fps>=50][vcodec^=vp9][format_note!*=Premium]+" .. AUDIO_FMT .. "/bestvideo[height<=1080]+" .. AUDIO_FMT .. "/best[height<=1080]"
     },
     ["1440"] = {
         label = "1440p 2K QHD (60fps ultra-crisp)",
-        fmt = "bestvideo[height<=1440][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][fps>=50]+bestaudio/bestvideo[height<=1440]+bestaudio[acodec=opus]/bestvideo[height<=1440]+bestaudio/best"
+        fmt = "bestvideo[height<=1440][fps>=50][vcodec^=avc1][format_note!*=Premium]+" .. AUDIO_FMT .. "/bestvideo[height<=1440][fps>=50][vcodec^=vp9][format_note!*=Premium]+" .. AUDIO_FMT .. "/bestvideo[height<=1440]+" .. AUDIO_FMT .. "/best[height<=1440]"
     },
     ["4k"] = {
         label = "Max / 4K UHD (Uncapped highest quality)",
-        fmt = "bestvideo[fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo+bestaudio[acodec=opus]/bestvideo+bestaudio/best"
+        fmt = "bestvideo[fps>=50][vcodec^=avc1][format_note!*=Premium]+" .. AUDIO_FMT .. "/bestvideo[fps>=50][vcodec^=vp9][format_note!*=Premium]+" .. AUDIO_FMT .. "/bestvideo+" .. AUDIO_FMT .. "/best"
     },
     ["480"] = {
         label = "480p SD (Low-bandwidth smooth)",
-        fmt = "bestvideo[height<=480]+bestaudio/best[height<=480]/best"
+        fmt = "bestvideo[height<=480]+" .. AUDIO_FMT .. "/best[height<=480]"
     },
     ["360"] = {
         label = "360p Low (Emergency smooth)",
-        fmt = "bestvideo[height<=360]+bestaudio/best[height<=360]/best"
+        fmt = "bestvideo[height<=360]+" .. AUDIO_FMT .. "/best[height<=360]"
     }
 }
 
