@@ -154,7 +154,28 @@ q "blinding lights the weeknd"
 
 ---
 
-## 📦 Step-by-Step Installation by OS
+## 📦 Installation & Setup
+
+### ⚡ 1-Line Universal Setup (Recommended)
+You can install Queue on any device (**Linux**, **macOS**, **Windows WSL2**, **Android Termux**) in seconds without manually cloning the repository. The smart setup script detects your operating system and pulls only the required components:
+
+```bash
+# Standard Standalone Mode (Headless / Native Audio & 60 FPS Video)
+curl -fsSL https://raw.githubusercontent.com/ravin-ship-it/queue/main/setup.sh | bash
+
+# Or enable Hybrid Boost Mode directly (Windows 120+ FPS / Android Hardware)
+curl -fsSL https://raw.githubusercontent.com/ravin-ship-it/queue/main/setup.sh | bash -s -- --hybrid
+```
+
+> [!TIP]
+> **100% Self-Contained Engine**: Queue is permanently installed into `~/.local/bin/mpv`. You can delete any cloned repository directory immediately after installation. To check health, update, or uninstall at any time:
+> - `q -deps` — Full multi-engine system dependencies diagnostic
+> - `q -up` — Universal 1-command engine & yt-dlp updater
+> - `q -uninstall` — Clean uninstallation checklist
+
+---
+
+### 🖥️ Step-by-Step Installation by OS (Manual Clone)
 
 Queue is designed to be 100% self-contained and automatically configures its environment. Below are step-by-step instructions tailored for each operating system:
 
@@ -684,10 +705,21 @@ When Auto-Mode is enabled:
 
 ## 🛠️ Uninstallation
 
+Queue can be cleanly uninstalled from anywhere with a single command, even after deleting the original repository folder:
+
 ```bash
-./uninstall.sh
+# Interactive uninstaller from anywhere
+q -uninstall      # or: q uninstall
+
+# Non-interactive complete wipe (skip all confirmation prompts)
+q -uninstall -y
 ```
-Cleanly removes all executables, shell wrapper functions, configurations, and cache files.
+
+If you are inside the repository or want to run it directly:
+```bash
+./uninstall.sh    # or: ./uninstall.sh -y
+```
+Cleanly removes all symlinks, executables, configuration files, Windows WSL2 host bridges, Android mobile scripts, and shell PATH modifications.
 
 ---
 

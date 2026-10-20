@@ -142,7 +142,7 @@ fi
 # --- Command Parsing ---
 
 PROCESSED_ANY_FLAG=false
-SMART_CMDS="^(play|pause|stop|next|prev|vol|info|list|clear|shuffle|remove|move|swap|help|save|load|auto|fx|deps|up|download|dl|d|dislike|dis|disl|rmd|undis|undislike|like|vid|video|watch|version|ver|res|quality|hybrid|hy)$"
+SMART_CMDS="^(play|pause|stop|next|prev|vol|info|list|clear|shuffle|remove|move|swap|help|save|load|auto|fx|deps|up|uninstall|download|dl|d|dislike|dis|disl|rmd|undis|undislike|like|vid|video|watch|version|ver|res|quality|hybrid|hy)$"
 
 while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
     PROCESSED_ANY_FLAG=true
@@ -170,6 +170,7 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
             fx) CMD="-fx" ;;
             deps) CMD="-deps" ;;
             up) CMD="-up" ;;
+            uninstall) CMD="-uninstall" ;;
             download|dl|d) CMD="-d" ;;
             dislike|dis) CMD="-dis" ;;
             disl) CMD="-disl" ;;
@@ -458,6 +459,11 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
             ;; 
         -deps) check_dependencies; shift ;;
         -up) cmd_update_ytdlp; shift ;;
+        -uninstall|--uninstall)
+            shift
+            cmd_uninstall "$@"
+            exit $?
+            ;;
         -d|-dl)
             shift
             target="$1"

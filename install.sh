@@ -172,7 +172,12 @@ echo -e "${CYAN}📦 Installing Queue engine into $DEST_DIR...${NC}"
 # Clean existing symlinks/files in destination before copying permanent files
 rm -rf "$DEST_DIR/q" "$DEST_DIR/q_modules" "$DEST_DIR/scripts"
 cp -r "$REPO_DIR/q" "$REPO_DIR/q_modules" "$REPO_DIR/scripts" "$DEST_DIR/"
-chmod +x "$DEST_DIR/q" "$DEST_DIR/q_modules/hybrid_bridge.py" "$DEST_DIR/q_modules/android_stream_bridge.py" 2>/dev/null || true
+cp -f "$REPO_DIR/install.sh" "$REPO_DIR/uninstall.sh" "$DEST_DIR/" 2>/dev/null || true
+[ -f "$REPO_DIR/setup.sh" ] && cp -f "$REPO_DIR/setup.sh" "$DEST_DIR/" 2>/dev/null || true
+[ -f "$REPO_DIR/input.conf.example" ] && cp -f "$REPO_DIR/input.conf.example" "$DEST_DIR/" 2>/dev/null || true
+[ -f "$REPO_DIR/mpv.conf.example" ] && cp -f "$REPO_DIR/mpv.conf.example" "$DEST_DIR/" 2>/dev/null || true
+chmod +x "$DEST_DIR/q" "$DEST_DIR/install.sh" "$DEST_DIR/uninstall.sh" "$DEST_DIR/setup.sh" 2>/dev/null || true
+chmod +x "$DEST_DIR/q_modules/hybrid_bridge.py" "$DEST_DIR/q_modules/android_stream_bridge.py" 2>/dev/null || true
 
 # Link to user and system bin paths for instant zero-restart availability
 ln -sf "$DEST_DIR/q" "$HOME/.local/bin/q"
@@ -190,6 +195,7 @@ fi
 echo -e "${GREEN}✅ Queue installed permanently to $DEST_DIR (symlinked to PATH)${NC}"
 echo -e "${GRAY}   👉 Self-Contained: You can delete the cloned folder anytime without breaking q!${NC}"
 echo -e "${GRAY}   👉 Auto-Updates: Run 'q -up' anytime from any directory to update Queue & yt-dlp.${NC}"
+echo -e "${GRAY}   👉 Easy Removal: Run 'q -uninstall' anytime to cleanly remove Queue.${NC}"
 
 # --- Configuration ---
 CONF_DIR="$HOME/.config/mpv"

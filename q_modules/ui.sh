@@ -37,136 +37,6 @@ get_clipboard() {
     fi
 }
 
-check_dependencies() {
-    local missing=()
-    command -v mpv >/dev/null || missing+=("mpv")
-    if ! command -v yt-dlp >/dev/null || ! yt-dlp --version >/dev/null 2>&1; then
-        if ! python3 -m yt_dlp --version >/dev/null 2>&1; then
-            missing+=("yt-dlp (broken/missing)")
-        fi
-    fi
-    command -v fzf >/dev/null || missing+=("fzf")
-    command -v jq >/dev/null || missing+=("jq")
-    command -v nc >/dev/null || missing+=("netcat")
-    
-    if [ ${#missing[@]} -gt 0 ]; then
-        echo -e "${C_PINK}❌ Missing or Broken Dependencies:${C_RESET} ${missing[*]}"
-        
-        if [ "$IS_ANDROID" = true ] || (command -v pkg >/dev/null && [ -d "/data/data/com.termux" ]); then
-            echo -e "${C_GRAY}Fix/Install on Termux with:${C_RESET}"
-            echo -e "  ${C_CYAN}pkg install -y python python-pip && pip install -U --force-reinstall yt-dlp${C_RESET}"
-        elif [ "$IS_MACOS" = true ] || command -v brew >/dev/null 2>&1; then
-            echo -e "${C_GRAY}Install on macOS with Homebrew:${C_RESET}"
-            echo -e "  ${C_CYAN}brew install mpv yt-dlp fzf jq node${C_RESET}"
-        else
-            echo -e "${C_GRAY}Install on Linux/WSL with:${C_RESET}"
-            echo -e "  ${C_CYAN}sudo apt update && sudo apt install mpv fzf jq netcat-openbsd ffmpeg${C_RESET}"
-            echo -e "  ${C_CYAN}pip install -U yt-dlp || sudo wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O /usr/local/bin/yt-dlp${C_RESET}"
-            echo -e "  ${C_CYAN}sudo chmod a+rx /usr/local/bin/yt-dlp${C_RESET}"
-        fi
-        return 1
-    fi
-    echo -e "${C_GREEN}✅ All core dependencies are installed and functioning:${C_RESET} ${C_CYAN}mpv, yt-dlp, fzf, jq, netcat${C_RESET}"
-    return 0
-}
-
-cmd_update_ytdlp() {
-    echo -e "${C_CYAN}──────────────────────────────────────────────────────────────────────────────${C_RESET}"
-    echo -e "${C_PINK}🚀 Updating yt-dlp & Queue Engine...${C_RESET}"
-    echo -e "${C_CYAN}──────────────────────────────────────────────────────────────────────────────${C_RESET}"
-    
-    # 1. Update yt-dlp
-    echo -e "${C_CYAN}📦 [1/2] Updating yt-dlp...${C_RESET}"
-    local ytdl_updated=false
-    
-    if command -v pkg >/dev/null 2>&1 && [ -d "/data/data/com.termux" ]; then
-        # Termux environment: prioritize pip with force-reinstall to prevent broken site-packages
-        if pip install -U --force-reinstall yt-dlp 2>/dev/null || pip3 install -U --force-reinstall yt-dlp 2>/dev/null; then
-            local new_ver=$(yt-dlp --version 2>/dev/null || python3 -m yt_dlp --version 2>/dev/null)
-            echo -e "${C_GREEN}✅ yt-dlp updated for Termux: ${C_YELLOW}${new_ver}${C_RESET}"
-            ytdl_updated=true
-        fi
-    fi
-
-    if [ "$ytdl_updated" = false ]; then
-        if yt-dlp -U 2>/dev/null; then
-            local new_ver=$(yt-dlp --version 2>/dev/null)
-            echo -e "${C_GREEN}✅ yt-dlp is up to date: ${C_YELLOW}${new_ver}${C_RESET}"
-            ytdl_updated=true
-        elif pip install -U yt-dlp 2>/dev/null || pip3 install -U yt-dlp 2>/dev/null || pip install -U yt-dlp --user 2>/dev/null; then
-            local new_ver=$(yt-dlp --version 2>/dev/null || python3 -m yt_dlp --version 2>/dev/null)
-            echo -e "${C_GREEN}✅ yt-dlp updated via pip: ${C_YELLOW}${new_ver}${C_RESET}"
-            ytdl_updated=true
-        elif mkdir -p "$HOME/.local/bin" && { curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o "$HOME/.local/bin/yt-dlp" 2>/dev/null || wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O "$HOME/.local/bin/yt-dlp" 2>/dev/null; }; then
-            chmod +x "$HOME/.local/bin/yt-dlp"
-            command -v termux-fix-shebang >/dev/null 2>&1 && termux-fix-shebang "$HOME/.local/bin/yt-dlp" 2>/dev/null
-            local new_ver=$("$HOME/.local/bin/yt-dlp" --version 2>/dev/null)
-            echo -e "${C_GREEN}✅ yt-dlp updated to latest official version: ${C_YELLOW}${new_ver}${C_RESET}"
-            ytdl_updated=true
-        fi
-    fi
-    [ "$ytdl_updated" = false ] && echo -e "${C_ORANGE}⚠️ Could not auto-update yt-dlp.${C_RESET}"
-
-    # 2. Update Queue Engine directly into ~/.local/bin/mpv/
-    echo -e "${C_CYAN}📦 [2/2] Updating Queue Engine from GitHub...${C_RESET}"
-    local dest_dir="$HOME/.local/bin/mpv"
-    mkdir -p "$dest_dir/q_modules" "$dest_dir/scripts" "$HOME/.config/mpv/scripts"
-    
-    local files=(
-        "q"
-        "q_modules/ui.sh"
-        "q_modules/utils.sh"
-        "q_modules/media.sh"
-        "q_modules/queue.sh"
-        "q_modules/search.sh"
-        "q_modules/batch.sh"
-        "q_modules/playlist.sh"
-        "q_modules/download.sh"
-        "q_modules/hybrid_bridge.py"
-        "q_modules/android_stream_bridge.py"
-        "scripts/PipeRelay.cs"
-        "scripts/queue_video.lua"
-        "scripts/queue_android_bridge.lua"
-    )
-    local success=true
-    local base_url="https://raw.githubusercontent.com/ravin-ship-it/queue/main"
-    
-    for f in "${files[@]}"; do
-        if curl -sSL -f -H "Cache-Control: no-cache" "${base_url}/${f}" -o "${dest_dir}/${f}.tmp" 2>/dev/null; then
-            mv "${dest_dir}/${f}.tmp" "${dest_dir}/${f}"
-        else
-            success=false
-            rm -f "${dest_dir}/${f}.tmp"
-        fi
-    done
-    
-    # Sync updated scripts to active mpv config
-    if [ -f "$dest_dir/scripts/queue_video.lua" ]; then
-        cp -f "$dest_dir/scripts/queue_video.lua" "$HOME/.config/mpv/scripts/queue_video.lua" 2>/dev/null || true
-    fi
-    if [ -f "$dest_dir/scripts/queue_android_bridge.lua" ]; then
-        ensure_android_mpv_config >/dev/null 2>&1 || true
-    fi
-
-    # Always ensure executable permissions and symlinks
-    chmod +x "$dest_dir/q" "$dest_dir/q_modules/hybrid_bridge.py" "$dest_dir/q_modules/android_stream_bridge.py" 2>/dev/null || true
-    mkdir -p "$HOME/.local/bin"
-    ln -sf "$dest_dir/q" "$HOME/.local/bin/q"
-    if [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ] && [ -w "$PREFIX/bin" ]; then
-        ln -sf "$dest_dir/q" "$PREFIX/bin/q"
-    fi
-    if [ -d "/usr/local/bin" ] && [ -w "/usr/local/bin" ]; then
-        ln -sf "$dest_dir/q" "/usr/local/bin/q" 2>/dev/null || true
-    fi
-    
-    if [ "$success" = true ]; then
-        echo -e "${C_GREEN}✅ Queue Engine successfully updated to latest version!${C_RESET}"
-    else
-        echo -e "${C_ORANGE}⚠️ Failed to fetch all Queue updates from GitHub. Check your connection.${C_RESET}"
-    fi
-    echo -e "${C_CYAN}──────────────────────────────────────────────────────────────────────────────${C_RESET}"
-}
-
 get_terminal_width() {
     local w="${COLUMNS:-}"
     if [[ "$w" =~ ^[0-9]+$ ]] && [ "$w" -ge 20 ]; then
@@ -179,15 +49,6 @@ get_terminal_width() {
     echo "$w"
 }
 
-TERM_WIDTH=$(get_terminal_width)
-[ "$TERM_WIDTH" -lt 40 ] && TERM_WIDTH=40
-BOX_WIDTH=$((TERM_WIDTH - 2))
-INNER_WIDTH=$((BOX_WIDTH - 4)) 
-
-# Create Horizontal Lines
-printf -v H_LINE "%*s" "$((TERM_WIDTH))" ""
-H_LINE=${H_LINE// /─}
-
 strip_colors() {
     # Strip real ESC (x1B) sequences
     echo "$1" | sed "s/$(echo -e '\033')\[[0-9;]*[a-zA-Z]//g"
@@ -197,10 +58,18 @@ get_visual_width() {
     echo -n "$1" | wc -L
 }
 
+TERM_WIDTH=$(get_terminal_width)
+[ "$TERM_WIDTH" -lt 40 ] && TERM_WIDTH=40
+BOX_WIDTH=$((TERM_WIDTH - 2))
+INNER_WIDTH=$((BOX_WIDTH - 4))
+
+printf -v H_LINE "%*s" "$((TERM_WIDTH))" ""
+H_LINE=${H_LINE// /─}
+
 print_header_box() {
     local title="$1"
-    local width=$TERM_WIDTH
-    [ -z "$width" ] && width=80
+    local width=$(get_terminal_width)
+    [ -z "$width" ] || [ "$width" -lt 40 ] && width=80
     
     printf -v T_LINE "╭%*s╮" "$((width - 2))" ""
     T_LINE=${T_LINE// /─}
@@ -220,16 +89,435 @@ print_header_box() {
 print_boxed_line() {
     local content="$1"
     local borderless="${2:-false}"
+    local width=$(get_terminal_width)
+    [ -z "$width" ] || [ "$width" -lt 40 ] && width=80
     
     if [ "$borderless" == "true" ]; then
-        printf " %b\n" "$content"
+        printf " %s\n" "$content"
     else
         local visible_content=$(strip_colors "$content")
         local visible_width=$(get_visual_width "$visible_content")
-        local pad_len=$((TERM_WIDTH - visible_width - 4))
+        local pad_len=$((width - visible_width - 4))
         [ $pad_len -lt 0 ] && pad_len=0
         printf -v PADDING "%*s" "$pad_len" ""
-        printf "${C_PURPLE}│${C_RESET} %b%s ${C_PURPLE}│${C_RESET}\n" "$content" "$PADDING"
+        printf "${C_PURPLE}│${C_RESET} %s%s ${C_PURPLE}│${C_RESET}\n" "$content" "$PADDING"
+    fi
+}
+
+check_dependencies() {
+    local width=$(get_terminal_width)
+    [ -z "$width" ] || [ "$width" -lt 40 ] && width=80
+    printf -v H_LINE "%*s" "$((width - 2))" ""
+    H_LINE=${H_LINE// /─}
+
+    print_header_box "${C_PINK}🔍 Queue System & Dependencies Diagnostic${C_RESET}"
+
+    # 1. Core Runtime Dependencies
+    print_boxed_line "${C_BOLD}${C_CYAN}Core Runtime Engine:${C_RESET}"
+    local core_missing=()
+
+    # mpv
+    if command -v mpv >/dev/null 2>&1; then
+        local mpv_ver=$(mpv --version 2>/dev/null | head -n1 | awk '{print $1" "$2}')
+        local mpv_path=$(command -v mpv)
+        print_boxed_line "  ${C_TEAL}MPV Backend:     ${C_GREEN}Installed ✅${C_RESET} ${C_GRAY}(${mpv_ver} • ${mpv_path})${C_RESET}"
+    else
+        core_missing+=("mpv")
+        print_boxed_line "  ${C_TEAL}MPV Backend:     ${C_PINK}Missing ❌${C_RESET} ${C_GRAY}(Core media player engine)${C_RESET}"
+    fi
+
+    # yt-dlp
+    local ytdl_cmd=""
+    if command -v yt-dlp >/dev/null 2>&1 && yt-dlp --version >/dev/null 2>&1; then
+        ytdl_cmd="yt-dlp"
+    elif python3 -m yt_dlp --version >/dev/null 2>&1; then
+        ytdl_cmd="python3 -m yt_dlp"
+    fi
+
+    if [ -n "$ytdl_cmd" ]; then
+        local ytdl_ver=$($ytdl_cmd --version 2>/dev/null)
+        local ytdl_path=$(command -v yt-dlp 2>/dev/null || echo "python3 module")
+        print_boxed_line "  ${C_TEAL}yt-dlp Streamer: ${C_GREEN}Installed ✅${C_RESET} ${C_GRAY}(v${ytdl_ver} • ${ytdl_path})${C_RESET}"
+    else
+        core_missing+=("yt-dlp")
+        print_boxed_line "  ${C_TEAL}yt-dlp Streamer: ${C_PINK}Missing ❌${C_RESET} ${C_GRAY}(Streams YouTube & SoundCloud)${C_RESET}"
+    fi
+
+    # JavaScript Runtime (yt-dlp YouTube decryption)
+    local js_rt=""
+    for js in node deno bun qjs; do
+        if command -v "$js" >/dev/null 2>&1; then
+            js_rt="$js"
+            break
+        fi
+    done
+    if [ -n "$js_rt" ]; then
+        local js_ver=$("$js_rt" --version 2>/dev/null || echo "")
+        print_boxed_line "  ${C_TEAL}JS Decryptor:    ${C_GREEN}Ready ✅${C_RESET} ${C_GRAY}(${js_rt} ${js_ver} • Anti-bot cipher shield)${C_RESET}"
+    else
+        print_boxed_line "  ${C_TEAL}JS Decryptor:    ${C_ORANGE}Optional ⚠️${C_RESET} ${C_GRAY}(Install node/deno to bypass YouTube 403 throttles)${C_RESET}"
+    fi
+
+    # fzf
+    if command -v fzf >/dev/null 2>&1; then
+        local fzf_ver=$(fzf --version 2>/dev/null | awk '{print $1}')
+        local fzf_path=$(command -v fzf)
+        print_boxed_line "  ${C_TEAL}FZF Search TUI:  ${C_GREEN}Installed ✅${C_RESET} ${C_GRAY}(v${fzf_ver} • ${fzf_path})${C_RESET}"
+    else
+        core_missing+=("fzf")
+        print_boxed_line "  ${C_TEAL}FZF Search TUI:  ${C_PINK}Missing ❌${C_RESET} ${C_GRAY}(Interactive queue explorer)${C_RESET}"
+    fi
+
+    # jq
+    if command -v jq >/dev/null 2>&1; then
+        local jq_ver=$(jq --version 2>/dev/null)
+        local jq_path=$(command -v jq)
+        print_boxed_line "  ${C_TEAL}jq JSON Parser:  ${C_GREEN}Installed ✅${C_RESET} ${C_GRAY}(${jq_ver} • ${jq_path})${C_RESET}"
+    else
+        core_missing+=("jq")
+        print_boxed_line "  ${C_TEAL}jq JSON Parser:  ${C_PINK}Missing ❌${C_RESET} ${C_GRAY}(IPC response processor)${C_RESET}"
+    fi
+
+    # netcat
+    if command -v nc >/dev/null 2>&1 || command -v ncat >/dev/null 2>&1; then
+        local nc_path=$(command -v nc 2>/dev/null || command -v ncat 2>/dev/null)
+        print_boxed_line "  ${C_TEAL}Netcat (IPC):    ${C_GREEN}Installed ✅${C_RESET} ${C_GRAY}(${nc_path})${C_RESET}"
+    else
+        core_missing+=("netcat")
+        print_boxed_line "  ${C_TEAL}Netcat (IPC):    ${C_PINK}Missing ❌${C_RESET} ${C_GRAY}(Socket communication bridge)${C_RESET}"
+    fi
+
+    # ffmpeg
+    if command -v ffmpeg >/dev/null 2>&1; then
+        local ff_path=$(command -v ffmpeg)
+        print_boxed_line "  ${C_TEAL}FFmpeg Codecs:   ${C_GREEN}Installed ✅${C_RESET} ${C_GRAY}(${ff_path})${C_RESET}"
+    else
+        print_boxed_line "  ${C_TEAL}FFmpeg Codecs:   ${C_ORANGE}Recommended ⚠️${C_RESET} ${C_GRAY}(Recommended for audio transcoding & downloads)${C_RESET}"
+    fi
+
+    echo -e "${C_PURPLE}├${H_LINE}┤${C_RESET}"
+
+    # 2. Platform & Engine Mode Diagnostics
+    local cur_mode=$(get_queue_mode)
+    if [ "$IS_WSL" = true ]; then
+        print_boxed_line "${C_BOLD}${C_CYAN}Windows + WSL2 Environment Diagnostics:${C_RESET}"
+        if [ "$cur_mode" == "hybrid" ]; then
+            print_boxed_line "  ${C_TEAL}Active Engine:   ${C_ORANGE}Hybrid Boost Mode ⚡ (120+ FPS Direct3D & WASAPI)${C_RESET}"
+        else
+            print_boxed_line "  ${C_TEAL}Active Engine:   ${C_CYAN}Standalone WSL Mode 🐧 (60 FPS WSLg Compositor)${C_RESET}"
+        fi
+
+        # WSLg Direct3D12 check
+        if [ -d "/usr/lib/wsl/lib" ]; then
+            print_boxed_line "  ${C_TEAL}WSLg Direct3D12: ${C_GREEN}Available ✅${C_RESET} ${C_GRAY}(Mesa D3D12 hardware GPU driver)${C_RESET}"
+        else
+            print_boxed_line "  ${C_TEAL}WSLg Direct3D12: ${C_ORANGE}Not Detected ⚠️${C_RESET} ${C_GRAY}(WSLg GPU acceleration missing)${C_RESET}"
+        fi
+
+        # Hybrid Windows Host checks
+        local win_mpv=$(find_windows_mpv)
+        if [ -n "$win_mpv" ]; then
+            print_boxed_line "  ${C_TEAL}Windows Host MPV:${C_GREEN}Installed ✅${C_RESET} ${C_GRAY}(${win_mpv})${C_RESET}"
+        else
+            print_boxed_line "  ${C_TEAL}Windows Host MPV:${C_PINK}Not Found ❌${C_RESET} ${C_GRAY}(Run: winget install shinchiro.mpv)${C_RESET}"
+        fi
+
+        local win_ytdlp=$(find_windows_ytdlp)
+        if [ -n "$win_ytdlp" ]; then
+            print_boxed_line "  ${C_TEAL}Windows yt-dlp:  ${C_GREEN}Installed ✅${C_RESET} ${C_GRAY}(${win_ytdlp})${C_RESET}"
+        else
+            print_boxed_line "  ${C_TEAL}Windows yt-dlp:  ${C_ORANGE}Not Found ⚠️${C_RESET} ${C_GRAY}(Run: winget install yt-dlp.yt-dlp)${C_RESET}"
+        fi
+
+        local relay_bin=$(ensure_piperelay_compiled 2>/dev/null)
+        if [ -n "$relay_bin" ] && [ -f "$relay_bin" ]; then
+            print_boxed_line "  ${C_TEAL}PipeRelay.exe:   ${C_GREEN}Ready ✅${C_RESET} ${C_GRAY}(Sub-millisecond Windows Named Pipe bridge)${C_RESET}"
+        else
+            print_boxed_line "  ${C_TEAL}PipeRelay.exe:   ${C_PINK}Missing ❌${C_RESET} ${C_GRAY}(Run ./install.sh to auto-compile)${C_RESET}"
+        fi
+
+        local win_u_dir=$(get_windows_user_dir)
+        if [ -f "$win_u_dir/AppData/Roaming/mpv/scripts/queue_video.lua" ]; then
+            print_boxed_line "  ${C_TEAL}Windows Scripts: ${C_GREEN}Synchronized ✅${C_RESET} ${C_GRAY}(%APPDATA%\\mpv\\scripts)${C_RESET}"
+        else
+            print_boxed_line "  ${C_TEAL}Windows Scripts: ${C_ORANGE}Not Synced ⚠️${C_RESET} ${C_GRAY}(Run ./install.sh to sync)${C_RESET}"
+        fi
+
+        if [ -f "$win_u_dir/AppData/Roaming/mpv/input.conf" ]; then
+            print_boxed_line "  ${C_TEAL}Windows Keys:    ${C_GREEN}Synchronized ✅${C_RESET} ${C_GRAY}(%APPDATA%\\mpv\\input.conf)${C_RESET}"
+        else
+            print_boxed_line "  ${C_TEAL}Windows Keys:    ${C_ORANGE}Not Synced ⚠️${C_RESET} ${C_GRAY}(Run ./install.sh to sync)${C_RESET}"
+        fi
+
+    elif [ "$IS_ANDROID" = true ]; then
+        print_boxed_line "${C_BOLD}${C_CYAN}Android / Termux Mobile Diagnostics:${C_RESET}"
+        if [ "$cur_mode" == "hybrid" ]; then
+            print_boxed_line "  ${C_TEAL}Active Engine:   ${C_ORANGE}Hybrid Mobile Mode 🤖⚡ (Play Store MPV App)${C_RESET}"
+        else
+            print_boxed_line "  ${C_TEAL}Active Engine:   ${C_CYAN}Standalone Termux Mode 🐧 (Headless Audio)${C_RESET}"
+        fi
+
+        # Termux API
+        if command -v termux-battery-status >/dev/null 2>&1 || [ -f "$PREFIX/bin/termux-battery-status" ]; then
+            print_boxed_line "  ${C_TEAL}Termux:API:      ${C_GREEN}Installed ✅${C_RESET} ${C_GRAY}(Battery & hardware integration)${C_RESET}"
+        else
+            print_boxed_line "  ${C_TEAL}Termux:API:      ${C_ORANGE}Missing ⚠️${C_RESET} ${C_GRAY}(Install Termux:API app & pkg install termux-api)${C_RESET}"
+        fi
+
+        # Wake-Lock
+        if command -v termux-wake-lock >/dev/null 2>&1; then
+            print_boxed_line "  ${C_TEAL}CPU Wake-Lock:   ${C_GREEN}Available ✅${C_RESET} ${C_GRAY}(Prevents Android sleep during audio)${C_RESET}"
+        else
+            print_boxed_line "  ${C_TEAL}CPU Wake-Lock:   ${C_ORANGE}Missing ⚠️${C_RESET}"
+        fi
+
+        # Storage
+        if [ -d "$HOME/storage/shared" ] || [ -d "/sdcard" ]; then
+            print_boxed_line "  ${C_TEAL}Storage Access:  ${C_GREEN}Granted ✅${C_RESET} ${C_GRAY}(Shared storage accessible)${C_RESET}"
+        else
+            print_boxed_line "  ${C_TEAL}Storage Access:  ${C_PINK}Missing ❌${C_RESET} ${C_GRAY}(Run: termux-setup-storage)${C_RESET}"
+        fi
+
+        # Play Store MPV Android App
+        local has_mpv_app=false
+        if command -v pm >/dev/null 2>&1 && pm list packages 2>/dev/null | grep -q "is.xyz.mpv"; then
+            has_mpv_app=true
+        elif [ -d "/sdcard/mpv" ] || [ -d "/storage/emulated/0/mpv" ]; then
+            has_mpv_app=true
+        fi
+        if [ "$has_mpv_app" = true ]; then
+            print_boxed_line "  ${C_TEAL}MPV Android App: ${C_GREEN}Detected ✅${C_RESET} ${C_GRAY}('is.xyz.mpv' MediaCodec GPU ready)${C_RESET}"
+        else
+            print_boxed_line "  ${C_TEAL}MPV Android App: ${C_ORANGE}Not Detected ⚠️${C_RESET} ${C_GRAY}(Install from Play Store / F-Droid)${C_RESET}"
+        fi
+
+        # Lua Bridge
+        if [ -f "/sdcard/mpv/scripts/queue_bridge.lua" ] || [ -f "$HOME/storage/shared/mpv/scripts/queue_bridge.lua" ]; then
+            print_boxed_line "  ${C_TEAL}Lua Bridge:      ${C_GREEN}Installed ✅${C_RESET} ${C_GRAY}(/sdcard/mpv/scripts/queue_bridge.lua)${C_RESET}"
+        else
+            print_boxed_line "  ${C_TEAL}Lua Bridge:      ${C_ORANGE}Not Installed ⚠️${C_RESET} ${C_GRAY}(Run ./install.sh to configure)${C_RESET}"
+        fi
+
+    elif [ "$IS_MACOS" = true ]; then
+        print_boxed_line "${C_BOLD}${C_CYAN}macOS Native Environment Diagnostics:${C_RESET}"
+        local mac_ver=$(sw_vers -productVersion 2>/dev/null || uname -r)
+        print_boxed_line "  ${C_TEAL}OS Version:      ${C_GREEN}macOS ${mac_ver} ✅${C_RESET}"
+        print_boxed_line "  ${C_TEAL}Audio Pipeline:  ${C_GREEN}Native CoreAudio (ao=coreaudio) ✅${C_RESET}"
+        print_boxed_line "  ${C_TEAL}GPU Acceleration:${C_GREEN}Native Cocoa / Metal (Direct 120+ FPS) ✅${C_RESET}"
+
+    elif [ "$IS_LINUX" = true ]; then
+        print_boxed_line "${C_BOLD}${C_CYAN}Native Linux Environment Diagnostics:${C_RESET}"
+        if [ -n "$WAYLAND_DISPLAY" ]; then
+            print_boxed_line "  ${C_TEAL}Display Server:  ${C_GREEN}Wayland (${WAYLAND_DISPLAY}) ✅${C_RESET}"
+        elif [ -n "$DISPLAY" ]; then
+            print_boxed_line "  ${C_TEAL}Display Server:  ${C_GREEN}X11 (${DISPLAY}) ✅${C_RESET}"
+        else
+            print_boxed_line "  ${C_TEAL}Display Server:  ${C_GRAY}Headless (Terminal Audio Only) ℹ️${C_RESET}"
+        fi
+
+        local audio_srv="ALSA"
+        if pactl info 2>/dev/null | grep -qi "pipewire"; then
+            audio_srv="PipeWire"
+        elif pactl info 2>/dev/null | grep -qi "pulse"; then
+            audio_srv="PulseAudio"
+        fi
+        print_boxed_line "  ${C_TEAL}Audio Backend:   ${C_GREEN}${audio_srv} ✅${C_RESET}"
+        print_boxed_line "  ${C_TEAL}GPU Driver:      ${C_GREEN}Kernel Direct DRM (Mesa / NVIDIA) ✅${C_RESET}"
+    fi
+
+    printf -v B_LINE "╰%*s╯" "$((width - 2))" ""
+    B_LINE=${B_LINE// /─}
+    echo -e "${C_PURPLE}${B_LINE}${C_RESET}"
+
+    if [ ${#core_missing[@]} -eq 0 ]; then
+        echo -e "${C_GREEN}✨ All core dependencies are healthy and ready to stream!${C_RESET}"
+        return 0
+    else
+        echo -e "${C_PINK}❌ Missing core dependencies: ${core_missing[*]}${C_RESET}"
+        echo -e "${C_GRAY}👉 Run: ${C_WHITE}./install.sh${C_GRAY} to automatically install all missing components.${C_RESET}"
+        return 1
+    fi
+}
+
+cmd_update_ytdlp() {
+    local width=$(get_terminal_width)
+    [ -z "$width" ] || [ "$width" -lt 40 ] && width=80
+    
+    print_header_box "${C_PINK}🚀 Full System Upgrade — yt-dlp & Queue Engine${C_RESET}"
+    
+    # 1. Update yt-dlp (Universal across platforms)
+    print_boxed_line "${C_BOLD}${C_CYAN}📦 [1/3] Updating yt-dlp Streaming Engine...${C_RESET}"
+    local ytdl_updated=false
+    
+    if command -v pkg >/dev/null 2>&1 && [ -d "/data/data/com.termux" ]; then
+        if pip install -U --force-reinstall yt-dlp 2>/dev/null || pip3 install -U --force-reinstall yt-dlp 2>/dev/null; then
+            local new_ver=$(yt-dlp --version 2>/dev/null || python3 -m yt_dlp --version 2>/dev/null)
+            print_boxed_line "  ${C_GREEN}✅ Termux yt-dlp updated:${C_RESET} ${C_YELLOW}v${new_ver}${C_RESET}"
+            ytdl_updated=true
+        fi
+    fi
+
+    if [ "$ytdl_updated" = false ]; then
+        if yt-dlp -U 2>/dev/null; then
+            local new_ver=$(yt-dlp --version 2>/dev/null)
+            print_boxed_line "  ${C_GREEN}✅ yt-dlp binary updated:${C_RESET} ${C_YELLOW}v${new_ver}${C_RESET}"
+            ytdl_updated=true
+        elif pip install -U yt-dlp 2>/dev/null || pip3 install -U yt-dlp 2>/dev/null || pip install -U yt-dlp --user 2>/dev/null; then
+            local new_ver=$(yt-dlp --version 2>/dev/null || python3 -m yt_dlp --version 2>/dev/null)
+            print_boxed_line "  ${C_GREEN}✅ yt-dlp pip package updated:${C_RESET} ${C_YELLOW}v${new_ver}${C_RESET}"
+            ytdl_updated=true
+        elif mkdir -p "$HOME/.local/bin" && { curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o "$HOME/.local/bin/yt-dlp" 2>/dev/null || wget https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -O "$HOME/.local/bin/yt-dlp" 2>/dev/null; }; then
+            chmod +x "$HOME/.local/bin/yt-dlp"
+            command -v termux-fix-shebang >/dev/null 2>&1 && termux-fix-shebang "$HOME/.local/bin/yt-dlp" 2>/dev/null
+            local new_ver=$("$HOME/.local/bin/yt-dlp" --version 2>/dev/null)
+            print_boxed_line "  ${C_GREEN}✅ Standalone yt-dlp binary updated:${C_RESET} ${C_YELLOW}v${new_ver}${C_RESET}"
+            ytdl_updated=true
+        fi
+    fi
+
+    # Update Windows Host yt-dlp if on WSL2
+    if [ "$IS_WSL" = true ]; then
+        if cmd.exe /c "where winget" </dev/null >/dev/null 2>&1; then
+            cmd.exe /c "winget upgrade yt-dlp.yt-dlp --accept-source-agreements --accept-package-agreements" </dev/null >/dev/null 2>&1 || true
+        fi
+        local win_ytdlp=$(find_windows_ytdlp)
+        if [ -n "$win_ytdlp" ]; then
+            print_boxed_line "  ${C_GREEN}✅ Windows Host yt-dlp verified:${C_RESET} ${C_YELLOW}${win_ytdlp}${C_RESET}"
+        fi
+    fi
+    [ "$ytdl_updated" = false ] && print_boxed_line "  ${C_ORANGE}⚠️ Could not auto-update yt-dlp. Check network or package manager.${C_RESET}"
+
+    # 2. Update Queue Engine directly into destination directory
+    print_boxed_line "${C_BOLD}${C_CYAN}📦 [2/3] Fetching Latest Queue Engine Components from GitHub...${C_RESET}"
+    local dest_dir="$HOME/.local/bin/mpv"
+    mkdir -p "$dest_dir/q_modules" "$dest_dir/scripts" "$HOME/.config/mpv/scripts"
+    
+    local files=(
+        "q"
+        "q_modules/ui.sh"
+        "q_modules/utils.sh"
+        "q_modules/media.sh"
+        "q_modules/queue.sh"
+        "q_modules/search.sh"
+        "q_modules/batch.sh"
+        "q_modules/playlist.sh"
+        "q_modules/download.sh"
+        "q_modules/hybrid_bridge.py"
+        "q_modules/android_stream_bridge.py"
+        "scripts/PipeRelay.cs"
+        "scripts/queue_video.lua"
+        "scripts/queue_android_bridge.lua"
+        "install.sh"
+        "uninstall.sh"
+        "setup.sh"
+        "input.conf.example"
+        "mpv.conf.example"
+    )
+    local success=true
+    local base_url="https://raw.githubusercontent.com/ravin-ship-it/queue/main"
+    
+    for f in "${files[@]}"; do
+        if curl -sSL -f -H "Cache-Control: no-cache" "${base_url}/${f}" -o "${dest_dir}/${f}.tmp" 2>/dev/null; then
+            mv "${dest_dir}/${f}.tmp" "${dest_dir}/${f}"
+        else
+            success=false
+            rm -f "${dest_dir}/${f}.tmp"
+        fi
+    done
+
+    # 3. Mode-Specific & Host Re-Synchronization
+    print_boxed_line "${C_BOLD}${C_CYAN}📦 [3/3] Synchronizing Environment & Engine Profiles...${C_RESET}"
+
+    # Sync scripts to user config
+    if [ -f "$dest_dir/scripts/queue_video.lua" ]; then
+        cp -f "$dest_dir/scripts/queue_video.lua" "$HOME/.config/mpv/scripts/queue_video.lua" 2>/dev/null || true
+    fi
+
+    # Windows WSL2 Hybrid Sync
+    if [ "$IS_WSL" = true ]; then
+        local win_u_dir=$(get_windows_user_dir)
+        if [ -n "$win_u_dir" ] && [ -d "$win_u_dir" ]; then
+            local win_mpv_dir="$win_u_dir/AppData/Roaming/mpv"
+            mkdir -p "$win_mpv_dir/scripts" 2>/dev/null
+            cp -f "$dest_dir/scripts/queue_video.lua" "$win_mpv_dir/scripts/queue_video.lua" 2>/dev/null || true
+            if [ -f "$dest_dir/input.conf.example" ] && [ ! -f "$win_mpv_dir/input.conf" ]; then
+                cp -f "$dest_dir/input.conf.example" "$win_mpv_dir/input.conf" 2>/dev/null || true
+            fi
+            # Recompile PipeRelay if needed
+            local csc_comp="/mnt/c/Windows/Microsoft.NET/Framework64/v4.0.30319/csc.exe"
+            [ ! -f "$csc_comp" ] && csc_comp="/mnt/c/Windows/Microsoft.NET/Framework/v4.0.30319/csc.exe"
+            if [ -f "$csc_comp" ] && [ -f "$dest_dir/scripts/PipeRelay.cs" ]; then
+                cp -f "$dest_dir/scripts/PipeRelay.cs" "$win_u_dir/PipeRelay.cs" 2>/dev/null
+                (cd "$win_u_dir" && "$csc_comp" /out:PipeRelay.exe /target:exe /nologo PipeRelay.cs </dev/null >/dev/null 2>&1)
+                rm -f "$win_u_dir/PipeRelay.cs" 2>/dev/null
+            fi
+            print_boxed_line "  ${C_GREEN}✅ Windows Hybrid Boost Mode host components re-synchronized!${C_RESET}"
+        fi
+    fi
+
+    # Android Termux Mobile Sync
+    if [ "$IS_ANDROID" = true ]; then
+        for mpv_dir in "/sdcard/mpv" "/storage/emulated/0/mpv" "$HOME/storage/shared/mpv"; do
+            if [ -d "$mpv_dir" ] || mkdir -p "$mpv_dir/scripts" 2>/dev/null; then
+                cp -f "$dest_dir/scripts/queue_android_bridge.lua" "$mpv_dir/scripts/queue_bridge.lua" 2>/dev/null || true
+                break
+            fi
+        done
+        print_boxed_line "  ${C_GREEN}✅ Android Mobile Hybrid bridge re-synchronized!${C_RESET}"
+    fi
+
+    # Always ensure executable permissions and symlinks
+    chmod +x "$dest_dir/q" "$dest_dir/q_modules/hybrid_bridge.py" "$dest_dir/q_modules/android_stream_bridge.py" 2>/dev/null || true
+    chmod +x "$dest_dir/install.sh" "$dest_dir/uninstall.sh" "$dest_dir/setup.sh" 2>/dev/null || true
+    mkdir -p "$HOME/.local/bin"
+    ln -sf "$dest_dir/q" "$HOME/.local/bin/q"
+    if [ -n "$PREFIX" ] && [ -d "$PREFIX/bin" ] && [ -w "$PREFIX/bin" ]; then
+        ln -sf "$dest_dir/q" "$PREFIX/bin/q"
+    fi
+    if [ -d "/usr/local/bin" ] && [ -w "/usr/local/bin" ]; then
+        ln -sf "$dest_dir/q" "/usr/local/bin/q" 2>/dev/null || true
+    fi
+
+    local new_q_ver
+    new_q_ver=$(grep -m1 '^QUEUE_VERSION=' "$dest_dir/q_modules/utils.sh" 2>/dev/null | cut -d'"' -f2)
+    [ -z "$new_q_ver" ] && new_q_ver="$QUEUE_VERSION"
+
+    printf -v B_LINE "╰%*s╯" "$((width - 2))" ""
+    B_LINE=${B_LINE// /─}
+    echo -e "${C_PURPLE}${B_LINE}${C_RESET}"
+
+    if [ "$success" = true ]; then
+        echo -e "${C_GREEN}✨ Queue Engine successfully updated to ${C_YELLOW}v${new_q_ver}${C_GREEN} (All modes synced)!${C_RESET}"
+    else
+        echo -e "${C_ORANGE}⚠️ Failed to fetch some components from GitHub. Check network connection.${C_RESET}"
+    fi
+}
+
+cmd_uninstall() {
+    local uninstaller=""
+    local dest_dir="$HOME/.local/bin/mpv"
+    local script_dir
+    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+    if [ -f "$script_dir/uninstall.sh" ]; then
+        uninstaller="$script_dir/uninstall.sh"
+    elif [ -f "$dest_dir/uninstall.sh" ]; then
+        uninstaller="$dest_dir/uninstall.sh"
+    fi
+
+    if [ -n "$uninstaller" ]; then
+        bash "$uninstaller" "$@"
+        return $?
+    fi
+
+    echo -e "${C_CYAN}🗑️ Fetching official uninstaller from GitHub...${C_RESET}"
+    if command -v curl >/dev/null 2>&1; then
+        bash <(curl -fsSL "https://raw.githubusercontent.com/ravin-ship-it/queue/main/uninstall.sh") "$@"
+    elif command -v wget >/dev/null 2>&1; then
+        bash <(wget -qO- "https://raw.githubusercontent.com/ravin-ship-it/queue/main/uninstall.sh") "$@"
+    else
+        echo -e "${C_PINK}❌ Error: curl or wget is required to download uninstaller.${C_RESET}"
+        return 1
     fi
 }
 
@@ -314,8 +602,9 @@ show_help() {
     print_boxed_line "  -shuf [list]    Shuffle Mode or actual Queue Entries"
     print_boxed_line "  -clr            Clear entire queue"
     print_boxed_line "  -auto           Toggle Auto-Discovery (24/7 Related Hits)"
-    print_boxed_line "  -deps           Check dependencies (WSL/Android)"
-    print_boxed_line "  -up             Update yt-dlp"
+    print_boxed_line "  -deps           System & Multi-Engine Dependencies Diagnostic"
+    print_boxed_line "  -up             Full Queue & Engine Auto-Updater (yt-dlp + scripts)"
+    print_boxed_line "  -uninstall      Uninstall Queue and cleanly remove all engine components"
     print_boxed_line "  -version / -V   Display version information"
     print_boxed_line "  -raw            Raw Queue output (for scripts)"
     print_boxed_line ""
