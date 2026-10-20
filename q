@@ -1009,7 +1009,7 @@ if [ "$IS_BATCH" = true ]; then
             echo -e "${C_CYAN}🔍 Analyzing URL:${C_RESET} $input"
             PL_TMP=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/q_pl_$$.tmp")
             # Use strict 4-column format for analysis and caching
-            local ytdl_batch_opts=("--extractor-args" "youtube:player_client=visionos,android,web" "--flat-playlist" "--print" "%(webpage_url)s\t%(title)s\t%(uploader)s\t%(duration_string)s" "--no-warnings" "--skip-download")
+            ytdl_batch_opts=("--extractor-args" "youtube:player_client=visionos,android,web" "--flat-playlist" "--print" "%(webpage_url)s\t%(title)s\t%(uploader)s\t%(duration_string)s" "--no-warnings" "--skip-download")
             command -v node >/dev/null 2>&1 && ytdl_batch_opts+=("--js-runtimes" "node")
             [ -n "$COOKIES_FILE" ] && [ -f "$COOKIES_FILE" ] && ytdl_batch_opts+=("--cookies" "$COOKIES_FILE")
             run_with_timeout 45 yt-dlp "${ytdl_batch_opts[@]}" -- "$input" > "$PL_TMP" 2>/dev/null
