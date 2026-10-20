@@ -2223,10 +2223,16 @@ cmd_blind_play() {
             win_u_dir=$(get_windows_user_dir)
             local win_opts=(
                 "--force-window=yes"
+                "--video=auto"
+                "--vid=auto"
+                "--vo=gpu"
+                "--gpu-context=auto"
+                "--hwdec=auto-safe"
                 "--keep-open=no"
                 "--title=Queue [Blind Mode]: $display_title"
                 "--geometry=50%x50%"
                 "--input-ipc-server=\\\\.\\pipe\\mpv-blind-$RANDOM"
+                "--msg-level=all=warn,ao=error"
             )
             [ -n "$win_ytdl" ] && win_opts+=("--script-opts=ytdl_hook-ytdl_path=$win_ytdl")
             if [ -n "$win_u_dir" ] && [ -f "$win_u_dir/AppData/Roaming/mpv/scripts/queue_video.lua" ]; then
@@ -2283,16 +2289,23 @@ cmd_blind_play() {
         "--keep-open=no"
         "--title=Queue [Blind Mode]: $display_title"
         "--input-ipc-server=/tmp/mpv-blind-$$.sock"
+        "--msg-level=all=warn,ao=error,pw.conf=error"
     )
     if [ "$has_display" = true ]; then
         standalone_opts+=(
             "--force-window=yes"
+            "--video=auto"
+            "--vid=auto"
+            "--vo=gpu"
+            "--gpu-context=auto"
+            "--hwdec=auto-safe"
             "--geometry=50%x50%"
-            "--ytdl-format=bestvideo[height<=1080][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
+            "--ytdl-format=bestvideo[height<=1080][fps<=60][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080]+bestaudio/best[height<=1080]/best"
         )
     else
         standalone_opts+=(
             "--force-window=no"
+            "--video=no"
             "--vo=null"
         )
     fi

@@ -5,16 +5,16 @@ save-position-on-quit=no
 resume-playback=no
 
 # Terminal / Audio (macOS, Linux, WSL, Android/Termux Resilient)
-ao=coreaudio,pipewire,pulse,alsa,opensles,audiotrack
+ao=pulse,pipewire,alsa,coreaudio,opensles,audiotrack
 pulse-latency-hacks=yes
 pulse-buffer=250
-audio-stream-silence=yes
 audio-wait-open=0.2
 audio-channels=stereo
 volume=100
 volume-max=200
 gapless-audio=yes
 audio-pitch-correction=yes
+msg-level=ao=warn,pw.conf=error
 
 # Network & Streaming Reconnect Resilience (Fluid Readahead & Fluctuation Protection)
 network-timeout=30
