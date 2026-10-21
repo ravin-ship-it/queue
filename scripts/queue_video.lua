@@ -146,6 +146,61 @@ end
 
 local lang_file = home ~= "" and (home .. "/.config/mpv/queue_lang") or nil
 local langs_cache_file = home ~= "" and (home .. "/.cache/mpv/current_audio_langs.json") or nil
+local res_file = nil
+local hw_ceiling_file = nil
+if home ~= "" then
+    if (package.config:sub(1,1) == "\\") or (os.getenv("WINDIR") ~= nil) then
+        res_file = home .. "/AppData/Roaming/mpv/queue_res"
+        hw_ceiling_file = home .. "/AppData/Roaming/mpv/queue_hw_ceiling"
+    else
+        res_file = home .. "/.config/mpv/queue_res"
+        hw_ceiling_file = home .. "/.config/mpv/queue_hw_ceiling"
+    end
+end
+
+local function get_saved_res()
+    if not res_file then return "auto" end
+    local f = io.open(res_file, "r")
+    if not f then return "auto" end
+    local content = f:read("*a")
+    f:close()
+    if content then
+        local trimmed = content:match("^%s*(.-)%s*$")
+        if trimmed and trimmed ~= "" then return trimmed:lower() end
+    end
+    return "auto"
+end
+
+local function save_res_pref(tier)
+    if not res_file or not tier then return end
+    local f = io.open(res_file, "w")
+    if f then
+        f:write(tier .. "\n")
+        f:close()
+    end
+end
+
+local function get_hw_ceiling()
+    if not hw_ceiling_file then return "4k" end
+    local f = io.open(hw_ceiling_file, "r")
+    if not f then return "4k" end
+    local content = f:read("*a")
+    f:close()
+    if content then
+        local trimmed = content:match("^%s*(.-)%s*$")
+        if trimmed and trimmed ~= "" then return trimmed:lower() end
+    end
+    return "4k"
+end
+
+local function save_hw_ceiling(tier)
+    if not hw_ceiling_file or not tier then return end
+    local f = io.open(hw_ceiling_file, "w")
+    if f then
+        f:write(tier .. "\n")
+        f:close()
+    end
+end
 
 local function get_saved_lang()
     if not lang_file then return "en" end
@@ -193,50 +248,73 @@ end
 local function get_audio_format(lang)
     lang = (lang or current_lang or "en"):lower()
     if lang == "auto" or lang == "orig" or lang == "original" then
-        return "(bestaudio[acodec=opus]/bestaudio)"
+        return "(bestaudio[acodec=opus]/bestaudio[acodec^=mp4a]/bestaudio)"
     end
-    return string.format("(bestaudio[language=%s][acodec=opus]/bestaudio[language^=%s][acodec=opus]/bestaudio[language=%s]/bestaudio[language^=%s]/bestaudio[acodec=opus]/bestaudio)", lang, lang, lang, lang)
+    return string.format("(bestaudio[language=%s][acodec=opus]/bestaudio[language^=%s][acodec=opus]/bestaudio[language=%s]/bestaudio[language^=%s]/bestaudio[acodec=opus]/bestaudio[acodec^=mp4a]/bestaudio)", lang, lang, lang, lang)
 end
 
 local function get_quality_format(tier, lang)
     tier = (tier or "auto"):lower()
     local audio_fmt = get_audio_format(lang)
-    if tier == "auto" then
-        return "bestvideo[height<=1080][fps<=60][vcodec^=avc1][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=1080][fps<=60][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=720]+" .. audio_fmt .. "/best"
-    elseif tier == "720" then
-        return "bestvideo[height<=720][fps>=50][vcodec^=avc1][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=720][fps>=50][vcodec^=vp9][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=720]+" .. audio_fmt .. "/best[height<=720]"
-    elseif tier == "1080" then
-        return "bestvideo[height<=1080][fps>=50][vcodec^=avc1][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=1080][fps>=50][vcodec^=vp9][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=1080]+" .. audio_fmt .. "/best[height<=1080]"
-    elseif tier == "1440" then
-        return "bestvideo[height<=1440][fps>=50][vcodec^=avc1][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=1440][fps>=50][vcodec^=vp9][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=1440]+" .. audio_fmt .. "/best[height<=1440]"
-    elseif tier == "4k" then
-        return "bestvideo[fps>=50][vcodec^=avc1][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[fps>=50][vcodec^=vp9][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo+" .. audio_fmt .. "/best"
-    elseif tier == "480" then
-        return "bestvideo[height<=480]+" .. audio_fmt .. "/best[height<=480]"
-    elseif tier == "360" then
-        return "bestvideo[height<=360]+" .. audio_fmt .. "/best[height<=360]"
+    local hw_ceiling = get_hw_ceiling()
+
+    if tier == "auto" or tier == "max" then
+        if hw_ceiling == "8k" or hw_ceiling == "4320" then
+            -- Uncapped 8K for high-end rigs with dedicated 8K hardware decoder
+            return "bestvideo[fps>30][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[format_note!*=Premium]+" .. audio_fmt .. "/bestvideo+" .. audio_fmt .. "/best"
+        elseif hw_ceiling == "high" or hw_ceiling == "1440" or hw_ceiling == "2k" then
+            return "bestvideo[height<=1440][fps>30][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=1440][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=1440]+" .. audio_fmt .. "/best[height<=1440]"
+        elseif hw_ceiling == "mid" or hw_ceiling == "1080" then
+            return "bestvideo[height<=1080][fps>30][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=1080][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=1080]+" .. audio_fmt .. "/best[height<=1080]"
+        else
+            -- Default smooth hardware ceiling: 4K (2160p) @ 60 FPS (prevents 8K decoder overload & game-like lag)
+            return "bestvideo[height<=2160][fps>30][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=2160][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=2160]+" .. audio_fmt .. "/best[height<=2160]"
+        end
+    elseif tier == "8k" or tier == "4320" then
+        -- Explicit 8K manual override
+        return "bestvideo[fps>30][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[format_note!*=Premium]+" .. audio_fmt .. "/bestvideo+" .. audio_fmt .. "/best"
+    elseif tier == "4k" or tier == "2160" or tier == "uhd" then
+        return "bestvideo[height<=2160][fps>30][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=2160][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=2160]+" .. audio_fmt .. "/best[height<=2160]"
+    elseif tier == "high" or tier == "1440" or tier == "2k" or tier == "qhd" then
+        return "bestvideo[height<=1440][fps>30][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=1440][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=1440]+" .. audio_fmt .. "/best[height<=1440]"
+    elseif tier == "mid" or tier == "1080" or tier == "fhd" or tier == "medium" then
+        return "bestvideo[height<=1080][fps>30][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=1080][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=1080]+" .. audio_fmt .. "/best[height<=1080]"
+    elseif tier == "low" or tier == "720" or tier == "hd" then
+        return "bestvideo[height<=720][fps>30][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=720][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=720]+" .. audio_fmt .. "/best[height<=720]"
+    elseif tier == "480" or tier == "sd" then
+        return "bestvideo[height<=480][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=480]+" .. audio_fmt .. "/best[height<=480]"
+    elseif tier == "360" or tier == "emergency" then
+        return "bestvideo[height<=360][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=360]+" .. audio_fmt .. "/best[height<=360]"
     else
-        return "bestvideo[height<=1080]+" .. audio_fmt .. "/best"
+        return "bestvideo[height<=2160][fps>30][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=2160][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=2160]+" .. audio_fmt .. "/best[height<=2160]"
     end
 end
 
 local QUALITY_PROFILES = {
-    ["auto"] = { label = "Auto / Smart 60FPS (Adapts to internet)" },
-    ["720"] = { label = "720p HD (60fps fluid / bandwidth saver)" },
-    ["1080"] = { label = "1080p Full HD (60fps crisp)" },
-    ["1440"] = { label = "1440p 2K QHD (60fps ultra-crisp)" },
-    ["4k"] = { label = "Max / 4K UHD (Uncapped highest quality)" },
+    ["auto"] = { label = "Auto / Smart (Hardware-adapted, protects buffer & smoothness)" },
+    ["low"] = { label = "Low / 720p HD (60fps fluid / bandwidth saver)" },
+    ["mid"] = { label = "Mid / 1080p Full HD (60fps crisp)" },
+    ["high"] = { label = "High / 1440p 2K QHD (60fps ultra-crisp)" },
+    ["max"] = { label = "Max / Hardware Ceiling (Highest smooth FPS & resolution)" },
+    ["4k"] = { label = "4K UHD (3840x2160 @ 60fps smooth)" },
+    ["8k"] = { label = "8K UHD (7680x4320 @ 60fps uncapped)" },
     ["480"] = { label = "480p SD (Low-bandwidth smooth)" },
     ["360"] = { label = "360p Low (Emergency smooth)" }
 }
 
+local initial_saved_res = get_saved_res()
+local is_auto_mode = (initial_saved_res == "auto")
+local current_tier = initial_saved_res
+pcall(mp.set_property, "user-data/queue-res", current_tier)
+local track_start_time = 0
+local has_downshifted_this_track = false
+local starved_buffer_seconds = 0
+local last_adaptation_time = 0
+local recent_stalls = {}
+local stable_buffer_seconds = 0
+
 local pending_resume_pos = nil
 local resume_timer = nil
-local is_auto_mode = true
-local current_tier = "1080"
-local recent_stalls = {}
-local last_adaptation_time = 0
-local stable_buffer_seconds = 0
 
 -- Position tracker for crash & network drop recovery
 local last_valid_pos = -1
@@ -280,10 +358,21 @@ end
 local function change_quality(target, is_auto_adaptive)
     target = string.lower(target or "auto")
     if target == "smart" then target = "auto" end
-    if target == "hd" then target = "720" end
-    if target == "fhd" then target = "1080" end
-    if target == "2k" or target == "qhd" then target = "1440" end
-    if target == "uhd" or target == "max" then target = "4k" end
+
+    -- Normalize aliases to canonical tiers: low, mid, high, max, auto
+    if target == "720" or target == "720p" or target == "hd" or target == "low" then
+        target = "low"
+    elseif target == "1080" or target == "1080p" or target == "fhd" or target == "mid" or target == "medium" then
+        target = "mid"
+    elseif target == "1440" or target == "1440p" or target == "2k" or target == "qhd" or target == "high" then
+        target = "high"
+    elseif target == "4k" or target == "8k" or target == "2160" or target == "4320" or target == "uhd" or target == "max" then
+        target = "max"
+    elseif target == "sd" then
+        target = "480"
+    elseif target == "emergency" then
+        target = "360"
+    end
 
     local profile = QUALITY_PROFILES[target]
     if not profile then
@@ -293,21 +382,29 @@ local function change_quality(target, is_auto_adaptive)
 
     if not is_auto_adaptive then
         is_auto_mode = (target == "auto")
-        if not is_auto_mode then
-            current_tier = target
-        else
-            current_tier = "1080"
-        end
+        current_tier = target
+        save_res_pref(target)
+        has_downshifted_this_track = false
+        starved_buffer_seconds = 0
         recent_stalls = {}
         stable_buffer_seconds = 0
+        track_start_time = mp.get_time()
+        last_adaptation_time = mp.get_time()
+    else
+        current_tier = target
+        track_start_time = mp.get_time()
+        last_adaptation_time = mp.get_time()
     end
 
-    -- Capture current timestamp and schedule seamless seek on reload
+    pcall(mp.set_property, "user-data/queue-res", current_tier)
+
+    -- Capture current timestamp and set start property + queue seek on reload
     local cur_time = mp.get_property_number("time-pos")
     if (not cur_time or cur_time < 1.0) and last_valid_time > 1.0 then
         cur_time = last_valid_time
     end
     if cur_time and cur_time > 1.0 then
+        mp.set_property("start", string.format("%.2f", cur_time))
         queue_resume_seek(cur_time)
     end
 
@@ -329,6 +426,7 @@ local function change_resolution(fmt, label)
         cur_time = last_valid_time
     end
     if cur_time and cur_time > 1.0 then
+        mp.set_property("start", string.format("%.2f", cur_time))
         queue_resume_seek(cur_time)
     end
 
@@ -506,32 +604,73 @@ end
 -- 4. YouTube-like Smart Adaptive Bitrate (ABR) Brain
 -- =========================================================================
 
-local function on_cache_pause_change(name, is_paused)
-    if not is_paused then return end
+local function evaluate_adaptive_bitrate()
     if not is_auto_mode then return end
 
-    local now = mp.get_time()
-    if now - last_adaptation_time < 20 then return end -- cooldown period
-
-    table.insert(recent_stalls, now)
-    -- Prune stalls older than 45 seconds
-    local filtered = {}
-    for _, t in ipairs(recent_stalls) do
-        if now - t <= 45 then
-            table.insert(filtered, t)
-        end
+    -- If player is idle or stream has not started demuxing frames yet, do not evaluate
+    local cur_time = mp.get_property_number("time-pos", nil)
+    if not cur_time or cur_time < 0.5 then
+        return
     end
-    recent_stalls = filtered
+
+    local idle = mp.get_property_bool("idle-active", false)
+    if idle then return end
+
+    local path = mp.get_property("path", "")
+    if not path or path == "" then return end
+    local is_remote = (path:match("^https?://") ~= nil) or (path:match("^ytdl://") ~= nil)
+    if not is_remote then return end -- Strict local file immunity: zero network downshifts
+
+    local now = mp.get_time()
+    -- 15-second grace period on new track start to allow demuxer to establish DASH buffers
+    if track_start_time > 0 and (now - track_start_time < 15) then
+        return
+    end
+
+    -- Downshift cooldown: at most one downshift per track, or 45s between emergency actions
+    if has_downshifted_this_track and (now - last_adaptation_time < 45) then
+        return
+    end
 
     local cache_dur = mp.get_property_number("demuxer-cache-duration", 0)
-    if #recent_stalls >= 1 and cache_dur < 1.5 then
-        -- Step down the resolution ladder
+    local paused = mp.get_property_bool("pause", false)
+    local cache_paused = mp.get_property_bool("paused-for-cache", false)
+
+    -- If user intentionally paused playback, do nothing
+    if paused then return end
+
+    -- THE PLAYABLE CACHE RULE:
+    -- If demuxer buffer has playable seconds (cache_dur >= 6.0s), NEVER downshift or interrupt playback!
+    -- Play the already-cached high quality frames uninterrupted.
+    if cache_dur >= 6.0 then
+        starved_buffer_seconds = 0
+        return
+    end
+
+    -- Genuine cache starvation tracking: demuxer buffer < 3.5s
+    if cache_dur < 3.5 then
+        starved_buffer_seconds = starved_buffer_seconds + 2
+    else
+        starved_buffer_seconds = math.max(0, starved_buffer_seconds - 2)
+    end
+
+    -- Downshift trigger conditions:
+    -- 1. Hard stall: player paused specifically for cache starvation AND buffer < 1.0s
+    -- 2. Sustained starvation: cache continuously under 3.5s for >= 6 seconds
+    local should_downshift = false
+    if cache_paused and cache_dur < 1.0 then
+        should_downshift = true
+    elseif starved_buffer_seconds >= 6 then
+        should_downshift = true
+    end
+
+    if should_downshift and (now - last_adaptation_time > 25) then
         local next_tier = nil
-        if current_tier == "4k" or current_tier == "1440" then
-            next_tier = "1080"
-        elseif current_tier == "1080" then
-            next_tier = "720"
-        elseif current_tier == "720" then
+        if current_tier == "auto" or current_tier == "max" or current_tier == "high" or current_tier == "4k" or current_tier == "1440" then
+            next_tier = "mid"
+        elseif current_tier == "mid" or current_tier == "1080" then
+            next_tier = "low"
+        elseif current_tier == "low" or current_tier == "720" then
             next_tier = "480"
         elseif current_tier == "480" then
             next_tier = "360"
@@ -539,15 +678,109 @@ local function on_cache_pause_change(name, is_paused)
 
         if next_tier then
             last_adaptation_time = now
-            current_tier = next_tier
-            recent_stalls = {}
-            stable_buffer_seconds = 0
+            has_downshifted_this_track = true
+            starved_buffer_seconds = 0
             change_quality(next_tier, true)
         end
     end
 end
 
--- Periodic Adaptive Recovery Watcher (upshifts when network stabilizes)
+local function on_cache_pause_change(name, is_paused)
+    if not is_paused then return end
+    evaluate_adaptive_bitrate()
+end
+
+-- =========================================================================
+-- 4b. Smart Hardware Compatibility & Dynamic Lag Guard
+-- Prevents GPU decoder bottlenecks, software-decode choking, and 8K frame lag
+-- =========================================================================
+
+local prev_dec_drops = 0
+local prev_vo_drops = 0
+local consecutive_lag_checks = 0
+local last_lag_check_time = 0
+
+local function check_hardware_lag()
+    local idle = mp.get_property_bool("idle-active", false)
+    local paused = mp.get_property_bool("pause", false)
+    if idle or paused then return end
+
+    local cur_time = mp.get_property_number("time-pos", nil)
+    if not cur_time or cur_time < 3.0 then return end
+
+    local path = mp.get_property("path", "")
+    if not path or path == "" then return end
+    local is_remote = (path:match("^https?://") ~= nil) or (path:match("^ytdl://") ~= nil)
+    if not is_remote then return end
+
+    local now = mp.get_time()
+    if (now - track_start_time) < 4.0 then
+        -- Initial grace period on track start / quality change
+        prev_dec_drops = mp.get_property_number("decoder-frame-drop-count", 0)
+        prev_vo_drops = mp.get_property_number("frame-drop-count", 0)
+        last_lag_check_time = now
+        return
+    end
+
+    if last_lag_check_time == 0 then
+        last_lag_check_time = now
+        prev_dec_drops = mp.get_property_number("decoder-frame-drop-count", 0)
+        prev_vo_drops = mp.get_property_number("frame-drop-count", 0)
+        return
+    end
+
+    local dt = now - last_lag_check_time
+    if dt < 1.8 then return end
+
+    local cur_dec_drops = mp.get_property_number("decoder-frame-drop-count", 0)
+    local cur_vo_drops = mp.get_property_number("frame-drop-count", 0)
+    local d_dec = math.max(0, cur_dec_drops - prev_dec_drops)
+    local d_vo = math.max(0, cur_vo_drops - prev_vo_drops)
+    prev_dec_drops = cur_dec_drops
+    prev_vo_drops = cur_vo_drops
+    last_lag_check_time = now
+
+    local h = mp.get_property_number("video-params/h", 0)
+    if h <= 720 then return end -- Don't downshift below low
+
+    local total_drops = d_dec + d_vo
+    -- Stutter threshold: > 10 dropped frames in ~2s (or massive drop burst >= 25)
+    if total_drops >= 25 then
+        consecutive_lag_checks = 2
+    elseif total_drops >= 10 then
+        consecutive_lag_checks = consecutive_lag_checks + 1
+    else
+        consecutive_lag_checks = math.max(0, consecutive_lag_checks - 1)
+    end
+
+    if consecutive_lag_checks >= 2 then
+        consecutive_lag_checks = 0
+        local next_ceiling = nil
+        local banner = ""
+
+        if h > 2160 then
+            next_ceiling = "4k"
+            banner = "⚡ Hardware Lag Guard: 8K exceeded GPU capability. Auto-adapted to 4K (60 FPS smooth)."
+        elseif h > 1440 then
+            next_ceiling = "high"
+            banner = "⚡ Hardware Lag Guard: 4K caused frame drops. Auto-adapted to 1440p 2K (60 FPS smooth)."
+        elseif h > 1080 then
+            next_ceiling = "mid"
+            banner = "⚡ Hardware Lag Guard: Auto-adapted to 1080p Full HD (60 FPS smooth)."
+        elseif h > 720 then
+            next_ceiling = "low"
+            banner = "⚡ Hardware Lag Guard: Auto-adapted to 720p HD (60 FPS smooth)."
+        end
+
+        if next_ceiling then
+            save_hw_ceiling(next_ceiling)
+            mp.commandv("show-text", banner, 3500)
+            change_quality(next_ceiling, true)
+        end
+    end
+end
+
+-- Periodic Adaptive Watcher & Position Cache
 mp.add_periodic_timer(2.0, function()
     -- Maintain playback position cache
     local p = mp.get_property_number("playlist-pos", -1)
@@ -559,43 +792,11 @@ mp.add_periodic_timer(2.0, function()
         if path ~= "" then last_valid_url = path end
     end
 
-    if not is_auto_mode then return end
-    if current_tier == "1080" or current_tier == "1440" or current_tier == "4k" then
-        return
-    end
+    -- 1. Hardware Lag & Frame Drop Guard (Prevents device stutter)
+    check_hardware_lag()
 
-    local cache_dur = mp.get_property_number("demuxer-cache-duration", 0)
-    local paused = mp.get_property_bool("pause", false)
-    local cache_paused = mp.get_property_bool("paused-for-cache", false)
-
-    if not paused and not cache_paused and cache_dur >= 30.0 then
-        stable_buffer_seconds = stable_buffer_seconds + 2
-    else
-        stable_buffer_seconds = math.max(0, stable_buffer_seconds - 3)
-    end
-
-    -- If connection stayed rock-solid for 80 seconds, step up
-    local now = mp.get_time()
-    if stable_buffer_seconds >= 80 and (now - last_adaptation_time > 60) then
-        local up_tier = nil
-        if current_tier == "360" then
-            up_tier = "480"
-        elseif current_tier == "480" then
-            up_tier = "720"
-        elseif current_tier == "720" then
-            up_tier = "1080"
-        end
-
-        if up_tier then
-            last_adaptation_time = now
-            current_tier = up_tier
-            stable_buffer_seconds = 0
-            recent_stalls = {}
-            local profile = QUALITY_PROFILES[up_tier]
-            mp.commandv("show-text", "⚡ Auto Quality: Network stabilized -> " .. profile.label, 3000)
-            change_quality(up_tier, true)
-        end
-    end
+    -- 2. Evaluate adaptive bitrate with playable buffer protection
+    evaluate_adaptive_bitrate()
 end)
 
 -- =========================================================================
@@ -704,9 +905,25 @@ end
 -- =========================================================================
 
 local function on_file_loaded()
+    mp.set_property("start", "none")
     do_resume_seek()
+    prev_dec_drops = 0
+    prev_vo_drops = 0
+    consecutive_lag_checks = 0
+    last_lag_check_time = 0
+    track_start_time = mp.get_time()
     local path = mp.get_property("path", "")
     if path and path ~= "" then
+        local is_remote = (path:match("^https?://") ~= nil) or (path:match("^ytdl://") ~= nil)
+        if is_remote and is_auto_mode then
+            current_tier = "auto"
+            has_downshifted_this_track = false
+            starved_buffer_seconds = 0
+            recent_stalls = {}
+            track_start_time = mp.get_time()
+            local fmt = get_quality_format("auto", current_lang)
+            mp.set_property("ytdl-format", fmt)
+        end
         fetch_stream_languages_async(path)
     end
 end
@@ -774,23 +991,47 @@ mp.add_key_binding("=", "scale_add_equal", function() adjust_scale(0.05) end)
 mp.add_key_binding("-", "scale_sub_minus", function() adjust_scale(-0.05) end)
 mp.add_key_binding("_", "scale_sub_underscore", function() adjust_scale(-0.05) end)
 
--- Linux / Windows / WSL Close Hotkeys
-mp.add_key_binding("q", "safe_hide_q", safe_hide)
-mp.add_key_binding("Q", "safe_hide_Q", safe_hide)
-mp.add_key_binding("CLOSE_WIN", "safe_hide_close", safe_hide)
-mp.add_key_binding("Ctrl+w", "safe_hide_ctrlw", safe_hide)
-mp.add_key_binding("Ctrl+W", "safe_hide_ctrlW", safe_hide)
-mp.add_key_binding("Alt+F4", "safe_hide_altf4", safe_hide)
+-- Window Close & Session Exit Hotkeys (Cross button [X], Alt+F4, q, Q quits session)
+local function stop_session()
+    mp.commandv("quit")
+end
 
--- macOS Close Hotkeys (Command+W, Command+Q)
-mp.add_key_binding("Meta+w", "safe_hide_metaw", safe_hide)
-mp.add_key_binding("Meta+W", "safe_hide_metaW", safe_hide)
-mp.add_key_binding("Meta+q", "safe_hide_metaq", safe_hide)
-mp.add_key_binding("Meta+Q", "safe_hide_metaQ", safe_hide)
+mp.add_forced_key_binding("CLOSE_WIN", "stop_close_win", stop_session)
+mp.add_forced_key_binding("Alt+F4", "stop_altf4", stop_session)
+mp.add_forced_key_binding("q", "stop_q", stop_session)
+mp.add_forced_key_binding("Q", "stop_Q", stop_session)
+mp.add_forced_key_binding("Ctrl+w", "stop_ctrlw", stop_session)
+mp.add_forced_key_binding("Ctrl+W", "stop_ctrlW", stop_session)
+mp.add_forced_key_binding("Meta+w", "stop_metaw", stop_session)
+mp.add_forced_key_binding("Meta+W", "stop_metaW", stop_session)
+mp.add_forced_key_binding("Meta+q", "stop_metaq", stop_session)
+mp.add_forced_key_binding("Meta+Q", "stop_metaQ", stop_session)
 
--- In-Window Quality Hotkeys (Seamless position memory & smart adaptive)
-mp.add_key_binding("0", "quality_0", function() change_quality("auto", false) end)
-mp.add_key_binding("1", "quality_1", function() change_quality("720", false) end)
-mp.add_key_binding("2", "quality_2", function() change_quality("1080", false) end)
-mp.add_key_binding("3", "quality_3", function() change_quality("1440", false) end)
-mp.add_key_binding("4", "quality_4", function() change_quality("4k", false) end)
+-- Hide Video Window to Background Audio Hotkeys (h / H)
+mp.add_forced_key_binding("h", "safe_hide_h", safe_hide)
+mp.add_forced_key_binding("H", "safe_hide_H", safe_hide)
+
+-- In-Window Quality Hotkeys (Forced overrides for number row, numpad, and Ctrl+Num)
+mp.add_forced_key_binding("0", "quality_0", function() change_quality("auto", false) end)
+mp.add_forced_key_binding("1", "quality_1", function() change_quality("low", false) end)
+mp.add_forced_key_binding("2", "quality_2", function() change_quality("mid", false) end)
+mp.add_forced_key_binding("3", "quality_3", function() change_quality("high", false) end)
+mp.add_forced_key_binding("4", "quality_4", function() change_quality("max", false) end)
+
+mp.add_forced_key_binding("KP0", "quality_kp0", function() change_quality("auto", false) end)
+mp.add_forced_key_binding("KP1", "quality_kp1", function() change_quality("low", false) end)
+mp.add_forced_key_binding("KP2", "quality_kp2", function() change_quality("mid", false) end)
+mp.add_forced_key_binding("KP3", "quality_kp3", function() change_quality("high", false) end)
+mp.add_forced_key_binding("KP4", "quality_kp4", function() change_quality("max", false) end)
+
+mp.add_forced_key_binding("Ctrl+0", "quality_ctrl0", function() change_quality("auto", false) end)
+mp.add_forced_key_binding("Ctrl+1", "quality_ctrl1", function() change_quality("low", false) end)
+mp.add_forced_key_binding("Ctrl+2", "quality_ctrl2", function() change_quality("mid", false) end)
+mp.add_forced_key_binding("Ctrl+3", "quality_ctrl3", function() change_quality("high", false) end)
+mp.add_forced_key_binding("Ctrl+4", "quality_ctrl4", function() change_quality("max", false) end)
+
+mp.add_forced_key_binding("F1", "quality_f1", function() change_quality("auto", false) end)
+mp.add_forced_key_binding("F2", "quality_f2", function() change_quality("low", false) end)
+mp.add_forced_key_binding("F3", "quality_f3", function() change_quality("mid", false) end)
+mp.add_forced_key_binding("F4", "quality_f4", function() change_quality("high", false) end)
+mp.add_forced_key_binding("F5", "quality_f5", function() change_quality("max", false) end)

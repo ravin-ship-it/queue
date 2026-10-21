@@ -501,7 +501,10 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
             ;;
         -res|-quality)
             shift
-            if [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]]; then
+            if [[ "$1" =~ ^(ceiling|hw|hardware) ]] && [[ -n "$2" ]] && [[ ! "$2" =~ ^- ]]; then
+                cmd_resolution "$1" "$2"
+                shift 2
+            elif [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]]; then
                 cmd_resolution "$1"
                 shift
             else

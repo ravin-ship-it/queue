@@ -45,7 +45,7 @@ def get_configured_resolution():
                     return content
         except Exception:
             pass
-    return "1080"
+    return "auto"
 
 def get_configured_language():
     """Retrieve saved language preference from ~/.config/mpv/queue_lang."""
@@ -64,8 +64,8 @@ def get_audio_selection(lang_pref=None):
         lang_pref = get_configured_language()
     lang_pref = lang_pref.lower()
     if lang_pref in ("auto", "orig", "original"):
-        return "(bestaudio[acodec=opus]/bestaudio)"
-    return f"(bestaudio[language={lang_pref}][acodec=opus]/bestaudio[language^={lang_pref}]/bestaudio[language={lang_pref}]/bestaudio[language^={lang_pref}]/bestaudio[acodec=opus]/bestaudio)"
+        return "(bestaudio[acodec=opus]/bestaudio[acodec^=mp4a]/bestaudio)"
+    return f"(bestaudio[language={lang_pref}][acodec=opus]/bestaudio[language^={lang_pref}][acodec=opus]/bestaudio[language={lang_pref}]/bestaudio[language^={lang_pref}]/bestaudio[acodec=opus]/bestaudio[acodec^=mp4a]/bestaudio)"
 
 def get_ytdl_format(res_pref=None, lang_pref=None):
     """Generate optimal yt-dlp format string based on target resolution and language."""
@@ -73,20 +73,22 @@ def get_ytdl_format(res_pref=None, lang_pref=None):
         res_pref = get_configured_resolution()
     res_pref = res_pref.lower()
     audio_sel = get_audio_selection(lang_pref)
-    if res_pref in ("720", "720p", "hd"):
-        return f"bestvideo[height<=720]+{audio_sel}/best[height<=720]/best"
-    elif res_pref in ("1080", "1080p", "fhd"):
-        return f"bestvideo[height<=1080]+{audio_sel}/best[height<=1080]/best"
-    elif res_pref in ("1440", "1440p", "2k", "qhd"):
-        return f"bestvideo[height<=1440]+{audio_sel}/best[height<=1440]/best"
-    elif res_pref in ("2160", "2160p", "4k", "uhd", "max"):
-        return f"bestvideo+{audio_sel}/best"
+    if res_pref in ("low", "720", "720p", "hd"):
+        return f"bestvideo[height<=720][fps>30][format_note!*=Premium]+{audio_sel}/bestvideo[height<=720][format_note!*=Premium]+{audio_sel}/bestvideo[height<=720]+{audio_sel}/best[height<=720]"
+    elif res_pref in ("mid", "1080", "1080p", "fhd"):
+        return f"bestvideo[height<=1080][fps>30][format_note!*=Premium]+{audio_sel}/bestvideo[height<=1080][format_note!*=Premium]+{audio_sel}/bestvideo[height<=1080]+{audio_sel}/best[height<=1080]"
+    elif res_pref in ("high", "1440", "1440p", "2k", "qhd"):
+        return f"bestvideo[height<=1440][fps>30][format_note!*=Premium]+{audio_sel}/bestvideo[height<=1440][format_note!*=Premium]+{audio_sel}/bestvideo[height<=1440]+{audio_sel}/best[height<=1440]"
+    elif res_pref in ("max", "4k", "2160", "2160p", "uhd"):
+        return f"bestvideo[height<=2160][fps>30][format_note!*=Premium]+{audio_sel}/bestvideo[height<=2160][format_note!*=Premium]+{audio_sel}/bestvideo[height<=2160]+{audio_sel}/best[height<=2160]"
+    elif res_pref in ("8k", "4320"):
+        return f"bestvideo[fps>30][format_note!*=Premium]+{audio_sel}/bestvideo[format_note!*=Premium]+{audio_sel}/bestvideo+{audio_sel}/best"
     elif res_pref in ("480", "480p", "sd"):
-        return f"bestvideo[height<=480]+{audio_sel}/best[height<=480]/best"
-    elif res_pref in ("360", "360p", "low"):
-        return f"bestvideo[height<=360]+{audio_sel}/best[height<=360]/best"
-    else:  # auto / smart adaptive
-        return f"bestvideo[height<=1080][fps<=60]+{audio_sel}/bestvideo[height<=720]+{audio_sel}/best"
+        return f"bestvideo[height<=480][format_note!*=Premium]+{audio_sel}/bestvideo[height<=480]+{audio_sel}/best[height<=480]"
+    elif res_pref in ("360", "360p", "emergency"):
+        return f"bestvideo[height<=360][format_note!*=Premium]+{audio_sel}/bestvideo[height<=360]+{audio_sel}/best[height<=360]"
+    else:  # auto / smart adaptive: highest resolution priority up to 4K hardware ceiling
+        return f"bestvideo[height<=2160][fps>30][format_note!*=Premium]+{audio_sel}/bestvideo[height<=2160][format_note!*=Premium]+{audio_sel}/bestvideo[height<=2160]+{audio_sel}/best[height<=2160]"
 
 def load_persistent_cache():
     global stream_cache

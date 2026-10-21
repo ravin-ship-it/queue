@@ -1588,107 +1588,300 @@ cmd_hybrid_toggle() {
     fi
 }
 
+get_hardware_ceiling() {
+    local ceiling=""
+    if [ "$IS_WSL" = true ]; then
+        local win_u_dir
+        win_u_dir=$(get_windows_user_dir)
+        if [ -n "$win_u_dir" ] && [ -f "$win_u_dir/AppData/Roaming/mpv/queue_hw_ceiling" ]; then
+            ceiling=$(cat "$win_u_dir/AppData/Roaming/mpv/queue_hw_ceiling" 2>/dev/null | tr -d '[:space:]')
+        fi
+    fi
+    if [ -z "$ceiling" ] && [ -f "$HOME/.config/mpv/queue_hw_ceiling" ]; then
+        ceiling=$(cat "$HOME/.config/mpv/queue_hw_ceiling" 2>/dev/null | tr -d '[:space:]')
+    fi
+    if [ -z "$ceiling" ]; then
+        ceiling=$(detect_hardware_ceiling)
+    fi
+    case "$ceiling" in
+        8k|4320) echo "8k" ;;
+        high|2k|1440|1440p) echo "high" ;;
+        mid|1080|1080p) echo "mid" ;;
+        *) echo "4k" ;;
+    esac
+}
+
+detect_hardware_ceiling() {
+    local detected="4k"
+    if [ "$IS_WSL" = true ]; then
+        local gpu_info
+        gpu_info=$(powershell.exe -NoProfile -Command "
+            \$g = Get-CimInstance Win32_VideoController | Select-Object -First 1 Name, AdapterRAM, CurrentHorizontalResolution, CurrentVerticalResolution;
+            \"\$(\$g.Name)|\$(\$g.AdapterRAM)|\$(\$g.CurrentHorizontalResolution)|\$(\$g.CurrentVerticalResolution)\"
+        " </dev/null 2>/dev/null | tr -d '\r\n')
+
+        if [ -n "$gpu_info" ]; then
+            local g_name g_vram g_w g_h
+            IFS='|' read -r g_name g_vram g_w g_h <<< "$gpu_info"
+            if [[ "$g_name" =~ (RTX (3080|3090|4070|4080|4090)|RX 7900) ]] && [ "${g_h:-0}" -ge 2160 ]; then
+                detected="8k"
+            elif [[ "$g_name" =~ Intel.*(HD|UHD) ]] || { [ -n "$g_vram" ] && [ "$g_vram" -lt 1073741824 ] && [[ ! "$g_name" =~ (Radeon|GeForce|NVIDIA) ]]; }; then
+                detected="1080"
+            else
+                detected="4k"
+            fi
+        fi
+    elif [ "$IS_LINUX" = true ]; then
+        if command -v lspci >/dev/null 2>&1; then
+            local pci_info
+            pci_info=$(lspci 2>/dev/null | grep -iE "vga|3d|display")
+            if [[ "$pci_info" =~ (RTX 40|RTX 3080|RTX 3090|RX 7900) ]]; then
+                detected="8k"
+            elif [[ "$pci_info" =~ Intel.*(HD|UHD) ]]; then
+                detected="1080"
+            else
+                detected="4k"
+            fi
+        fi
+    fi
+
+    mkdir -p "$HOME/.config/mpv"
+    echo "$detected" > "$HOME/.config/mpv/queue_hw_ceiling"
+    if [ "$IS_WSL" = true ]; then
+        local win_u_dir
+        win_u_dir=$(get_windows_user_dir)
+        if [ -n "$win_u_dir" ]; then
+            mkdir -p "$win_u_dir/AppData/Roaming/mpv" 2>/dev/null
+            echo "$detected" > "$win_u_dir/AppData/Roaming/mpv/queue_hw_ceiling" 2>/dev/null
+        fi
+    fi
+    echo "$detected"
+}
+
+get_active_saved_res() {
+    local saved_res=""
+    if [ -S "$SOCKET" ]; then
+        local live_prop
+        live_prop=$(echo '{"command":["get_property","user-data/queue-res"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // empty' 2>/dev/null)
+        [ -n "$live_prop" ] && saved_res="$live_prop"
+    fi
+    if [ -z "$saved_res" ] && [ "$(get_queue_mode)" == "hybrid" ] && command -v get_windows_user_dir >/dev/null 2>&1; then
+        local win_u_dir
+        win_u_dir=$(get_windows_user_dir)
+        if [ -n "$win_u_dir" ] && [ -f "$win_u_dir/AppData/Roaming/mpv/queue_res" ]; then
+            saved_res=$(cat "$win_u_dir/AppData/Roaming/mpv/queue_res" 2>/dev/null | tr -d '[:space:]')
+        fi
+    fi
+    if [ -z "$saved_res" ] && [ -f "$HOME/.config/mpv/queue_res" ]; then
+        saved_res=$(cat "$HOME/.config/mpv/queue_res" 2>/dev/null | tr -d '[:space:]')
+    fi
+    [ -z "$saved_res" ] && saved_res="auto"
+    echo "$saved_res"
+}
+
 cmd_resolution() {
     local target="$1"
     target=$(echo "$target" | tr '[:upper:]' '[:lower:]')
 
-    local clean_target="1080"
-    local ytdl_fmt=""
+    # Handle manual hardware ceiling override: q -res ceiling [val] / q -res hw [val]
+    if [[ "$target" =~ ^(ceiling|hw|hardware) ]]; then
+        local new_ceiling="$2"
+        new_ceiling=$(echo "$new_ceiling" | tr '[:upper:]' '[:lower:]')
+        if [ -n "$new_ceiling" ]; then
+            case "$new_ceiling" in
+                8k|4320|uncapped) new_ceiling="8k" ;;
+                4k|2160|uhd) new_ceiling="4k" ;;
+                high|2k|1440|1440p) new_ceiling="high" ;;
+                mid|1080|1080p) new_ceiling="mid" ;;
+                *)
+                    echo -e "${C_PINK}❓ Unknown ceiling: '$new_ceiling'. Use: 8k, 4k, high (2k), or mid (1080p).${C_RESET}"
+                    return 1
+                    ;;
+            esac
+            mkdir -p "$HOME/.config/mpv"
+            echo "$new_ceiling" > "$HOME/.config/mpv/queue_hw_ceiling"
+            if [ "$IS_WSL" = true ]; then
+                local win_u_dir
+                win_u_dir=$(get_windows_user_dir)
+                [ -n "$win_u_dir" ] && echo "$new_ceiling" > "$win_u_dir/AppData/Roaming/mpv/queue_hw_ceiling" 2>/dev/null
+            fi
+            echo -e "${C_CYAN}💻 Hardware Playback Ceiling set to:${C_RESET} ${C_PINK}${new_ceiling}${C_RESET}"
+            # If MPV is running, trigger quality reload with current tier
+            if [ -S "$SOCKET" ]; then
+                local cur_p
+                cur_p=$(get_active_saved_res)
+                echo "{\"command\":[\"script-message\",\"change-quality\",\"$cur_p\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+            fi
+            return 0
+        else
+            local cur_c
+            cur_c=$(get_hardware_ceiling)
+            echo -e "${C_CYAN}💻 Current Hardware Playback Ceiling:${C_RESET} ${C_PINK}${cur_c}${C_RESET}"
+            return 0
+        fi
+    fi
+
+    local clean_target="auto"
     local label=""
 
     case "$target" in
-        720|720p|hd)
-            clean_target="720"
-            ytdl_fmt="bestvideo[height<=720][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=720][fps>=50]+bestaudio/bestvideo[height<=720]+bestaudio[acodec=opus]/bestvideo[height<=720]+bestaudio/best[height<=720]"
-            label="720p HD (60 FPS fluid / bandwidth saver)"
+        low|720|720p|hd)
+            clean_target="low"
+            label="Low / 720p HD (Fluid 60 FPS / bandwidth saver)"
             ;;
-        1080|1080p|fhd)
-            clean_target="1080"
-            ytdl_fmt="bestvideo[height<=1080][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps>=50]+bestaudio/bestvideo[height<=1080]+bestaudio[acodec=opus]/bestvideo[height<=1080]+bestaudio/best[height<=1080]"
-            label="1080p Full HD (60 FPS crisp)"
+        mid|medium|1080|1080p|fhd)
+            clean_target="mid"
+            label="Mid / 1080p Full HD (Crisp 60 FPS)"
             ;;
-        1440|1440p|2k|qhd)
-            clean_target="1440"
-            ytdl_fmt="bestvideo[height<=1440][fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1440][fps>=50]+bestaudio/bestvideo[height<=1440]+bestaudio[acodec=opus]/bestvideo[height<=1440]+bestaudio/best[height<=1440]"
-            label="1440p 2K QHD (60 FPS ultra-crisp)"
+        high|1440|1440p|2k|qhd)
+            clean_target="high"
+            label="High / 1440p 2K QHD (Ultra-crisp 60 FPS)"
             ;;
-        2160|2160p|4k|uhd|max)
+        max)
+            clean_target="max"
+            local hw_ceil
+            hw_ceil=$(get_hardware_ceiling)
+            if [ "$hw_ceil" == "8k" ]; then
+                label="Max / 8K UHD (Uncapped highest quality & FPS)"
+            elif [ "$hw_ceil" == "high" ]; then
+                label="Max / 1440p 2K (Hardware ceiling for smooth 60 FPS playback)"
+            elif [ "$hw_ceil" == "mid" ]; then
+                label="Max / 1080p Full HD (Hardware ceiling for smooth 60 FPS playback)"
+            else
+                label="Max / 4K UHD (Hardware ceiling for smooth 60 FPS playback)"
+            fi
+            ;;
+        4k|2160|2160p|uhd)
             clean_target="4k"
-            ytdl_fmt="bestvideo[fps>=50][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[fps>=50][vcodec^=vp9][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo+bestaudio[acodec=opus]/bestvideo+bestaudio/best"
-            label="Max / 4K UHD (Uncapped highest quality)"
+            label="4K UHD (3840x2160 @ 60 FPS smooth)"
+            ;;
+        8k|4320|4320p)
+            clean_target="8k"
+            local hw_ceil
+            hw_ceil=$(get_hardware_ceiling)
+            if [ "$hw_ceil" != "8k" ]; then
+                label="8K UHD Uncapped (⚠️ Manual override: hardware ceiling is ${hw_ceil})"
+            else
+                label="8K UHD (7680x4320 @ 60 FPS uncapped)"
+            fi
             ;;
         480|480p|sd)
             clean_target="480"
-            ytdl_fmt="bestvideo[height<=480]+bestaudio/best[height<=480]/best"
             label="480p SD (Low-bandwidth smooth)"
             ;;
-        360|360p|low)
+        360|360p|emergency)
             clean_target="360"
-            ytdl_fmt="bestvideo[height<=360]+bestaudio/best[height<=360]/best"
             label="360p Low (Emergency smooth)"
             ;;
         auto|smart)
             clean_target="auto"
-            ytdl_fmt="bestvideo[height<=1080][fps<=60][vcodec^=avc1][format_note!*=Premium]+bestaudio[acodec=opus]/bestvideo[height<=1080][fps<=60][format_note!*=Premium]+bestaudio/bestvideo[height<=720]+bestaudio/best"
-            label="Auto / Smart 60FPS (Adapts to internet, downshifts on buffer underrun)"
+            local hw_ceil
+            hw_ceil=$(get_hardware_ceiling)
+            label="Auto / Smart (Hardware ceiling: ${hw_ceil}, protects buffer & frame-rate)"
             ;;
         "")
             # Query / Show active resolution status
+            local hw_ceil
+            hw_ceil=$(get_hardware_ceiling)
+            local hw_display="4K UHD"
+            [ "$hw_ceil" == "8k" ] && hw_display="8K UHD (Uncapped)"
+            [ "$hw_ceil" == "high" ] && hw_display="1440p 2K QHD"
+            [ "$hw_ceil" == "mid" ] && hw_display="1080p Full HD"
+
             if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
-                local saved_res="1080"
+                local saved_res="auto"
                 [ -f "$HOME/.config/mpv/queue_res" ] && saved_res=$(cat "$HOME/.config/mpv/queue_res" 2>/dev/null | tr -d '[:space:]')
-                local res_desc="1080p Full HD (60 FPS crisp)"
+                local res_desc="Auto / Smart (Adapts to internet)"
                 case "$saved_res" in
-                    720|720p) res_desc="720p HD (60 FPS fluid / data saver)" ;;
-                    1080|1080p) res_desc="1080p Full HD (60 FPS crisp)" ;;
-                    1440|1440p|2k) res_desc="1440p 2K QHD (60 FPS ultra-crisp)" ;;
-                    4k|2160|max) res_desc="4K UHD (Uncapped highest quality)" ;;
+                    low|720|720p) res_desc="Low / 720p HD (Fluid 60 FPS / data saver)" ;;
+                    mid|1080|1080p) res_desc="Mid / 1080p Full HD (Crisp 60 FPS)" ;;
+                    high|1440|1440p|2k) res_desc="High / 1440p 2K QHD (Ultra-crisp 60 FPS)" ;;
+                    max|4k|2160) res_desc="Max / 4K UHD (Hardware ceiling smooth)" ;;
+                    8k|4320) res_desc="8K UHD (Uncapped)" ;;
                     480|480p) res_desc="480p SD (Low-bandwidth smooth)" ;;
                     360|360p) res_desc="360p Low (Emergency smooth)" ;;
-                    auto) res_desc="Auto / Smart 60FPS (Adapts to internet)" ;;
+                    auto) res_desc="Auto / Smart (Hardware ceiling: 4K, protects buffer)" ;;
                 esac
                 echo -e "╭─────────────────────────────────────────────────────────────────────────╮"
                 echo -e "│ 📱 ${C_PURPLE}Queue Video Quality Profile (Android Mobile)${C_RESET}                          │"
                 echo -e "├─────────────────────────────────────────────────────────────────────────┤"
                 echo -e "│ ${C_TEAL}Active Quality:${C_RESET}  ${C_PINK}${res_desc}${C_RESET}"
+                echo -e "│ ${C_TEAL}Hardware Ceiling:${C_RESET}${C_WHITE}${hw_display}${C_RESET}"
                 echo -e "│ ${C_TEAL}Video Pipeline:${C_RESET}  ${C_WHITE}Hardware MediaCodec GPU (is.xyz.mpv)${C_RESET}"
                 echo -e "│ ${C_TEAL}Audio Tunnel:${C_RESET}    ${C_WHITE}Pristine Opus 48kHz (AAudio / AudioTrack)${C_RESET}"
                 echo -e "│ ${C_TEAL}Stream Manifest:${C_RESET} ${C_WHITE}Dynamic EDL Multi-Stream (100% Uncompressed)${C_RESET}"
                 echo -e "╰─────────────────────────────────────────────────────────────────────────╯"
-                echo -e "${C_GRAY}💡 Quick Switch: ${C_WHITE}q -res 720${C_GRAY} | ${C_WHITE}q -res 1080${C_GRAY} | ${C_WHITE}q -res 1440${C_GRAY} | ${C_WHITE}q -res 4k${C_GRAY} | ${C_WHITE}q -res auto${C_RESET}"
+                echo -e "${C_GRAY}💡 Quick Switch: ${C_WHITE}q -res low${C_GRAY} | ${C_WHITE}q -res mid${C_GRAY} | ${C_WHITE}q -res high${C_GRAY} | ${C_WHITE}q -res max${C_GRAY} | ${C_WHITE}q -res auto${C_RESET}"
                 return 0
             fi
 
             # Desktop Status
             if [ -S "$SOCKET" ] && echo '{"command":["get_property","idle-active"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1; then
-                local cur_w cur_h cur_fps cur_codec
+                local cur_w cur_h cur_fps cur_codec cur_acodec cur_samplerate
                 local res_info
-                res_info=$(echo -e '{"command":["get_property","video-params"]}\n{"command":["get_property","track-list"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
+                res_info=$(echo -e '{"command":["get_property","video-params"]}\n{"command":["get_property","track-list"]}\n{"command":["get_property","audio-params"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
                 cur_w=$(echo "$res_info" | jq -s -r 'map(select(.event == null)) | .[0].data.w // "N/A"' 2>/dev/null)
                 cur_h=$(echo "$res_info" | jq -s -r 'map(select(.event == null)) | .[0].data.h // "N/A"' 2>/dev/null)
                 cur_fps=$(echo "$res_info" | jq -s -r 'map(select(.event == null)) | (.[1].data[]? | select(.type=="video" and .selected==true) | .["demux-fps"]) // "N/A"' 2>/dev/null)
                 cur_codec=$(echo "$res_info" | jq -s -r 'map(select(.event == null)) | (.[1].data[]? | select(.type=="video" and .selected==true) | .codec) // "N/A"' 2>/dev/null)
+                cur_acodec=$(echo "$res_info" | jq -s -r 'map(select(.event == null)) | (.[1].data[]? | select(.type=="audio" and .selected==true) | .codec) // "opus"' 2>/dev/null)
+                cur_samplerate=$(echo "$res_info" | jq -s -r 'map(select(.event == null)) | .[2].data.samplerate // 48000' 2>/dev/null)
                 [[ "$cur_fps" =~ ^[0-9]+(\.[0-9]+)?$ ]] && printf -v cur_fps "%.0f" "$cur_fps"
+
+                local saved_res
+                saved_res=$(get_active_saved_res)
+                echo "$saved_res" > "$HOME/.config/mpv/queue_res" 2>/dev/null
+                local res_friendly="Auto"
+                case "$saved_res" in
+                    low|720|720p) res_friendly="Low (720p HD)" ;;
+                    mid|1080|1080p) res_friendly="Mid (1080p Full HD)" ;;
+                    high|1440|1440p|2k) res_friendly="High (1440p 2K QHD)" ;;
+                    max) res_friendly="Max (Hardware Ceiling: ${hw_display})" ;;
+                    4k|2160) res_friendly="4K UHD" ;;
+                    8k|4320) res_friendly="8K UHD (Uncapped)" ;;
+                    480) res_friendly="480p SD" ;;
+                    360) res_friendly="360p Low" ;;
+                    auto) res_friendly="Auto (Smart Dynamic up to ${hw_display})" ;;
+                    *) res_friendly="$saved_res" ;;
+                esac
 
                 if [ "$cur_w" == "N/A" ] || [ -z "$cur_w" ]; then
                     local current_fmt
                     current_fmt=$(echo '{"command":["get_property","ytdl-format"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // "Default"')
-                    echo -e "${C_CYAN}📺 Video Stream:${C_RESET} ${C_GRAY}Idle (No video actively rendering)${C_RESET}"
-                    echo -e "   ${C_PINK}Active Quality Profile:${C_RESET} ${C_WHITE}${current_fmt:0:60}...${C_RESET}"
+                    echo -e "${C_CYAN}📺 Video Stream:${C_RESET} ${C_GRAY}Idle / Audio Only (No video actively rendering)${C_RESET}"
+                    echo -e "   ${C_PINK}Active Profile:${C_RESET}   ${C_WHITE}${res_friendly}${C_RESET}"
+                    echo -e "   ${C_TEAL}Hardware Ceiling:${C_RESET} ${C_WHITE}${hw_display}${C_RESET} (${C_GRAY}Smart GPU capability cap${C_RESET})"
                 else
                     echo -e "${C_CYAN}📺 Active Video Quality:${C_RESET} ${C_WHITE}${cur_w}x${cur_h}${C_RESET} @ ${C_PINK}${cur_fps} FPS${C_RESET} (${C_GRAY}codec: ${cur_codec}${C_RESET})"
+                    echo -e "${C_CYAN}🔊 Active Audio Stream:${C_RESET}  ${C_GREEN}${cur_acodec}${C_RESET} @ ${C_WHITE}${cur_samplerate} Hz${C_RESET} (${C_GRAY}pristine lossless stream${C_RESET})"
+                    echo -e "   ${C_PINK}Active Profile:${C_RESET}       ${C_WHITE}${res_friendly}${C_RESET}"
+                    echo -e "   ${C_TEAL}Hardware Ceiling:${C_RESET}     ${C_WHITE}${hw_display}${C_RESET} (${C_GRAY}Smart GPU capability cap${C_RESET})"
                 fi
             else
-                local saved_res="1080"
-                [ -f "$HOME/.config/mpv/queue_res" ] && saved_res=$(cat "$HOME/.config/mpv/queue_res" 2>/dev/null | tr -d '[:space:]')
-                echo -e "${C_CYAN}📺 Video Quality Profile:${C_RESET} ${C_PINK}${saved_res}p${C_RESET}"
+                local saved_res
+                saved_res=$(get_active_saved_res)
+                local res_friendly="Auto"
+                case "$saved_res" in
+                    low|720|720p) res_friendly="Low (720p HD)" ;;
+                    mid|1080|1080p) res_friendly="Mid (1080p Full HD)" ;;
+                    high|1440|1440p|2k) res_friendly="High (1440p 2K QHD)" ;;
+                    max) res_friendly="Max (Hardware Ceiling: ${hw_display})" ;;
+                    4k|2160) res_friendly="4K UHD" ;;
+                    8k|4320) res_friendly="8K UHD (Uncapped)" ;;
+                    480) res_friendly="480p SD" ;;
+                    360) res_friendly="360p Low" ;;
+                    auto) res_friendly="Auto (Smart Dynamic up to ${hw_display})" ;;
+                    *) res_friendly="$saved_res" ;;
+                esac
+                echo -e "${C_CYAN}📺 Video Quality Profile:${C_RESET} ${C_PINK}${res_friendly}${C_RESET}"
+                echo -e "   ${C_TEAL}Hardware Ceiling:${C_RESET}     ${C_WHITE}${hw_display}${C_RESET} (${C_GRAY}Smart GPU capability cap${C_RESET})"
             fi
-            echo -e "${C_GRAY}💡 Quick Switch: 'q -res 720' | 'q -res 1080' | 'q -res 1440' | 'q -res 4k' | 'q -res auto'${C_RESET}"
-            echo -e "${C_GRAY}   Or inside video window press keys: ${C_WHITE}0${C_GRAY} (Auto) | ${C_WHITE}1${C_GRAY} (720p) | ${C_WHITE}2${C_GRAY} (1080p60) | ${C_WHITE}3${C_GRAY} (2K) | ${C_WHITE}4${C_GRAY} (4K)${C_RESET}"
+            echo -e "${C_GRAY}💡 Quick Switch: 'q -res low' | 'q -res mid' | 'q -res high' | 'q -res max' | 'q -res auto'${C_RESET}"
+            echo -e "${C_GRAY}   Or inside video window press keys: ${C_WHITE}0${C_GRAY} (Auto) | ${C_WHITE}1${C_GRAY} (Low) | ${C_WHITE}2${C_GRAY} (Mid) | ${C_WHITE}3${C_GRAY} (High) | ${C_WHITE}4${C_GRAY} (Max)${C_RESET}"
             return 0
             ;;
         *)
-            echo -e "${C_PINK}❓ Unknown resolution: '$target'. Use: 720, 1080, 1440, 4k, 480, 360, or auto.${C_RESET}"
+            echo -e "${C_PINK}❓ Unknown resolution: '$target'. Use: low, mid, high, max, or auto (or 720, 1080, 2k, 4k, 8k).${C_RESET}"
             return 1
             ;;
     esac
@@ -1696,6 +1889,16 @@ cmd_resolution() {
     # Persist choice to user config
     mkdir -p "$HOME/.config/mpv"
     echo "$clean_target" > "$HOME/.config/mpv/queue_res"
+
+    # Also persist to Windows user config in WSL2 / Hybrid mode
+    if command -v get_windows_user_dir >/dev/null 2>&1; then
+        local win_u_dir
+        win_u_dir=$(get_windows_user_dir)
+        if [ -n "$win_u_dir" ]; then
+            mkdir -p "$win_u_dir/AppData/Roaming/mpv" 2>/dev/null
+            echo "$clean_target" > "$win_u_dir/AppData/Roaming/mpv/queue_res" 2>/dev/null
+        fi
+    fi
 
     # Invalidate bridge stream cache to ensure next stream fetches fresh resolution
     rm -f "$HOME/.cache/mpv/android_stream_cache.json"
@@ -1739,24 +1942,8 @@ cmd_resolution() {
         return 0
     fi
 
-    # Capture current playback position to seamlessly restore without restarting track from 0:00
-    local cur_time
-    cur_time=$(echo '{"command":["get_property","time-pos"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // empty' 2>/dev/null)
-
-    # Use queue_video.lua handler (zero-restart position resume via playback-restart / file-loaded events)
+    # Dispatch SINGLE script-message command to queue_video.lua (handles seamless timestamp memory & reload)
     echo "{\"command\":[\"script-message\",\"change-quality\",\"$clean_target\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    echo "{\"command\":[\"script-message\",\"change-resolution\",\"$ytdl_fmt\",\"$label\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-
-    # Detached seek watcher fallback guarantees position restoration across any engine or script state
-    if [ -n "$cur_time" ] && [[ "$cur_time" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-        local cur_int="${cur_time%.*}"
-        if [ "$cur_int" -ge 2 ]; then
-            (
-                wait_for_playback_start >/dev/null 2>&1
-                echo "{\"command\":[\"seek\",$cur_time,\"absolute\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-            ) & disown
-        fi
-    fi
 
     echo -e "${C_CYAN}📺 Video Quality set to:${C_RESET} ${C_PINK}${label}${C_RESET}"
     if ! is_video_window_open && [ "$IS_ANDROID" = false ]; then

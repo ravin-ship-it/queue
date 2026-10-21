@@ -1,16 +1,18 @@
 # MPV Keybindings for Queue Video Mode
 F11 cycle fullscreen
 f cycle fullscreen
-q script-message safe-hide-video
-Q script-message safe-hide-video
-CLOSE_WIN script-message safe-hide-video
-Ctrl+w script-message safe-hide-video
-Ctrl+W script-message safe-hide-video
-Meta+w script-message safe-hide-video
-Meta+W script-message safe-hide-video
-Meta+q script-message safe-hide-video
-Meta+Q script-message safe-hide-video
-Alt+F4 script-message safe-hide-video
+CLOSE_WIN quit
+Alt+F4 quit
+q quit
+Q quit
+Ctrl+w quit
+Ctrl+W quit
+Meta+w quit
+Meta+W quit
+Meta+q quit
+Meta+Q quit
+h script-message safe-hide-video
+H script-message safe-hide-video
 ESC set fullscreen no
 > playlist-next
 < playlist-prev
@@ -28,10 +30,28 @@ Ctrl+WHEEL_DOWN add window-scale -0.05 ; show-text "Window Scale: ${window-scale
 
 # Quick Quality / Resolution Switchers (Seamless position memory & smart adaptive)
 0 script-message change-quality auto
-1 script-message change-quality 720
-2 script-message change-quality 1080
-3 script-message change-quality 1440
-4 script-message change-quality 4k
+1 script-message change-quality low
+2 script-message change-quality mid
+3 script-message change-quality high
+4 script-message change-quality max
+
+KP0 script-message change-quality auto
+KP1 script-message change-quality low
+KP2 script-message change-quality mid
+KP3 script-message change-quality high
+KP4 script-message change-quality max
+
+Ctrl+0 script-message change-quality auto
+Ctrl+1 script-message change-quality low
+Ctrl+2 script-message change-quality mid
+Ctrl+3 script-message change-quality high
+Ctrl+4 script-message change-quality max
+
+F1 script-message change-quality auto
+F2 script-message change-quality low
+F3 script-message change-quality mid
+F4 script-message change-quality high
+F5 script-message change-quality max
 
 # Audio Language Switcher (YouTube Multi-Audio Dubs & Multi-Track Audio)
 a script-message cycle-language

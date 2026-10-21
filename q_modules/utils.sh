@@ -362,7 +362,17 @@ EOF
 
     local win_mpv_dir="$win_dir/AppData/Roaming/mpv"
     mkdir -p "$win_mpv_dir" 2>/dev/null
-    cat << 'EOF' > "$win_mpv_dir/mpv.conf"
+    if [ -f "$HOME/.config/mpv/queue_res" ]; then
+        cp -f "$HOME/.config/mpv/queue_res" "$win_mpv_dir/queue_res" 2>/dev/null
+    fi
+    if [ -f "$HOME/.config/mpv/queue_hw_ceiling" ]; then
+        cp -f "$HOME/.config/mpv/queue_hw_ceiling" "$win_mpv_dir/queue_hw_ceiling" 2>/dev/null
+    fi
+    local init_ytdl_fmt="bestvideo[height<=2160][fps>30][format_note!*=Premium]+(bestaudio[language=en][acodec=opus]/bestaudio[language^=en]/bestaudio[acodec=opus]/bestaudio)/bestvideo[height<=2160][format_note!*=Premium]+(bestaudio[language=en]/bestaudio)/bestvideo[height<=2160]+(bestaudio[language=en]/bestaudio)/best"
+    if [ -f "$HOME/.config/mpv/queue_hw_ceiling" ] && [ "$(cat "$HOME/.config/mpv/queue_hw_ceiling" 2>/dev/null | tr -d '[:space:]')" == "8k" ]; then
+        init_ytdl_fmt="bestvideo[fps>30][format_note!*=Premium]+(bestaudio[language=en][acodec=opus]/bestaudio[language^=en]/bestaudio[acodec=opus]/bestaudio)/bestvideo[format_note!*=Premium]+(bestaudio[language=en]/bestaudio)/bestvideo+(bestaudio[language=en]/bestaudio)/best"
+    fi
+    cat << EOF > "$win_mpv_dir/mpv.conf"
 # MPV Native Windows Configuration (Queue Engine)
 vo=gpu
 gpu-context=auto
@@ -374,20 +384,25 @@ audio-channels=stereo
 network-timeout=30
 stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5
 cache=yes
-cache-secs=180
+cache-secs=300
 cache-pause=yes
 cache-pause-wait=2
 cache-pause-initial=yes
-demuxer-max-bytes=256MiB
-demuxer-max-back-bytes=64MiB
-demuxer-readahead-secs=60
+demuxer-max-bytes=512MiB
+demuxer-max-back-bytes=128MiB
+demuxer-readahead-secs=300
 
 # YouTube / Streaming (Smart Adaptive default & English language prioritization)
 alang=en,eng,enUS,en-US
 slang=en,eng,enUS,en-US
 ytdl=yes
-ytdl-format=bestvideo[height<=1080][fps<=60][vcodec^=avc1][format_note!*=Premium]+(bestaudio[language=en][acodec=opus]/bestaudio[language^=en]/bestaudio[acodec=opus]/bestaudio)/bestvideo[height<=1080][fps<=60][format_note!*=Premium]+(bestaudio[language=en]/bestaudio)/bestvideo[height<=720]+(bestaudio[language=en]/bestaudio)/best
+ytdl-format=$init_ytdl_fmt
 script-opts=ytdl_hook-ytdl_path=yt-dlp
+script-opts-append=stats-key_page_0=
+script-opts-append=stats-key_page_1=
+script-opts-append=stats-key_page_2=
+script-opts-append=stats-key_page_3=
+script-opts-append=stats-key_page_4=
 ytdl-raw-options=extractor-args="youtube:player_client=visionos,android,web"
 tls-verify=no
 
@@ -719,15 +734,18 @@ ensure_mpv_running() {
                 mkdir -p "$win_mpv_scripts_dir" 2>/dev/null
                 if [ -f "$script_path" ]; then
                     cp -f "$script_path" "$win_mpv_scripts_dir/queue_video.lua" 2>/dev/null
-                    local win_native_script
-                    win_native_script=$(wslpath -w "$win_mpv_scripts_dir/queue_video.lua" 2>/dev/null)
-                    [ -n "$win_native_script" ] && script_arg="'--script=$win_native_script',"
+                    # Do not pass --script here; MPV already auto-loads all scripts in AppData/Roaming/mpv/scripts
+                    script_arg=""
                 fi
                 local in_conf="$HOME/.config/mpv/input.conf"
                 [ ! -f "$in_conf" ] && in_conf="$SCRIPT_DIR/input.conf.example"
                 [ ! -f "$in_conf" ] && in_conf="$(dirname "$MODULE_DIR")/input.conf.example"
-                if [ -f "$in_conf" ] && [ ! -f "$win_mpv_dir/input.conf" ]; then
+                local input_arg=""
+                if [ -f "$in_conf" ]; then
                     cp -f "$in_conf" "$win_mpv_dir/input.conf" 2>/dev/null
+                    local win_native_in_conf
+                    win_native_in_conf=$(wslpath -w "$win_mpv_dir/input.conf" 2>/dev/null)
+                    [ -n "$win_native_in_conf" ] && input_arg="'--input-conf=$win_native_in_conf',"
                 fi
             elif [ -f "$script_path" ]; then
                 local win_script
@@ -741,7 +759,7 @@ ensure_mpv_running() {
 
             ensure_windows_ytdlp_configured
 
-            powershell.exe -NoProfile -Command "Start-Process -FilePath '$win_mpv_native' -ArgumentList '--idle=yes','--keep-open=yes','--vo=gpu','--video=auto','--force-window=immediate','--window-minimized=yes',${ytdl_arg}${script_arg}'--input-ipc-server=\\\\.\\pipe\\$pipe_name' -WindowStyle Hidden" </dev/null >/dev/null 2>&1
+            powershell.exe -NoProfile -Command "Start-Process -FilePath '$win_mpv_native' -ArgumentList '--idle=yes','--keep-open=yes','--vo=gpu','--video=auto','--force-window=immediate','--window-minimized=yes',${ytdl_arg}${script_arg}${input_arg}'--input-ipc-server=\\\\.\\pipe\\$pipe_name' -WindowStyle Hidden" </dev/null >/dev/null 2>&1
 
             local bridge_script="$MODULE_DIR/hybrid_bridge.py"
             [ ! -f "$bridge_script" ] && bridge_script="$SCRIPT_DIR/q_modules/hybrid_bridge.py"
