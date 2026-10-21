@@ -61,6 +61,12 @@ local function check_and_execute_cmd()
                     if target then
                         mp.commandv("seek", target, parts[3] or "absolute")
                     end
+                elseif cmd == "speed" and #parts >= 2 then
+                    local target = tonumber(parts[2])
+                    if target then
+                        mp.set_property_number("speed", target)
+                        mp.commandv("show-text", string.format("⚡ Speed: %.2fx", target), 1500)
+                    end
                 end
             end
         end

@@ -770,6 +770,114 @@ cmd_volume() {
     echo -e "🔊 ${C_PINK}Volume:${C_RESET} ${C_CYAN}${vol}%${C_RESET}"
 }
 
+cmd_speed() {
+    local input="$1"
+    input=$(echo "$input" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
+
+    local speed_file="$HOME/.config/mpv/queue_speed"
+    local win_u_dir=""
+    if [ "$IS_WSL" = true ] && command -v get_windows_user_dir >/dev/null 2>&1; then
+        win_u_dir=$(get_windows_user_dir)
+    fi
+
+    # Read current speed from MPV or config
+    local cur_speed="1.00"
+    if [ "$MPV_RUNNING" = true ] && [ -S "$SOCKET" ]; then
+        local raw_sp
+        raw_sp=$(echo '{"command":["get_property","speed"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // empty' 2>/dev/null)
+        if [ -n "$raw_sp" ] && [[ "$raw_sp" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+            cur_speed=$(awk -v s="$raw_sp" 'BEGIN { printf "%.2f", s }')
+        fi
+    elif [ -f "$speed_file" ]; then
+        local saved_sp
+        saved_sp=$(cat "$speed_file" 2>/dev/null | tr -d '[:space:]')
+        if [[ "$saved_sp" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+            cur_speed=$(awk -v s="$saved_sp" 'BEGIN { printf "%.2f", s }')
+        fi
+    fi
+
+    # 1. Query mode (empty input)
+    if [ -z "$input" ]; then
+        local status_desc="Normal"
+        if [ "$cur_speed" == "1.00" ]; then
+            status_desc="Normal"
+        elif [ "$cur_speed" == "2.00" ]; then
+            status_desc="Double (2x)"
+        elif [ "$cur_speed" == "0.50" ]; then
+            status_desc="Half (0.5x)"
+        elif (( $(echo "$cur_speed > 1.0" | bc -l 2>/dev/null || echo 0) )); then
+            status_desc="Fast"
+        else
+            status_desc="Slow"
+        fi
+        echo -e "${C_CYAN}⚡ Playback Speed:${C_RESET} ${C_PINK}${cur_speed}x${C_RESET} ${C_GRAY}(${status_desc})${C_RESET}"
+        echo -e "${C_GRAY}💡 Quick Controls: 'q -speed 1.25' | 'q -speed 1.5' | 'q -speed 2' | 'q -speed reset'${C_RESET}"
+        echo -e "${C_GRAY}   Or in video window: '[' / ']' (±10%) | '{' / '}' (±25%) | Backspace (Reset 1.0x)${C_RESET}"
+        return 0
+    fi
+
+    # 2. Parse target speed
+    local target_speed=""
+    case "$input" in
+        reset|normal|default|1|1.0|1.0x|1x)
+            target_speed="1.00"
+            ;;
+        half|0.5|0.5x)
+            target_speed="0.50"
+            ;;
+        double|2|2.0|2x)
+            target_speed="2.00"
+            ;;
+        "+"*|"-"*)
+            local offset="${input%x}"
+            target_speed=$(awk -v cur="$cur_speed" -v off="$offset" 'BEGIN {
+                res = cur + off;
+                if (res < 0.25) res = 0.25;
+                if (res > 4.0) res = 4.0;
+                printf "%.2f", res;
+            }')
+            ;;
+        *)
+            local clean_num="${input%x}"
+            if [[ "$clean_num" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+                target_speed=$(awk -v val="$clean_num" 'BEGIN {
+                    if (val < 0.25) val = 0.25;
+                    if (val > 4.0) val = 4.0;
+                    printf "%.2f", val;
+                }')
+            else
+                echo -e "${C_PINK}❓ Invalid speed: '$input'. Use: 0.25 to 4.0 (e.g. 'q -speed 1.25', 'q -speed reset', 'q -speed +0.1')${C_RESET}"
+                return 1
+            fi
+            ;;
+    esac
+
+    # Persist choice
+    mkdir -p "$HOME/.config/mpv"
+    echo "$target_speed" > "$speed_file"
+    if [ -n "$win_u_dir" ] && [ -d "$win_u_dir" ]; then
+        mkdir -p "$win_u_dir/AppData/Roaming/mpv" 2>/dev/null
+        echo "$target_speed" > "$win_u_dir/AppData/Roaming/mpv/queue_speed" 2>/dev/null
+    fi
+
+    # Android Mobile Sync
+    if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+        send_android_mpv_cmd "speed $target_speed"
+        echo -e "${C_CYAN}⚡ Mobile Playback Speed set to:${C_RESET} ${C_PINK}${target_speed}x${C_RESET}"
+        return 0
+    fi
+
+    # Desktop Player (Linux / WSL2)
+    if [ "$MPV_RUNNING" = true ] && [ -S "$SOCKET" ]; then
+        echo "{\"command\":[\"script-message\",\"set-speed\",\"$target_speed\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+        echo "{\"command\":[\"set_property\",\"speed\",$target_speed]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+        echo -e "${C_CYAN}⚡ Playback Speed set to:${C_RESET} ${C_PINK}${target_speed}x${C_RESET}"
+    else
+        echo -e "${C_CYAN}⚡ Playback Speed set to:${C_RESET} ${C_PINK}${target_speed}x${C_RESET}"
+        echo -e "${C_GRAY}   Default profile saved. Will be applied automatically on next playback.${C_RESET}"
+    fi
+}
+
 cmd_audio_fx() {
     if [ "$MPV_RUNNING" = false ]; then
         echo -e "${C_PINK}😴💤 MPV isn't running... it must be taking a nap${C_RESET}"

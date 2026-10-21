@@ -58,5 +58,13 @@ a script-message cycle-language
 A script-message cycle-language
 # script-message cycle-language
 
+# Playback Speed Controls (Fine ±10%, Coarse ±25%, Reset)
+[ script-message adjust-speed -0.1
+] script-message adjust-speed 0.1
+{ script-message adjust-speed -0.25
+} script-message adjust-speed 0.25
+BS script-message reset-speed
+Alt+0 script-message reset-speed
+
 Ctrl+s cycle shuffle
 r playlist-shuffle

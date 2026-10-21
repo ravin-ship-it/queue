@@ -148,14 +148,61 @@ local lang_file = home ~= "" and (home .. "/.config/mpv/queue_lang") or nil
 local langs_cache_file = home ~= "" and (home .. "/.cache/mpv/current_audio_langs.json") or nil
 local res_file = nil
 local hw_ceiling_file = nil
+local speed_file = nil
 if home ~= "" then
     if (package.config:sub(1,1) == "\\") or (os.getenv("WINDIR") ~= nil) then
         res_file = home .. "/AppData/Roaming/mpv/queue_res"
         hw_ceiling_file = home .. "/AppData/Roaming/mpv/queue_hw_ceiling"
+        speed_file = home .. "/AppData/Roaming/mpv/queue_speed"
     else
         res_file = home .. "/.config/mpv/queue_res"
         hw_ceiling_file = home .. "/.config/mpv/queue_hw_ceiling"
+        speed_file = home .. "/.config/mpv/queue_speed"
     end
+end
+
+local function get_saved_speed()
+    if not speed_file then return 1.0 end
+    local f = io.open(speed_file, "r")
+    if not f then return 1.0 end
+    local content = f:read("*a")
+    f:close()
+    if content then
+        local trimmed = content:match("^%s*(.-)%s*$")
+        local num = tonumber(trimmed)
+        if num and num >= 0.25 and num <= 4.0 then
+            return num
+        end
+    end
+    return 1.0
+end
+
+local function save_speed(val)
+    if not speed_file or not val then return end
+    local f = io.open(speed_file, "w")
+    if f then
+        f:write(string.format("%.2f\n", val))
+        f:close()
+    end
+end
+
+local function set_playback_speed(val)
+    if not val then return end
+    val = math.max(0.25, math.min(4.0, math.floor(val * 100 + 0.5) / 100))
+    mp.set_property_number("speed", val)
+    pcall(mp.set_property, "user-data/queue-speed", string.format("%.2f", val))
+    save_speed(val)
+
+    local label = string.format("⚡ Speed: %.2fx", val)
+    if math.abs(val - 1.0) < 0.01 then
+        label = "⚡ Speed: 1.00x (Normal)"
+    end
+    mp.commandv("show-text", label, 1500)
+end
+
+local function adjust_playback_speed(delta)
+    local cur = mp.get_property_number("speed", 1.0)
+    set_playback_speed(cur + delta)
 end
 
 local function get_saved_res()
@@ -306,6 +353,12 @@ local initial_saved_res = get_saved_res()
 local is_auto_mode = (initial_saved_res == "auto")
 local current_tier = initial_saved_res
 pcall(mp.set_property, "user-data/queue-res", current_tier)
+
+local initial_saved_speed = get_saved_speed()
+if initial_saved_speed and initial_saved_speed ~= 1.0 then
+    mp.set_property_number("speed", initial_saved_speed)
+    pcall(mp.set_property, "user-data/queue-speed", string.format("%.2f", initial_saved_speed))
+end
 local track_start_time = 0
 local has_downshifted_this_track = false
 local starved_buffer_seconds = 0
@@ -913,6 +966,11 @@ local function on_file_loaded()
     last_lag_check_time = 0
     track_start_time = mp.get_time()
     local path = mp.get_property("path", "")
+    local saved_sp = get_saved_speed()
+    if saved_sp and saved_sp ~= 1.0 then
+        mp.set_property_number("speed", saved_sp)
+        pcall(mp.set_property, "user-data/queue-speed", string.format("%.2f", saved_sp))
+    end
     if path and path ~= "" then
         local is_remote = (path:match("^https?://") ~= nil) or (path:match("^ytdl://") ~= nil)
         if is_remote and is_auto_mode then
@@ -946,6 +1004,9 @@ mp.register_script_message("change-language", function(target) change_language(t
 mp.register_script_message("cycle-language", cycle_audio_language)
 mp.register_script_message("smart-next", function() smart_next(false) end)
 mp.register_script_message("smart-prev", smart_prev)
+mp.register_script_message("set-speed", function(val) set_playback_speed(tonumber(val)) end)
+mp.register_script_message("adjust-speed", function(delta) adjust_playback_speed(tonumber(delta)) end)
+mp.register_script_message("reset-speed", function() set_playback_speed(1.0) end)
 
 -- Smart Navigation Keybindings
 mp.add_key_binding(">", "smart_next_key", function() smart_next(false) end)
@@ -1035,3 +1096,11 @@ mp.add_forced_key_binding("F2", "quality_f2", function() change_quality("low", f
 mp.add_forced_key_binding("F3", "quality_f3", function() change_quality("mid", false) end)
 mp.add_forced_key_binding("F4", "quality_f4", function() change_quality("high", false) end)
 mp.add_forced_key_binding("F5", "quality_f5", function() change_quality("max", false) end)
+
+-- In-Window Playback Speed Hotkeys ([, ], {, }, Backspace, Alt+0)
+mp.add_forced_key_binding("[", "speed_down_bracket", function() adjust_playback_speed(-0.1) end)
+mp.add_forced_key_binding("]", "speed_up_bracket", function() adjust_playback_speed(0.1) end)
+mp.add_forced_key_binding("{", "speed_down_brace", function() adjust_playback_speed(-0.25) end)
+mp.add_forced_key_binding("}", "speed_up_brace", function() adjust_playback_speed(0.25) end)
+mp.add_forced_key_binding("BS", "speed_reset_bs", function() set_playback_speed(1.0) end)
+mp.add_forced_key_binding("Alt+0", "speed_reset_alt0", function() set_playback_speed(1.0) end)

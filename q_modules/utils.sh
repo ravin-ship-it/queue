@@ -368,6 +368,9 @@ EOF
     if [ -f "$HOME/.config/mpv/queue_hw_ceiling" ]; then
         cp -f "$HOME/.config/mpv/queue_hw_ceiling" "$win_mpv_dir/queue_hw_ceiling" 2>/dev/null
     fi
+    if [ -f "$HOME/.config/mpv/queue_speed" ]; then
+        cp -f "$HOME/.config/mpv/queue_speed" "$win_mpv_dir/queue_speed" 2>/dev/null
+    fi
     local init_ytdl_fmt="bestvideo[height<=2160][fps>30][format_note!*=Premium]+(bestaudio[language=en][acodec=opus]/bestaudio[language^=en]/bestaudio[acodec=opus]/bestaudio)/bestvideo[height<=2160][format_note!*=Premium]+(bestaudio[language=en]/bestaudio)/bestvideo[height<=2160]+(bestaudio[language=en]/bestaudio)/best"
     if [ -f "$HOME/.config/mpv/queue_hw_ceiling" ] && [ "$(cat "$HOME/.config/mpv/queue_hw_ceiling" 2>/dev/null | tr -d '[:space:]')" == "8k" ]; then
         init_ytdl_fmt="bestvideo[fps>30][format_note!*=Premium]+(bestaudio[language=en][acodec=opus]/bestaudio[language^=en]/bestaudio[acodec=opus]/bestaudio)/bestvideo[format_note!*=Premium]+(bestaudio[language=en]/bestaudio)/bestvideo+(bestaudio[language=en]/bestaudio)/best"
@@ -379,6 +382,7 @@ gpu-context=auto
 hwdec=auto-safe
 ao=wasapi
 audio-channels=stereo
+audio-pitch-correction=yes
 
 # Smooth Caching & Performance (Resilient against internet fluctuations)
 network-timeout=30
@@ -595,6 +599,9 @@ local function check_and_execute_cmd()
                 elseif cmd == "seek" and #parts >= 2 then
                     local target = tonumber(parts[2])
                     if target then mp.commandv("seek", target, parts[3] or "absolute") end
+                elseif cmd == "speed" and #parts >= 2 then
+                    local target = tonumber(parts[2])
+                    if target then mp.set_property_number("speed", target) end
                 end
             end
         end
