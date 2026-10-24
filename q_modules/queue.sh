@@ -925,7 +925,7 @@ cmd_dislike_list() {
                 [ -z "$bid" ] && continue
                 [ -z "$btitle" ] && btitle=$(get_cached_title "$bid")
                 [ -z "$btitle" ] && btitle="Track ($bid)"
-                items+="${C_ORANGE}${i}.${C_RESET} ${C_CYAN}${btitle}${C_RESET} ${C_GRAY}[${bid}]${C_RESET}"$'\t'"${bid}"$'\t'"${btitle}"$'\n'
+                items+="${C_ORANGE}${i}${C_RESET}. ${C_CYAN}${btitle}${C_RESET} ${C_GRAY}[${bid}]${C_RESET}"$'\t'"${bid}"$'\t'"${btitle}"$'\n'
                 ((i++))
                 ((count++))
             done < "$bl_file"
@@ -936,7 +936,10 @@ cmd_dislike_list() {
         [ "$count" -gt 0 ] && fzf_input+="  🗑️   Clear Entire Dislike List ($count tracks)\n"
         fzf_input+="$items"
 
-        local header=$(printf "${C_GRAY}${H_LINE}${C_RESET}\n  ${C_PURPLE}👎 Dislike List Manager${C_RESET} ${C_GRAY}(${count} blacklisted tracks)${C_RESET}\n  ${C_GRAY}ENTER: Remove from Dislike List | TAB: Select Multiple | ESC: Exit${C_RESET}")
+        local LINE=$(get_fzf_divider)
+        local status_icons=$(get_player_status_icons)
+        local header="${C_PURPLE}🪷 Dislike List Manager${C_RESET} ${C_GRAY}(${count} tracks • ENTER: Remove, TAB: Multi)${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
+        local d_prompt="🎵 ${C_TEAL}Dislike Manager${status_icons}${C_RESET} > "
 
         local sel=$(echo -ne "$fzf_input" | fzf --multi --ansi --height=100% --layout=reverse --border \
             --header="$header" \
@@ -944,18 +947,21 @@ cmd_dislike_list() {
             --bind "tab:toggle,alt-a:toggle-all,insert:select-all,delete:deselect-all" \
             --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \
             $FZF_COLOR_OPTS \
-            --info=inline-right --prompt="Dislike Manager > ")
+            --info=inline-right --prompt="$d_prompt")
 
         [ -z "$sel" ] && break
 
         # Case 1: Add Track to Dislike List
         if echo "$sel" | grep -q "Add Track to Dislike List"; then
+            local LINE=$(get_fzf_divider)
+            local add_header="${C_PURPLE}🪷 How would you like to add track(s) to Dislike List?${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
+            local add_prompt="🎵 ${C_TEAL}Add Dislike${C_RESET} > "
             local add_action=$(echo -e "  🎵  Currently Playing Track\n  📋  Pick from Current Queue\n  🕒  Pick from Recent History\n  🔍  Search YouTube to Dislike\n  🔗  Enter URL or Video ID manually" | \
                 fzf --height=100% --layout=reverse --border --info=inline-right \
                 $FZF_COLOR_OPTS \
                 --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \
-                --header="How would you like to add track(s) to the Dislike List?" \
-                --prompt="Add Dislike > ")
+                --header="$add_header" \
+                --prompt="$add_prompt")
 
             [ -z "$add_action" ] && continue
 
@@ -973,14 +979,17 @@ cmd_dislike_list() {
                         local fn=$(echo "$item_json" | jq -r '.filename // ""')
                         local tt=$(echo "$item_json" | jq -r '.title // ""')
                         [ -z "$tt" ] && tt="$fn"
-                        q_items+="${C_ORANGE}$((k+1)).${C_RESET} ${C_CYAN}${tt}${C_RESET}"$'\t'"${fn}"$'\t'"${tt}"$'\n'
+                        q_items+="${C_ORANGE}$((k+1))${C_RESET}. ${C_CYAN}${tt}${C_RESET}"$'\t'"${fn}"$'\t'"${tt}"$'\n'
                     done
+                    local LINE=$(get_fzf_divider)
+                    local q_header="${C_PURPLE}🪷 Select Track(s) from Current Queue to Dislike${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
+                    local q_prompt="🎵 ${C_TEAL}Queue Dislike${C_RESET} > "
                     local q_sel=$(echo -ne "$q_items" | fzf --multi --ansi --height=100% --layout=reverse --border \
                         --delimiter=$'\t' --with-nth=1 \
                         --bind "tab:toggle,alt-a:toggle-all,insert:select-all,delete:deselect-all" \
                         $FZF_COLOR_OPTS \
-                        --header="Select track(s) from current queue to dislike:" \
-                        --prompt="Queue Track > ")
+                        --header="$q_header" \
+                        --prompt="$q_prompt")
                     if [ -n "$q_sel" ]; then
                         while IFS= read -r q_line; do
                             [ -z "$q_line" ] && continue
@@ -1002,15 +1011,18 @@ cmd_dislike_list() {
                         [ -z "$h_id" ] && continue
                         local h_tit=$(get_cached_title "$h_id")
                         [ -z "$h_tit" ] && h_tit="History Track ($h_id)"
-                        h_items+="${C_ORANGE}${h_idx}.${C_RESET} ${C_CYAN}${h_tit}${C_RESET} ${C_GRAY}[${h_id}]${C_RESET}"$'\t'"${h_id}"$'\t'"${h_tit}"$'\n'
+                        h_items+="${C_ORANGE}${h_idx}${C_RESET}. ${C_CYAN}${h_tit}${C_RESET} ${C_GRAY}[${h_id}]${C_RESET}"$'\t'"${h_id}"$'\t'"${h_tit}"$'\n'
                         ((h_idx++))
                     done < <(tail -n 30 "$hist_file" 2>/dev/null | tac)
+                    local LINE=$(get_fzf_divider)
+                    local h_header="${C_PURPLE}🪷 Select Track(s) from History to Dislike${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
+                    local h_prompt="🎵 ${C_TEAL}History Dislike${C_RESET} > "
                     local h_sel=$(echo -ne "$h_items" | fzf --multi --ansi --height=100% --layout=reverse --border \
                         --delimiter=$'\t' --with-nth=1 \
                         --bind "tab:toggle,alt-a:toggle-all,insert:select-all,delete:deselect-all" \
                         $FZF_COLOR_OPTS \
-                        --header="Select track(s) from history to dislike:" \
-                        --prompt="History Track > ")
+                        --header="$h_header" \
+                        --prompt="$h_prompt")
                     if [ -n "$h_sel" ]; then
                         while IFS= read -r h_line; do
                             [ -z "$h_line" ] && continue
@@ -1032,15 +1044,18 @@ cmd_dislike_list() {
                         local s_idx=1
                         while IFS=$'\t' read -r su st sa sd; do
                             [ -z "$su" ] && continue
-                            s_items+="${C_ORANGE}${s_idx}.${C_RESET} ${C_CYAN}${st}${C_RESET} ${C_LIGHT_PINK}by ${sa}${C_RESET} [${sd}]"$'\t'"${su}"$'\t'"${st}"$'\n'
+                            s_items+="${C_ORANGE}${s_idx}${C_RESET}. ${st} ${C_GRAY}by${C_RESET} ${C_LIGHT_PINK}${sa}${C_RESET} ${C_ORANGE}[${sd}]${C_RESET}"$'\t'"${su}"$'\t'"${st}"$'\n'
                             ((s_idx++))
                         done < "$s_tmp"
+                        local LINE=$(get_fzf_divider)
+                        local s_header="${C_PURPLE}🪷 Search Results to Dislike [\"${s_query}\"]${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
+                        local s_prompt="🎵 ${C_TEAL}Search Dislike${C_RESET} > "
                         local s_sel=$(echo -ne "$s_items" | fzf --multi --ansi --height=100% --layout=reverse --border \
                             --delimiter=$'\t' --with-nth=1 \
                             --bind "tab:toggle,alt-a:toggle-all,insert:select-all,delete:deselect-all" \
                             $FZF_COLOR_OPTS \
-                            --header="Select track(s) to blacklist from Auto Mode:" \
-                            --prompt="Dislike Track > ")
+                            --header="$s_header" \
+                            --prompt="$s_prompt")
                         if [ -n "$s_sel" ]; then
                             while IFS= read -r s_line; do
                                 [ -z "$s_line" ] && continue
@@ -1068,11 +1083,14 @@ cmd_dislike_list() {
 
         # Case 2: Clear Entire Dislike List
         if echo "$sel" | grep -q "Clear Entire Dislike List"; then
+            local LINE=$(get_fzf_divider)
+            local clr_header="${C_PURPLE}🪷 Clear Entire Dislike List (${count} tracks)?${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
+            local clr_prompt="🎵 ${C_TEAL}Confirm Clear${C_RESET} > "
             local confirm=$(echo -e "  ❌  No, Cancel\n  🗑️   Yes, Clear All Dislikes" | \
                 fzf --height=100% --layout=reverse --border --info=inline-right \
                 $FZF_COLOR_OPTS \
-                --header="Are you sure you want to completely clear the dislike list ($count tracks)?" \
-                --prompt="Confirm > ")
+                --header="$clr_header" \
+                --prompt="$clr_prompt")
             if echo "$confirm" | grep -q "Yes, Clear"; then
                 > "$bl_file"
                 echo -e "${C_GREEN}✅ Dislike list cleared completely.${C_RESET}"

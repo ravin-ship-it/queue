@@ -56,7 +56,7 @@ cmd_playlist_opts_fzf() {
     while IFS= read -r f; do
         [ -z "$f" ] && continue
         local count=$(grep -cve '^\s*$' "${PLAYLIST_DIR}/${f}.txt" 2>/dev/null || echo "0")
-        echo -e "${C_ORANGE}${idx}.${C_RESET} 📂 ${C_CYAN}${f}${C_RESET} ${C_GRAY}(${count})${C_RESET}"
+        echo -e "${C_ORANGE}${idx}${C_RESET}. 📂 ${C_CYAN}${f}${C_RESET} ${C_GRAY}(${count} tracks)${C_RESET}"
         ((idx++))
     done < <(find "$PLAYLIST_DIR" -maxdepth 1 -name "*.txt" -exec basename {} .txt \; 2>/dev/null | sort)
 }
@@ -69,8 +69,9 @@ cmd_playlist_items_fzf() {
     while IFS= read -r url; do
         [ -z "$url" ] && continue
         local title=$(get_cached_title "$url")
-        local log_line=$(format_track_log "$i" "$url" "$title")
-        echo -e "${log_line}::${url}"
+        local fzf_line=$(format_track_fzf "$i" "$url" "$title")
+        [ -z "$title" ] && title=$(echo "$url" | sed 's/.*v=//; s/.*watch?v=//; s/&.*//')
+        echo -e "${fzf_line}::${url}::${title}"
         ((i++))
     done < "$file"
 }
@@ -86,7 +87,10 @@ cmd_playlist_load() {
         fi
         
         local pl_opts=$(cmd_playlist_opts_fzf)
-        local pl_header=$(printf "${C_GRAY}${H_LINE}${C_RESET}\n  ${C_PURPLE}🪷 Select Playlists to Load${C_RESET}")
+        local LINE=$(get_fzf_divider)
+        local status_icons=$(get_player_status_icons)
+        local pl_header="${C_PURPLE}🪷 Select Playlists to Load${C_RESET} ${C_GRAY}(ENTER load, TAB multi)${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
+        local pl_prompt="🎵 ${C_TEAL}Load Playlist${status_icons}${C_RESET} > "
 
         input=$(echo -ne "$pl_opts" | \
             fzf --multi --exact --cycle --tiebreak=index --height=100% --layout=reverse --border --ansi \
@@ -94,19 +98,23 @@ cmd_playlist_load() {
             --header="$pl_header" \
             --bind "tab:toggle,alt-a:toggle-all,insert:select-all,delete:deselect-all" \
             $FZF_COLOR_OPTS \
-            --info=inline-right --prompt="📂 Playlist > " | sed "s/\x1b\[[0-9;]*m//g" | sed 's/^[ 0-9]*\. //' | sed 's/^📂 //' | sed 's/ ([0-9]*)$//')
+            --info=inline-right --prompt="$pl_prompt" | sed "s/\x1b\[[0-9;]*m//g" | sed 's/^[ 0-9]*\. //' | sed 's/^📂 //' | sed -E 's/ \([0-9]+( tracks)?\)$//')
         
         [ -z "$input" ] && { echo -e "${C_PINK}👋 Loading cancelled${C_RESET}"; return; }
     fi
     
     # Action Selection for loading multiple
+    local LINE=$(get_fzf_divider)
+    local status_icons=$(get_player_status_icons)
+    local act_header="${C_PURPLE}🪷 How would you like to load these tracks?${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
+    local act_prompt="🎵 ${C_TEAL}Choose Action${status_icons}${C_RESET} > "
     local load_mode="Append"
     load_mode=$(echo -e "  🎧  Append to Active Queue\n  ✨  Replace with New Queue & Play\n  🔀  Shuffle & Append to Active Queue" | \
         fzf --height=100% --layout=reverse --border --info=inline-right \
         $FZF_COLOR_OPTS \
         --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \
-        --header="How would you like to load these tracks?" \
-        --prompt="Action > ")
+        --header="$act_header" \
+        --prompt="$act_prompt")
     [ -z "$load_mode" ] && return
 
     ensure_mpv_running
@@ -208,22 +216,28 @@ cmd_playlist_list() {
 
     # 1. Select Playlist
     local pl_opts=$(cmd_playlist_opts_fzf)
-    local pl_header=$(printf "${C_GRAY}${H_LINE}${C_RESET}\n  ${C_PURPLE}🪷 Explore Your Collections${C_RESET}")
+    local LINE=$(get_fzf_divider)
+    local status_icons=$(get_player_status_icons)
+    local pl_header="${C_PURPLE}🪷 Explore Playlists${C_RESET} ${C_GRAY}(ENTER select)${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
+    local pl_prompt="🎵 ${C_TEAL}Playlists${status_icons}${C_RESET} > "
 
     local selected_line=$(echo -ne "$pl_opts" | \
         fzf --exact --cycle --tiebreak=index --height=100% --layout=reverse --border --ansi \
         --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \
         --header="$pl_header" \
         $FZF_COLOR_OPTS \
-        --info=inline-right --prompt="📂 Playlist > ")
+        --info=inline-right --prompt="$pl_prompt")
 
     [ -z "$selected_line" ] && return
     
-    local selected_pl=$(echo -e "$selected_line" | sed "s/\x1b\[[0-9;]*m//g" | sed 's/^[ 0-9]*\. //' | sed 's/^📂 //' | sed 's/ ([0-9]*)$//')
+    local selected_pl=$(echo -e "$selected_line" | sed "s/\x1b\[[0-9;]*m//g" | sed 's/^[ 0-9]*\. //' | sed 's/^📂 //' | sed -E 's/ \([0-9]+( tracks)?\)$//')
     local file="${PLAYLIST_DIR}/${selected_pl}.txt"
 
     # 2. Explore Playlist Contents
-    local ex_header=$(printf "${C_GRAY}${H_LINE}${C_RESET}\n  ${C_PURPLE}🪷 Playlist: ${C_CYAN}${selected_pl}${C_RESET} ${C_GRAY}(ENTER action, TAB select)${C_RESET}")
+    local LINE=$(get_fzf_divider)
+    local status_icons=$(get_player_status_icons)
+    local ex_header="${C_PURPLE}🪷 Playlist: ${C_CYAN}${selected_pl}${C_RESET} ${C_GRAY}(ENTER action, TAB select)${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
+    local tr_prompt="🎵 ${C_TEAL}${selected_pl}${status_icons}${C_RESET} > "
 
     local selection=$(cmd_playlist_items_fzf "$selected_pl" | fzf --multi --exact --cycle --tiebreak=index --bind "tab:toggle,alt-a:toggle-all,insert:select-all,delete:deselect-all" \
         --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \
@@ -231,18 +245,22 @@ cmd_playlist_list() {
         --header="$ex_header" \
         --delimiter="::" --with-nth=1 \
         $FZF_COLOR_OPTS \
-        --info=inline-right --prompt="🎵 Track > ")
+        --info=inline-right --prompt="$tr_prompt")
 
     [ -z "$selection" ] && return
 
     # 3. Choose Action
     local sel_count=$(echo "$selection" | wc -l)
+    local LINE=$(get_fzf_divider)
+    local status_icons=$(get_player_status_icons)
+    local act_header="${C_PURPLE}🪷 Action for ${C_CYAN}${sel_count}${C_PURPLE} track(s) from \"${selected_pl}\"${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
+    local act_prompt="🎵 ${C_TEAL}Choose Action${status_icons}${C_RESET} > "
     local action=$(echo -e "  🎧  Append to Active Queue\n  ✨  New Queue from Selected & Play\n  🔀  Shuffle & Append to Active Queue\n  👎  Dislike Track (Add to Blacklist)\n  👎✖ Dislike & Remove from Playlist\n  ✖  Remove from Playlist" | \
         fzf --height=100% --layout=reverse --border --info=inline-right \
         $FZF_COLOR_OPTS \
         --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \
-        --header="Action for $sel_count track(s) from \"$selected_pl\"?" \
-        --prompt="Choose > ")
+        --header="$act_header" \
+        --prompt="$act_prompt")
     
     [ -z "$action" ] && return
 

@@ -15,6 +15,47 @@ C_BOLD=$'\e[1m'
 
 # Unified FZF theme matching terminal color variables
 FZF_COLOR_OPTS="--color=fg:#00ffff,hl:#ff1493,fg+:#00ffff,hl+:#ff1493,pointer:#ff1493,marker:#ff1493,border:#8700ff,header:#d75fff,prompt:#008787"
+NL=$'\n'
+
+get_fzf_divider() {
+    local cols=$(get_terminal_width)
+    local width=$((cols - 2))
+    [ "$width" -lt 0 ] && width=0
+    local line
+    printf -v line "%*s" "$width" ""
+    echo "${line// /─}"
+}
+
+get_player_status_icons() {
+    local icons=""
+    local p_deep_pink=$'\e[38;5;197m'
+    local p_reset=$'\e[0m'
+    local sock="${SOCKET:-$HOME/.mpv-socket}"
+    
+    if [ -S "$sock" ]; then
+        local raw
+        raw=$(echo -e '{"command":["get_property","shuffle"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","af"]}\n{"command":["get_property","vo"]}\n{"command":["get_property","vid"]}\n{"command":["get_property","window-minimized"]}' | nc ${NC_OPTS:--U} -w 1 "$sock" 2>/dev/null | jq -s -r 'map(select(.event == null)) | .[0].data // false, .[1].data // "no", .[2].data // "no", (if .[3].data == null or .[3].data == [] then "off" else "on" end), (if (.[4].data[0].name // "null") != "null" and (.[5].data // false) != false and (.[5].data // false) != "no" and (.[6].data // false) != true then "on" else "off" end)' 2>/dev/null)
+        if [ -n "$raw" ]; then
+            mapfile -t s_props <<< "$raw"
+            local s_shuf="${s_props[0]}"
+            local s_loop_f="${s_props[1]}"
+            local s_loop_p="${s_props[2]}"
+            local s_af="${s_props[3]}"
+            local s_vid="${s_props[4]}"
+            
+            [ "$s_shuf" == "true" ] && icons="${icons}${p_deep_pink} ><${p_reset}"
+            [ "$s_loop_f" == "inf" ] && icons="${icons}${p_deep_pink} ⟳1${p_reset}"
+            [ "$s_loop_p" == "inf" ] && icons="${icons}${p_deep_pink} ⟳${p_reset}"
+            [ "$s_af" == "on" ] && icons="${icons}${p_deep_pink} Ꭰᗡ${p_reset}"
+            [ -f "$HOME/.cache/mpv/auto_enabled" ] && icons="${icons}${p_deep_pink} ◖∞◗${p_reset}"
+            [ "$s_vid" == "on" ] && icons="${icons}${p_deep_pink} <|V|>${p_reset}"
+        fi
+    fi
+    if command -v is_audio_mode_active >/dev/null 2>&1 && is_audio_mode_active; then
+        icons="${icons}${p_deep_pink} 🎧${p_reset}"
+    fi
+    echo -n "$icons"
+}
 
 get_clipboard() {
     if command -v termux-clipboard-get >/dev/null 2>&1; then
@@ -544,11 +585,14 @@ truncate_text() {
 get_input() {
     local header="$1"
     local prompt="${2:-Name > }"
+    local clean_prompt="${prompt% > }"
+    clean_prompt="${clean_prompt# }"
+    local styled_prompt="🎵 ${C_TEAL}${clean_prompt}${C_RESET} > "
     local tmp=$(mktemp)
     # Use fzf as a polished input box. 
     # IMPORTANT: We redirect stdin from /dev/tty for the interactive part 
     # while providing /dev/null for the item list.
-    fzf --header "  $header" --prompt "  $prompt" \
+    fzf --header "  $header" --prompt "$styled_prompt" \
         --height=5 --layout=reverse --border --info=hidden \
         $FZF_COLOR_OPTS \
         --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \

@@ -361,6 +361,83 @@ format_track_log() {
     echo -e "${C_WHITE}[${C_ORANGE}${idx}${C_WHITE}] ${C_CYAN}${display_title}${C_RESET}${artist_part}${dur_part}"
 }
 
+format_track_fzf() {
+    local idx="$1"
+    local filename="$2"
+    local mpv_title="$3"
+    local force_artist="$4"
+    local force_dur="$5"
+    
+    # 1. Clean Filename (Only for remote URLs)
+    local clean_fname="$filename"
+    [[ "$filename" =~ ^http ]] && clean_fname=$(echo "$filename" | sed -e 's/^[[:space:]]*//; s/[[:space:]]*$//; s/\\t.*//; s/\t.*//')
+
+    # 2. Extract Embedded Title (Only for remote URLs with \t metadata)
+    local embedded_title=""
+    [[ "$filename" =~ ^http && "$filename" == *"\\t"* ]] && embedded_title="${filename#*\\t}"
+
+    # 3. Robust Cache & Metadata Lookup
+    local cached_title=""
+    local cached_artist=""
+    local cached_duration="$force_dur"
+    
+    if [ -n "$clean_fname" ]; then
+        [ ${#CACHE_MEM[@]} -eq 0 ] && load_cache_to_memory
+        
+        local row="${CACHE_MEM[$clean_fname]}"
+        if [ -z "$row" ] && { [[ "$clean_fname" =~ ^http ]] || [[ "$clean_fname" == watch\?v=* ]]; }; then
+            local vid_id=""
+            [[ "$clean_fname" =~ v=([a-zA-Z0-9_-]{11}) ]] && vid_id="${BASH_REMATCH[1]}"
+            [[ "$clean_fname" =~ watch\?v=([a-zA-Z0-9_-]{11}) ]] && vid_id="${BASH_REMATCH[1]}"
+            
+            if [ -n "$vid_id" ]; then
+                for key in "${!CACHE_MEM[@]}"; do
+                    if [[ "$key" == *"$vid_id"* ]]; then
+                        row="${CACHE_MEM[$key]}"
+                        break
+                    fi
+                done
+            fi
+        fi
+
+        if [ -n "$row" ]; then
+            cached_title=$(echo -e "$row" | cut -f1)
+            cached_artist=$(echo -e "$row" | cut -f2)
+            [ -z "$cached_duration" ] && cached_duration=$(echo -e "$row" | cut -f3)
+        fi
+    fi
+
+    # 4. Final Title Determination
+    local display_title="$mpv_title"
+    if [ -n "$cached_title" ] && [ "$cached_title" != "null" ]; then
+        display_title="$cached_title"
+    elif [ -n "$embedded_title" ]; then
+        display_title="$embedded_title"
+    elif [[ "$display_title" =~ ^https?:// ]] || [[ "$display_title" == watch\?v=* ]] || [ -z "$display_title" ]; then
+        if [[ "$filename" =~ ^http ]]; then
+            display_title=$(echo "$clean_fname" | sed 's/.*v=//; s/.*watch?v=//; s/&.*//')
+        else
+            display_title="${filename##*/}"
+        fi
+    fi
+
+    display_title="${display_title%%\\t*}"
+    display_title="${display_title%%$'\t'*}"
+
+    # 5. Build Formatting Parts (Strictly matches show_queue FZF line style)
+    local artist_part=""
+    local dur_part=""
+    
+    local final_artist="${force_artist:-$cached_artist}"
+    final_artist="${final_artist//\//, }"
+    
+    [ -n "$final_artist" ] && [ "$final_artist" != "null" ] && [ "$final_artist" != "$clean_fname" ] && [ "$final_artist" != "N/A" ] && [ "$final_artist" != "Unknown" ] && artist_part=" ${C_GRAY}by${C_RESET} ${C_LIGHT_PINK}$final_artist${C_RESET}"
+    
+    [ -n "$cached_duration" ] && [ "$cached_duration" != "null" ] && [ "$cached_duration" != "0:00" ] && dur_part=" ${C_ORANGE}[$cached_duration]${C_RESET}"
+    
+    printf "%s. %s%s%s" "${C_ORANGE}${idx}${C_RESET}" "$display_title" "$artist_part" "$dur_part"
+}
+
 log_now_playing() {
     local user_prefix="$1"
     

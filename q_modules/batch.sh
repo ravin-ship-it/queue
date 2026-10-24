@@ -27,28 +27,35 @@ execute_batch() {
              # Small breather after search results
              sleep 0.2
              local Q_ICON="🎧 "; local NQ_ICON="✨ "; local P_ICON="📂 "; local N_ICON="✚ "
-             local list_opts="  ${Q_ICON}Active Queue\n  ${NQ_ICON}New Queue\n  ${N_ICON}Create New Playlist..."
+             local list_opts="${Q_ICON}Active Queue\n${NQ_ICON}New Queue\n${N_ICON}Create New Playlist..."
              if [ -d "$PLAYLIST_DIR" ]; then
                  local i=1
                  # Ensure we find all current playlists from the FS
                  while IFS= read -r f; do
                      [ -z "$f" ] && continue
                      local count=$(grep -cve '^\s*$' "${PLAYLIST_DIR}/${f}.txt" 2>/dev/null || echo "0")
-                     list_opts+="\n  ${C_ORANGE}${i}.${C_RESET} ${P_ICON}${f} (${count})"
+                     list_opts+="\n${C_ORANGE}${i}${C_RESET}. ${P_ICON}${C_CYAN}${f}${C_RESET} ${C_GRAY}(${count} tracks)${C_RESET}"
                      ((i++))
                  done < <(ls "$PLAYLIST_DIR" | grep '\.txt$' | sed 's/\.txt$//' | sort)
              fi
              
-             # Dynamic Header for context
-             local header_txt="Where to add these ${#PLAYLIST_URLS[@]} tracks?"
-             [ -n "$CURRENT_QUERY_CONTEXT" ] && header_txt="[Result: $CURRENT_QUERY_CONTEXT]\n$header_txt"
+             # Dynamic Header for context matching queue list style
+             local LINE=$(get_fzf_divider)
+             local status_icons=$(get_player_status_icons)
+             local header_txt
+             if [ -n "$CURRENT_QUERY_CONTEXT" ]; then
+                 header_txt="${C_PURPLE}🪷 Destination for ${C_CYAN}${#PLAYLIST_URLS[@]}${C_PURPLE} track(s) [\"${CURRENT_QUERY_CONTEXT}\"]${C_RESET} ${C_GRAY}(TAB: multi)${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
+             else
+                 header_txt="${C_PURPLE}🪷 Destination for ${C_CYAN}${#PLAYLIST_URLS[@]}${C_PURPLE} track(s)${C_RESET} ${C_GRAY}(TAB: multi)${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
+             fi
+             local dest_prompt="🎵 ${C_TEAL}Destination${status_icons}${C_RESET} > "
 
              local dest=$(echo -e "$list_opts" | fzf --multi --exact --cycle --tiebreak=index --height=100% --layout=reverse --border --ansi --info=inline-right \
                  --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \
                  --header="$header_txt" \
                  --bind "tab:toggle,alt-a:toggle-all,insert:select-all,delete:deselect-all" \
                  $FZF_COLOR_OPTS \
-                 --prompt="Select Destination (TAB for multi) > ")
+                 --prompt="$dest_prompt")
              
              if [ -z "$dest" ]; then 
                  echo -e "${C_PINK}👋 Selection cancelled... no music for you?${C_RESET}"
@@ -77,7 +84,7 @@ execute_batch() {
                  DO_QUEUE=true
              elif [[ "$line" =~ ${P_ICON}(.*) ]]; then
                  # Extract name after icon, strip ANSI, and remove the (count) suffix
-                 local pl_raw=$(echo -e "${BASH_REMATCH[1]}" | sed "s/\x1b\[[0-9;]*m//g" | sed 's/ ([0-9]*)$//')
+                 local pl_raw=$(echo -e "${BASH_REMATCH[1]}" | sed "s/\x1b\[[0-9;]*m//g" | sed -E 's/ \([0-9]+( tracks)?\)$//')
                  # Trim leading/trailing whitespace
                  local pl_name=$(echo "$pl_raw" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
                  [ -n "$pl_name" ] && TARGET_FILES+=("${PLAYLIST_DIR}/${pl_name}.txt")

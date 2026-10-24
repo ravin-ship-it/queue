@@ -131,10 +131,13 @@ interactive_download_wizard() {
 
     local format_choice=""
     if command -v fzf >/dev/null 2>&1; then
+        local LINE=$(get_fzf_divider)
+        local f_header="${C_PURPLE}🪷 Select Download Format / Quality for: ${C_CYAN}${title:0:40}...${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
+        local f_prompt="🎵 ${C_TEAL}Download Format${C_RESET} > "
         format_choice=$(echo -ne "$menu_items" | fzf --height=100% --layout=reverse --border \
             $FZF_COLOR_OPTS \
-            --header="Select Download Format / Quality for: ${title:0:40}..." \
-            --prompt="Format > ")
+            --header="$f_header" \
+            --prompt="$f_prompt")
     else
         echo -e "${C_YELLOW}Select Format / Quality:${C_RESET}"
         local i=1
@@ -176,10 +179,13 @@ interactive_download_wizard() {
 
     local dir_choice=""
     if command -v fzf >/dev/null 2>&1; then
+        local LINE=$(get_fzf_divider)
+        local d_header="${C_PURPLE}🪷 Where would you like to save this download?${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
+        local d_prompt="🎵 ${C_TEAL}Save Location${C_RESET} > "
         dir_choice=$(echo -ne "$dir_items" | fzf --height=100% --layout=reverse --border \
             $FZF_COLOR_OPTS \
-            --header="Where would you like to save this download?" \
-            --prompt="Destination > ")
+            --header="$d_header" \
+            --prompt="$d_prompt")
     else
         echo -e "\n${C_YELLOW}Select Destination Folder:${C_RESET}"
         local i=1

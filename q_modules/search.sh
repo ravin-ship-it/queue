@@ -75,21 +75,48 @@ perform_search() {
         rm -f "$TMP_RESULTS"
         return 1 # Skip to next query
     fi
-    echo -e "${C_GRAY}${H_LINE}${C_RESET}"
 
     # FZF Selection
     if command -v fzf >/dev/null; then
         # FZF Mode: Format for humans, hide URL/Title/Artist/Duration after ::
         # We pack ::URL::Title::Artist::Duration for retrieval
-        local s_header=$(printf "${C_GRAY}${H_LINE}${C_RESET}\n  ${C_PURPLE}🔍 Results for: ${C_CYAN}${QUERY}${C_RESET} ${C_GRAY}(ENTER select, TAB multi, CTRL-D dislike)${C_RESET}")
-        local raw_sel=$(awk -F'\t' -v c="$C_CYAN" -v p="$C_LIGHT_PINK" -v o="$C_ORANGE" -v r="$C_RESET" -v clr_idx="$C_ORANGE" \
-            '{gsub("::", ":", $1); gsub("::", ":", $3); gsub("::", ":", $4); printf "%s%d.%s %s%s %sby %s %s[%s]%s::%s::%s::%s::%s\n", clr_idx, NR, r, c, $1, p, $4, o, $3, r, $2, $1, $4, $3}' "$TMP_RESULTS" | \
+        local LINE=$(get_fzf_divider)
+        local status_icons=$(get_player_status_icons)
+        local s_header="${C_PURPLE}🪷 Results for: ${C_CYAN}${QUERY}${C_RESET} ${C_GRAY}(ENTER select, TAB multi, CTRL-D dislike)${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
+        local s_prompt="🎵 ${C_TEAL}Search Results${status_icons}${C_RESET} > "
+        local raw_sel=$(awk -F'\t' \
+            -v o="$C_ORANGE" \
+            -v g="$C_GRAY" \
+            -v lp="$C_LIGHT_PINK" \
+            -v r="$C_RESET" '
+            {
+                gsub("::", ":", $1);
+                gsub("::", ":", $3);
+                gsub("::", ":", $4);
+                
+                title = $1;
+                url = $2;
+                dur = $3;
+                artist = $4;
+                
+                artist_part = "";
+                if (artist != "" && artist != "null") {
+                    artist_part = " " g "by" r " " lp artist r;
+                }
+                
+                dur_part = "";
+                if (dur != "" && dur != "null" && dur != "0:00") {
+                    dur_part = " " o "[" dur "]" r;
+                }
+                
+                printf "%s%d%s. %s%s%s::%s::%s::%s::%s\n", o, NR, r, title, artist_part, dur_part, url, title, artist, dur;
+            }' "$TMP_RESULTS" | \
             fzf --multi --exact --cycle --tiebreak=index --expect=ctrl-d,ctrl-x \
                 --bind "tab:toggle,alt-a:toggle-all,insert:select-all,delete:deselect-all" --delimiter="::" --with-nth=1 --height=100% --layout=reverse --border --ansi \
                 --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \
                 --header="$s_header" \
                 $FZF_COLOR_OPTS \
-                --info=inline-right --prompt="🎵 Select for \"$QUERY\" > ")
+                --info=inline-right --prompt="$s_prompt")
         
         [ -z "$raw_sel" ] && { echo -e "${C_PINK}👋 Selection cancelled for \"$QUERY\"${C_RESET}"; rm -f "$TMP_RESULTS"; return 1; }
 

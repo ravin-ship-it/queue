@@ -771,12 +771,15 @@ if [ -z "$1" ]; then
         track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
         
         if [ "$count" -gt 1 ] || [ -f "$SELECTION_MODE_FILE" ]; then
+             LINE=$(get_fzf_divider)
+             act_header="${C_PURPLE}🪷 Action for ${C_CYAN}${count}${C_PURPLE} item(s)${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
+             act_prompt="🎵 ${P_TEAL}Choose Action${STATUS_ICONS}${P_RESET} > "
              action=$(echo -e "  |>  Play Selected\n  📺  Watch Video Window\n  🎧  Audio-Only Mode (Bandwidth Saver)\n  ℹ️  Inspect Track Info (Metadata & Stream)\n  🕶️  Blind Play (One-Off Isolated)\n  🎬  Set Video Quality / Resolution\n  ✨  New Queue from Selected & Play\n  📥  Download Selected\n  👎  Dislike Track\n  👎✖ Dislike & Remove\n  ✖  Remove from Queue\n  ✚  Save to Playlist" | \
                  fzf --height=100% --layout=reverse --border --info=inline-right \
                  $FZF_COLOR_OPTS \
                  --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \
-                 --header="Action for $count item(s)?" \
-                 --prompt="Choose > ")
+                 --header="$act_header" \
+                 --prompt="$act_prompt")
              
              if [ -z "$action" ]; then exit 0; fi
 
@@ -817,11 +820,14 @@ if [ -z "$1" ]; then
 
              # Set Video Quality / Resolution
              if echo "$action" | grep -q "Video Quality"; then
+                 LINE=$(get_fzf_divider)
+                 q_header="${C_PURPLE}🪷 Select Video Quality / Resolution${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
+                 q_prompt="🎵 ${P_TEAL}Quality${STATUS_ICONS}${P_RESET} > "
                  res_choice=$(echo -e "  🌟  Auto / Smart (Hardware Adapted)\n  📺  1080p Full HD (60 FPS)\n  📺  720p HD (Fluid 60 FPS)\n  📺  1440p 2K QHD\n  📺  4K UHD\n  🚀  Max / Hardware Playback Ceiling\n  🎧  Audio-Only (98% Bandwidth Saver)" | \
                      fzf --height=100% --layout=reverse --border --info=inline-right \
                      $FZF_COLOR_OPTS \
-                     --header="Select Video Quality / Resolution" \
-                     --prompt="Quality > ")
+                     --header="$q_header" \
+                     --prompt="$q_prompt")
                  if [ -n "$res_choice" ]; then
                      case "$res_choice" in
                          *Auto*) cmd_resolution "auto" ;;
@@ -857,15 +863,20 @@ if [ -z "$1" ]; then
                      i=1
                      while IFS= read -r f; do
                          [ -z "$f" ] && continue
-                         pl_opt+="${C_ORANGE}${i}.${C_RESET} 📂 ${f}\n"
+                         local pl_cnt=$(grep -cve '^\s*$' "${PLAYLIST_DIR}/${f}.txt" 2>/dev/null || echo "0")
+                         pl_opt+="${C_ORANGE}${i}${C_RESET}. 📂 ${C_CYAN}${f}${C_RESET} ${C_GRAY}(${pl_cnt} tracks)${C_RESET}\n"
                          ((i++))
                      done < <(find "$PLAYLIST_DIR" -maxdepth 1 -name "*.txt" -exec basename {} .txt \; | sort)
 
-                     pl_choice=$(echo -ne "✚ Create New...\n$pl_opt" | fzf --multi --ansi --height=100% --layout=reverse --border --info=inline-right \
+                     LINE=$(get_fzf_divider)
+                     pl_header="${C_PURPLE}🪷 Save to Playlist${C_RESET} ${C_GRAY}(TAB: select multiple)${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
+                     pl_prompt="🎵 ${P_TEAL}Save to Playlist${STATUS_ICONS}${P_RESET} > "
+                     pl_choice=$(echo -ne "  ✚  Create New Playlist...\n$pl_opt" | fzf --multi --ansi --height=100% --layout=reverse --border --info=inline-right \
                          $FZF_COLOR_OPTS \
                          --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \
                          --bind "tab:toggle,alt-a:toggle-all,insert:select-all,delete:deselect-all" \
-                         --prompt="Select Playlist(s) > ")
+                         --header="$pl_header" \
+                         --prompt="$pl_prompt")
                      
                      if [ -z "$pl_choice" ]; then exit 0; fi
 
@@ -877,7 +888,7 @@ if [ -z "$1" ]; then
                      while IFS= read -r line; do
                          [ -z "$line" ] || [[ "$line" == *"Create New"* ]] && continue
                          # Strip ANSI, index, and emoji
-                         name=$(echo -e "$line" | sed "s/\x1b\[[0-9;]*m//g" | sed 's/^[ 0-9]*\. //' | sed 's/^📂 //')
+                         name=$(echo -e "$line" | sed "s/\x1b\[[0-9;]*m//g" | sed 's/^[ 0-9]*\. //' | sed 's/^📂 //' | sed -E 's/ \([0-9]+( tracks)?\)$//')
                          [ -n "$name" ] && TARGET_FILES+=("${PLAYLIST_DIR}/${name}.txt")
                      done <<< "$pl_choice"
                  fi
