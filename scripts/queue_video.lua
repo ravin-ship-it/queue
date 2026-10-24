@@ -69,8 +69,21 @@ local function smart_next(is_auto_eof)
             end
         end
         mp.commandv("playlist-play-index", rand_idx)
-    elseif not is_auto_eof then
-        mp.commandv("playlist-next")
+        mp.set_property_bool("pause", false)
+    else
+        if is_auto_eof then
+            local loop_p = mp.get_property("loop-playlist", "no")
+            if pos >= 0 and (pos + 1) < count then
+                mp.commandv("playlist-next")
+                mp.set_property_bool("pause", false)
+            elseif loop_p ~= "no" and loop_p ~= "false" and count > 0 then
+                mp.commandv("playlist-play-index", 0)
+                mp.set_property_bool("pause", false)
+            end
+        else
+            mp.commandv("playlist-next")
+            mp.set_property_bool("pause", false)
+        end
     end
 end
 
@@ -149,15 +162,40 @@ local langs_cache_file = home ~= "" and (home .. "/.cache/mpv/current_audio_lang
 local res_file = nil
 local hw_ceiling_file = nil
 local speed_file = nil
+local audio_mode_file = nil
 if home ~= "" then
     if (package.config:sub(1,1) == "\\") or (os.getenv("WINDIR") ~= nil) then
         res_file = home .. "/AppData/Roaming/mpv/queue_res"
         hw_ceiling_file = home .. "/AppData/Roaming/mpv/queue_hw_ceiling"
         speed_file = home .. "/AppData/Roaming/mpv/queue_speed"
+        audio_mode_file = home .. "/AppData/Roaming/mpv/queue_audio_mode"
     else
         res_file = home .. "/.config/mpv/queue_res"
         hw_ceiling_file = home .. "/.config/mpv/queue_hw_ceiling"
         speed_file = home .. "/.config/mpv/queue_speed"
+        audio_mode_file = home .. "/.config/mpv/queue_audio_mode"
+    end
+end
+
+local function is_audio_mode_active()
+    if not audio_mode_file then return false end
+    local f = io.open(audio_mode_file, "r")
+    if not f then return false end
+    local content = f:read("*l")
+    f:close()
+    if content then
+        content = content:match("^%s*(.-)%s*$")
+        return (content == "true" or content == "1" or content == "on")
+    end
+    return false
+end
+
+local function save_audio_mode(enabled)
+    if not audio_mode_file then return end
+    local f = io.open(audio_mode_file, "w")
+    if f then
+        f:write(enabled and "true\n" or "false\n")
+        f:close()
     end
 end
 
@@ -305,6 +343,10 @@ local function get_quality_format(tier, lang)
     local audio_fmt = get_audio_format(lang)
     local hw_ceiling = get_hw_ceiling()
 
+    if tier == "audio" or tier == "aud" then
+        return audio_fmt
+    end
+
     if tier == "auto" or tier == "max" then
         if hw_ceiling == "8k" or hw_ceiling == "4320" then
             -- Uncapped 8K for high-end rigs with dedicated 8K hardware decoder
@@ -338,6 +380,7 @@ local function get_quality_format(tier, lang)
 end
 
 local QUALITY_PROFILES = {
+    ["audio"] = { label = "Audio-Only (98% Bandwidth Reduction / Pure Opus Stream)" },
     ["auto"] = { label = "Auto / Smart (Hardware-adapted, protects buffer & smoothness)" },
     ["low"] = { label = "Low / 720p HD (60fps fluid / bandwidth saver)" },
     ["mid"] = { label = "Mid / 1080p Full HD (60fps crisp)" },
@@ -353,6 +396,15 @@ local initial_saved_res = get_saved_res()
 local is_auto_mode = (initial_saved_res == "auto")
 local current_tier = initial_saved_res
 pcall(mp.set_property, "user-data/queue-res", current_tier)
+
+if is_audio_mode_active() then
+    mp.set_property("vid", "no")
+    mp.set_property("video", "no")
+    mp.set_property("force-window", "no")
+    mp.set_property_bool("window-minimized", true)
+    local fmt = get_quality_format("audio", current_lang)
+    mp.set_property("ytdl-format", fmt)
+end
 
 local initial_saved_speed = get_saved_speed()
 if initial_saved_speed and initial_saved_speed ~= 1.0 then
@@ -384,11 +436,19 @@ local function do_resume_seek()
     local seekable = mp.get_property_bool("seekable", false)
     local cur_time = mp.get_property_number("time-pos", nil)
 
-    if seekable or (cur_time and cur_time >= 0) then
+    if seekable and cur_time and cur_time >= 0 then
+        if math.abs(cur_time - pos) > 2.0 then
+            mp.commandv("seek", pos, "absolute")
+        end
         pending_resume_pos = nil
         if resume_timer then resume_timer:kill(); resume_timer = nil end
-        mp.commandv("seek", pos, "absolute")
     end
+end
+
+local function arm_resume_seek(pos)
+    if not pos or pos <= 1.0 then return end
+    pending_resume_pos = pos
+    if resume_timer then resume_timer:kill(); resume_timer = nil end
 end
 
 local function queue_resume_seek(pos)
@@ -399,7 +459,7 @@ local function queue_resume_seek(pos)
     local attempts = 0
     resume_timer = mp.add_periodic_timer(0.12, function()
         attempts = attempts + 1
-        if not pending_resume_pos or attempts > 35 then
+        if not pending_resume_pos or attempts > 50 then
             if resume_timer then resume_timer:kill(); resume_timer = nil end
             pending_resume_pos = nil
             return
@@ -425,6 +485,8 @@ local function change_quality(target, is_auto_adaptive)
         target = "480"
     elseif target == "emergency" then
         target = "360"
+    elseif target == "audio" or target == "aud" then
+        target = "audio"
     end
 
     local profile = QUALITY_PROFILES[target]
@@ -433,23 +495,37 @@ local function change_quality(target, is_auto_adaptive)
         target = "auto"
     end
 
-    if not is_auto_adaptive then
-        is_auto_mode = (target == "auto")
-        current_tier = target
-        save_res_pref(target)
-        has_downshifted_this_track = false
-        starved_buffer_seconds = 0
-        recent_stalls = {}
-        stable_buffer_seconds = 0
-        track_start_time = mp.get_time()
-        last_adaptation_time = mp.get_time()
+    if target == "audio" then
+        save_audio_mode(true)
+        mp.set_property("vid", "no")
+        mp.set_property("video", "no")
+        mp.set_property("force-window", "no")
+        mp.set_property_bool("window-minimized", true)
+        if state_file then pcall(os.remove, state_file) end
     else
-        current_tier = target
-        track_start_time = mp.get_time()
-        last_adaptation_time = mp.get_time()
+        if is_audio_mode_active() then
+            save_audio_mode(false)
+            mp.set_property("vid", "auto")
+            mp.set_property("video", "auto")
+            safe_show()
+        end
+        if not is_auto_adaptive then
+            is_auto_mode = (target == "auto")
+            current_tier = target
+            save_res_pref(target)
+            has_downshifted_this_track = false
+            starved_buffer_seconds = 0
+            recent_stalls = {}
+            stable_buffer_seconds = 0
+            track_start_time = mp.get_time()
+            last_adaptation_time = mp.get_time()
+        else
+            current_tier = target
+            track_start_time = mp.get_time()
+            last_adaptation_time = mp.get_time()
+        end
+        pcall(mp.set_property, "user-data/queue-res", current_tier)
     end
-
-    pcall(mp.set_property, "user-data/queue-res", current_tier)
 
     -- Capture current timestamp and set start property + queue seek on reload
     local cur_time = mp.get_property_number("time-pos")
@@ -457,8 +533,10 @@ local function change_quality(target, is_auto_adaptive)
         cur_time = last_valid_time
     end
     if cur_time and cur_time > 1.0 then
+        arm_resume_seek(cur_time)
         mp.set_property("start", string.format("%.2f", cur_time))
-        queue_resume_seek(cur_time)
+    else
+        pending_resume_pos = nil
     end
 
     local fmt = get_quality_format(target, current_lang)
@@ -479,8 +557,10 @@ local function change_resolution(fmt, label)
         cur_time = last_valid_time
     end
     if cur_time and cur_time > 1.0 then
+        arm_resume_seek(cur_time)
         mp.set_property("start", string.format("%.2f", cur_time))
-        queue_resume_seek(cur_time)
+    else
+        pending_resume_pos = nil
     end
 
     mp.set_property("ytdl-format", fmt)
@@ -502,7 +582,10 @@ local function change_language(lang, label)
         cur_time = last_valid_time
     end
     if cur_time and cur_time > 1.0 then
-        queue_resume_seek(cur_time)
+        arm_resume_seek(cur_time)
+        mp.set_property("start", string.format("%.2f", cur_time))
+    else
+        pending_resume_pos = nil
     end
 
     -- 1. Check for native multi-track audio container (MKV / MP4 / local file)
@@ -658,6 +741,7 @@ end
 -- =========================================================================
 
 local function evaluate_adaptive_bitrate()
+    if is_audio_mode_active() then return end
     if not is_auto_mode then return end
 
     -- If player is idle or stream has not started demuxing frames yet, do not evaluate
@@ -754,6 +838,7 @@ local consecutive_lag_checks = 0
 local last_lag_check_time = 0
 
 local function check_hardware_lag()
+    if is_audio_mode_active() then return end
     local idle = mp.get_property_bool("idle-active", false)
     local paused = mp.get_property_bool("pause", false)
     if idle or paused then return end
@@ -1031,7 +1116,10 @@ end
 
 local function on_file_loaded()
     mp.set_property("start", "none")
-    do_resume_seek()
+    if pending_resume_pos and pending_resume_pos > 1.0 then
+        local p = pending_resume_pos
+        queue_resume_seek(p)
+    end
     prev_dec_drops = 0
     prev_vo_drops = 0
     consecutive_lag_checks = 0
@@ -1044,17 +1132,28 @@ local function on_file_loaded()
         mp.set_property_number("speed", saved_sp)
         pcall(mp.set_property, "user-data/queue-speed", string.format("%.2f", saved_sp))
     end
-    if path and path ~= "" then
-        local is_remote = (path:match("^https?://") ~= nil) or (path:match("^ytdl://") ~= nil)
-        if is_remote and is_auto_mode then
-            current_tier = "auto"
-            has_downshifted_this_track = false
-            starved_buffer_seconds = 0
-            recent_stalls = {}
-            track_start_time = mp.get_time()
-            local fmt = get_quality_format("auto", current_lang)
-            mp.set_property("ytdl-format", fmt)
+    if is_audio_mode_active() then
+        mp.set_property("vid", "no")
+        mp.set_property("video", "no")
+        mp.set_property("force-window", "no")
+        mp.set_property_bool("window-minimized", true)
+        local fmt = get_quality_format("audio", current_lang)
+        mp.set_property("ytdl-format", fmt)
+    else
+        if path and path ~= "" then
+            local is_remote = (path:match("^https?://") ~= nil) or (path:match("^ytdl://") ~= nil)
+            if is_remote and is_auto_mode then
+                current_tier = "auto"
+                has_downshifted_this_track = false
+                starved_buffer_seconds = 0
+                recent_stalls = {}
+                track_start_time = mp.get_time()
+                local fmt = get_quality_format("auto", current_lang)
+                mp.set_property("ytdl-format", fmt)
+            end
         end
+    end
+    if path and path ~= "" then
         fetch_stream_languages_async(path)
     end
 end
@@ -1090,6 +1189,27 @@ mp.observe_property("vid", "string", update_state)
 mp.observe_property("paused-for-cache", "bool", on_cache_pause_change)
 
 -- Script Messages
+mp.register_script_message("set-audio-mode", function(val)
+    local enabled = (val == "true" or val == "1" or val == "on" or val == "yes")
+    save_audio_mode(enabled)
+    if enabled then
+        mp.set_property("vid", "no")
+        mp.set_property("video", "no")
+        mp.set_property("force-window", "no")
+        mp.set_property_bool("window-minimized", true)
+        if state_file then pcall(os.remove, state_file) end
+        local fmt = get_quality_format("audio", current_lang)
+        mp.set_property("ytdl-format", fmt)
+    else
+        mp.set_property("vid", "auto")
+        mp.set_property("video", "auto")
+        local fmt = get_quality_format(current_tier, current_lang)
+        mp.set_property("ytdl-format", fmt)
+    end
+end)
+mp.register_script_message("arm-resume-seek", function(pos)
+    arm_resume_seek(tonumber(pos))
+end)
 mp.register_script_message("safe-hide-video", safe_hide)
 mp.register_script_message("safe-show-video", safe_show)
 mp.register_script_message("change-quality", function(target) change_quality(target, false) end)

@@ -581,7 +581,8 @@ show_help() {
     print_boxed_line "${C_YELLOW}Commands:${C_RESET}"
     print_boxed_line "  -i [N|url]      Metadata & Track Inspector (Synced Resolution)"
     print_boxed_line "  -vid [sz|N]     Toggle Desktop Video Window ${C_GRAY}(small|med|large|F11)${C_RESET}"
-    print_boxed_line "  -res [val]      Set/Check Video Quality ${C_GRAY}(low|mid|high|max|auto)${C_RESET}"
+    print_boxed_line "  -aud [on|off]   Audio-Only Mode ${C_GRAY}(98% bandwidth reduction / pure Opus)${C_RESET}"
+    print_boxed_line "  -res [val]      Set/Check Video Quality ${C_GRAY}(low|mid|high|max|auto|audio)${C_RESET}"
     print_boxed_line "  -speed [val]    Set/Check Playback Speed ${C_GRAY}(0.25-4.0x, reset, +/-0.1)${C_RESET}"
     print_boxed_line "  -lang [code]    Set/Inspect Audio Language & Dubs ${C_GRAY}(en|zh|ja|auto)${C_RESET}"
     if [ "$IS_ANDROID" = true ]; then
@@ -644,6 +645,7 @@ show_help() {
     print_boxed_line "  Ꭰᗡ              Audio FX (Dolby Equalizer) ON"
     print_boxed_line "  ◖∞◗             Auto-Discovery (Continuous Radio) ON"
     print_boxed_line "  <|V|>           Desktop Video Window Mode ON"
+    print_boxed_line "  🎧              Audio-Only Mode ON"
     print_boxed_line ""
     print_boxed_line "${C_YELLOW}Searching:${C_RESET}"
     print_boxed_line "  q yt <q>        Force YouTube search"

@@ -143,6 +143,24 @@ get_queue_mode() {
     echo "standalone"
 }
 
+is_audio_mode_active() {
+    [ -f "$HOME/.config/mpv/queue_audio_mode" ] && [ "$(cat "$HOME/.config/mpv/queue_audio_mode" 2>/dev/null | tr -d '[:space:]')" == "true" ]
+}
+
+set_audio_mode() {
+    local val="${1:-true}"
+    mkdir -p "$HOME/.config/mpv"
+    echo "$val" > "$HOME/.config/mpv/queue_audio_mode"
+    if [ "$IS_WSL" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+        local win_u_dir
+        win_u_dir=$(get_windows_user_dir)
+        if [ -n "$win_u_dir" ]; then
+            mkdir -p "$win_u_dir/AppData/Roaming/mpv" 2>/dev/null
+            echo "$val" > "$win_u_dir/AppData/Roaming/mpv/queue_audio_mode" 2>/dev/null
+        fi
+    fi
+}
+
 get_windows_user_dir() {
     if [ "$IS_WSL" = true ]; then
         local win_prof
@@ -266,6 +284,12 @@ ensure_piperelay_compiled() {
     local win_exe="$win_dir/PipeRelay.exe"
     local win_ps1="$win_dir/PipeRelay.ps1"
 
+    # Prefer signed in-memory PowerShell relay to eliminate Smart App Control / Defender block notifications
+    if [ -f "$win_ps1" ]; then
+        echo "$win_ps1"
+        return 0
+    fi
+
     # Test if win_exe is runnable (not blocked by Device Guard / Code Integrity)
     if [ -f "$win_exe" ] && [ -x "$win_exe" ]; then
         local probe_out
@@ -274,12 +298,6 @@ ensure_piperelay_compiled() {
             echo "$win_exe"
             return 0
         fi
-    fi
-
-    # If win_ps1 is available, return it as the preferred compliant relay
-    if [ -f "$win_ps1" ]; then
-        echo "$win_ps1"
-        return 0
     fi
 
     local csc_compiler="/mnt/c/Windows/Microsoft.NET/Framework64/v4.0.30319/csc.exe"
@@ -969,6 +987,13 @@ sync_session_cache() {
             elif [ -f "$lnx_cache/last_playlist.txt" ]; then
                 cp -fp "$lnx_cache/last_playlist.txt" "$win_cache/last_playlist.txt" 2>/dev/null
             fi
+
+            # Sync queue_audio_mode between WSL and Windows
+            if [ -f "$win_dir/AppData/Roaming/mpv/queue_audio_mode" ] && [ ! -f "$HOME/.config/mpv/queue_audio_mode" ]; then
+                cp -fp "$win_dir/AppData/Roaming/mpv/queue_audio_mode" "$HOME/.config/mpv/queue_audio_mode" 2>/dev/null
+            elif [ -f "$HOME/.config/mpv/queue_audio_mode" ] && [ -d "$win_dir/AppData/Roaming/mpv" ]; then
+                cp -fp "$HOME/.config/mpv/queue_audio_mode" "$win_dir/AppData/Roaming/mpv/queue_audio_mode" 2>/dev/null
+            fi
         fi
     fi
 }
@@ -1031,6 +1056,22 @@ save_current_playlist() {
 
 restore_state_properties() {
     sync_session_cache
+    if is_audio_mode_active && [ "$MPV_RUNNING" = true ] && [ -S "$SOCKET" ]; then
+        local pure_audio_fmt="(bestaudio[acodec=opus]/bestaudio[acodec^=mp4a]/bestaudio)"
+        local cur_lang=""
+        [ -f "$HOME/.config/mpv/queue_lang" ] && cur_lang=$(cat "$HOME/.config/mpv/queue_lang" 2>/dev/null | tr -d '[:space:]')
+        if [ -n "$cur_lang" ] && [ "$cur_lang" != "auto" ]; then
+            pure_audio_fmt="(bestaudio[language=$cur_lang][acodec=opus]/bestaudio[language^=$cur_lang][acodec=opus]/bestaudio[language=$cur_lang]/bestaudio[language^=$cur_lang]/bestaudio[acodec=opus]/bestaudio[acodec^=mp4a]/bestaudio)"
+        fi
+        local batch=""
+        batch+="{\"command\":[\"set_property\",\"vid\",\"no\"]}\n"
+        batch+="{\"command\":[\"set_property\",\"video\",\"no\"]}\n"
+        batch+="{\"command\":[\"set_property\",\"force-window\",\"no\"]}\n"
+        batch+="{\"command\":[\"set_property\",\"window-minimized\",true]}\n"
+        batch+="{\"command\":[\"set_property\",\"ytdl-format\",\"$pure_audio_fmt\"]}\n"
+        batch+="{\"command\":[\"script-message\",\"set-audio-mode\",\"true\"]}\n"
+        echo -e "$batch" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    fi
     local state_file="$HOME/.cache/mpv/state.json"
     [ ! -f "$state_file" ] && return
     

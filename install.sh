@@ -295,27 +295,10 @@ if [ "$IS_WSL" = true ]; then
     win_user=""
     [ -n "$win_dir" ] && win_user=$(basename "$win_dir")
 
-    # 1. Prepare PipeRelay (Native .exe or Smart App Control compliant .ps1)
+    # 1. Prepare PipeRelay (Smart App Control & Defender compliant PowerShell relay)
     [ -f "$REPO_DIR/scripts/PipeRelay.ps1" ] && cp -f "$REPO_DIR/scripts/PipeRelay.ps1" "$win_dir/PipeRelay.ps1" 2>/dev/null
-    win_relay="$win_dir/PipeRelay.exe"
-    csc_compiler="/mnt/c/Windows/Microsoft.NET/Framework64/v4.0.30319/csc.exe"
-    [ ! -f "$csc_compiler" ] && csc_compiler="/mnt/c/Windows/Microsoft.NET/Framework/v4.0.30319/csc.exe"
-
-    if [ -f "$csc_compiler" ]; then
-        if [ ! -f "$win_relay" ]; then
-            echo -e "${CYAN}🔨 Compiling native zero-dependency PipeRelay.exe for sub-millisecond IPC...${NC}"
-            cp "$REPO_DIR/scripts/PipeRelay.cs" "$win_dir/PipeRelay.cs" 2>/dev/null
-            (cd "$win_dir" && "$csc_compiler" /out:PipeRelay.exe /target:exe /nologo PipeRelay.cs </dev/null >/dev/null 2>&1)
-            rm -f "$win_dir/PipeRelay.cs" 2>/dev/null
-        fi
-        if [ -f "$win_relay" ] && "$win_relay" </dev/null >/dev/null 2>&1; then
-            echo -e "${GREEN}✅ PipeRelay.exe ready at $win_relay${NC}"
-        else
-            echo -e "${GREEN}✅ PipeRelay.ps1 ready (Smart App Control compliant) at $win_dir/PipeRelay.ps1${NC}"
-        fi
-    elif [ -f "$win_dir/PipeRelay.ps1" ]; then
-        echo -e "${GREEN}✅ PipeRelay.ps1 ready (Smart App Control compliant) at $win_dir/PipeRelay.ps1${NC}"
-    fi
+    rm -f "$win_dir/PipeRelay.exe" 2>/dev/null
+    echo -e "${GREEN}✅ PipeRelay.ps1 ready (Smart App Control compliant) at $win_dir/PipeRelay.ps1${NC}"
 
     # 2. Check for Native Windows MPV
     has_win_mpv=false

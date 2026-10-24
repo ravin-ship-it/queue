@@ -142,7 +142,7 @@ fi
 # --- Command Parsing ---
 
 PROCESSED_ANY_FLAG=false
-SMART_CMDS="^(play|pause|stop|next|prev|vol|info|list|clear|shuffle|remove|move|swap|help|save|load|auto|fx|deps|up|install|setup|uninstall|remove-setup|pb|blind|download|dl|d|dislike|dis|disl|rmd|undis|undislike|like|vid|video|watch|version|ver|res|quality|hybrid|hy|lang|audio|speed|sp)$"
+SMART_CMDS="^(play|pause|stop|next|prev|vol|info|list|clear|shuffle|remove|move|swap|help|save|load|auto|fx|deps|up|install|setup|uninstall|remove-setup|pb|blind|download|dl|d|dislike|dis|disl|rmd|undis|undislike|like|vid|video|watch|version|ver|res|quality|hybrid|hy|lang|audio|speed|sp|aud)$"
 
 while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
     PROCESSED_ANY_FLAG=true
@@ -185,6 +185,7 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
             hybrid|hy) CMD="-hybrid" ;;
             lang|audio) CMD="-lang" ;;
             speed|sp) CMD="-speed" ;;
+            aud) CMD="-aud" ;;
         esac
     fi
 
@@ -406,6 +407,15 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
             done
             [ "$found" = false ] && cmd_video_toggle ""
             ;; 
+        -aud|--aud)
+            shift
+            if [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]] && [[ ! "$1" =~ $SMART_CMDS ]]; then
+                cmd_audio_mode "$1"
+                shift
+            else
+                cmd_audio_mode ""
+            fi
+            ;; 
         -raw) 
             export IS_RAW=true
             show_queue
@@ -578,6 +588,9 @@ if [ -z "$1" ]; then
     [ "$init_af" == "on" ] && STATUS_ICONS="${STATUS_ICONS}${P_DEEP_PINK} Ꭰᗡ${P_RESET}"
     [ -f "$HOME/.cache/mpv/auto_enabled" ] && STATUS_ICONS="${STATUS_ICONS}${P_DEEP_PINK} ◖∞◗${P_RESET}"
     [ "$init_vid" == "on" ] && STATUS_ICONS="${STATUS_ICONS}${P_DEEP_PINK} <|V|>${P_RESET}"
+    if is_audio_mode_active; then
+        STATUS_ICONS="${STATUS_ICONS}${P_DEEP_PINK} 🎧${P_RESET}"
+    fi
 
     if [ "$init_count" == "0" ]; then
         PROMPT=$(printf "🎵 ${P_TEAL}Queue List ${P_YELLOW}(${P_PURPLE}Empty${P_YELLOW})${STATUS_ICONS}${P_RESET} > ")
@@ -688,6 +701,9 @@ if [ -z "$1" ]; then
                 [ "$curr_af" == "on" ] && NEW_ICONS="${NEW_ICONS}${P_DEEP_PINK} Ꭰᗡ${P_RESET}"
                 [ "$curr_radio" == "on" ] && NEW_ICONS="${NEW_ICONS}${P_DEEP_PINK} ◖∞◗${P_RESET}"
                 [ "$curr_vid" == "on" ] && NEW_ICONS="${NEW_ICONS}${P_DEEP_PINK} <|V|>${P_RESET}"
+                if is_audio_mode_active; then
+                    NEW_ICONS="${NEW_ICONS}${P_DEEP_PINK} 🎧${P_RESET}"
+                fi
 
                 if [ "$curr_count" == "0" ]; then
                     new_p=$(printf "🎵 ${P_TEAL}Queue List ${P_YELLOW}(${P_PURPLE}Empty${P_YELLOW})${NEW_ICONS}${P_RESET} > ")
@@ -755,7 +771,7 @@ if [ -z "$1" ]; then
         track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
         
         if [ "$count" -gt 1 ] || [ -f "$SELECTION_MODE_FILE" ]; then
-             action=$(echo -e "  |>  Play Selected\n  📺  Watch Video Window\n  ✨  New Queue from Selected & Play\n  📥  Download Selected\n  👎  Dislike Track\n  👎✖ Dislike & Remove\n  ✖  Remove from Queue\n  ✚  Save to Playlist" | \
+             action=$(echo -e "  |>  Play Selected\n  📺  Watch Video Window\n  🎧  Audio-Only Mode (Bandwidth Saver)\n  ℹ️  Inspect Track Info (Metadata & Stream)\n  🕶️  Blind Play (One-Off Isolated)\n  🎬  Set Video Quality / Resolution\n  ✨  New Queue from Selected & Play\n  📥  Download Selected\n  👎  Dislike Track\n  👎✖ Dislike & Remove\n  ✖  Remove from Queue\n  ✚  Save to Playlist" | \
                  fzf --height=100% --layout=reverse --border --info=inline-right \
                  $FZF_COLOR_OPTS \
                  --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \
@@ -768,6 +784,55 @@ if [ -z "$1" ]; then
              if echo "$action" | grep -q "Watch Video"; then
                  first=$(echo "$selection" | head -n1)
                  cmd_video_toggle "$first"
+                 exit 0
+             fi
+
+             # Audio-Only Mode
+             if echo "$action" | grep -q "Audio-Only"; then
+                 cmd_audio_mode "on"
+                 first=$(echo "$selection" | head -n1)
+                 [ -n "$first" ] && cmd_play "$first"
+                 exit 0
+             fi
+
+             # Inspect Track Info
+             if echo "$action" | grep -q "Inspect"; then
+                 first=$(echo "$selection" | head -n1)
+                 cmd_info "$first"
+                 exit 0
+             fi
+
+             # Blind Play (One-Off Isolated)
+             if echo "$action" | grep -q "Blind Play"; then
+                 first=$(echo "$selection" | head -n1)
+                 item_json=$(echo "$track_info" | jq -s -c "map(select(.event == null)) | .[0].data[$((first - 1))] // empty")
+                 url=$(echo "$item_json" | jq -r '.filename // ""')
+                 if [ -n "$url" ]; then
+                     cmd_blind_play "$url"
+                 else
+                     cmd_blind_play "$first"
+                 fi
+                 exit 0
+             fi
+
+             # Set Video Quality / Resolution
+             if echo "$action" | grep -q "Video Quality"; then
+                 res_choice=$(echo -e "  🌟  Auto / Smart (Hardware Adapted)\n  📺  1080p Full HD (60 FPS)\n  📺  720p HD (Fluid 60 FPS)\n  📺  1440p 2K QHD\n  📺  4K UHD\n  🚀  Max / Hardware Playback Ceiling\n  🎧  Audio-Only (98% Bandwidth Saver)" | \
+                     fzf --height=100% --layout=reverse --border --info=inline-right \
+                     $FZF_COLOR_OPTS \
+                     --header="Select Video Quality / Resolution" \
+                     --prompt="Quality > ")
+                 if [ -n "$res_choice" ]; then
+                     case "$res_choice" in
+                         *Auto*) cmd_resolution "auto" ;;
+                         *1080*) cmd_resolution "1080" ;;
+                         *720*) cmd_resolution "720" ;;
+                         *1440*) cmd_resolution "1440" ;;
+                         *4K*) cmd_resolution "4k" ;;
+                         *Max*) cmd_resolution "max" ;;
+                         *Audio-Only*) cmd_audio_mode "on" ;;
+                     esac
+                 fi
                  exit 0
              fi
 

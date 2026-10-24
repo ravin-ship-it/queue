@@ -928,6 +928,7 @@ VIDEO_PID_FILE="$HOME/.cache/mpv/video_window.pid"
 is_video_window_open() {
     [ "$MPV_RUNNING" = false ] && return 1
     [ ! -S "$SOCKET" ] && return 1
+    if is_audio_mode_active; then return 1; fi
 
     local raw
     raw=$(echo -e '{"command":["get_property","vo"]}\n{"command":["get_property","vid"]}\n{"command":["get_property","window-minimized"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" 2>/dev/null)
@@ -938,7 +939,7 @@ is_video_window_open() {
     vid_val=$(echo "$raw" | jq -s -r 'map(select(.event == null)) | .[1].data // false' 2>/dev/null)
     min_val=$(echo "$raw" | jq -s -r 'map(select(.event == null)) | .[2].data // false' 2>/dev/null)
 
-    if [ "$vo_name" != "null" ] && [ -n "$vo_name" ] && [ "$min_val" != "true" ]; then
+    if [ "$vo_name" != "null" ] && [ -n "$vo_name" ] && [ "$min_val" != "true" ] && [ "$vid_val" != "false" ] && [ "$vid_val" != "no" ] && [ "$vid_val" != "null" ]; then
         return 0
     fi
     return 1
@@ -1247,6 +1248,19 @@ cmd_video_toggle() {
         return 1
     fi
 
+    local reload_needed=false
+    if is_audio_mode_active; then
+        reload_needed=true
+        set_audio_mode "false"
+        echo "{\"command\":[\"script-message\",\"set-audio-mode\",\"false\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    else
+        local pre_vid
+        pre_vid=$(echo '{"command":["get_property","vid"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // false')
+        if [ "$pre_vid" == "false" ] || [ "$pre_vid" == "no" ]; then
+            reload_needed=true
+        fi
+    fi
+
     # Determine VO & GPU context across platforms and engines:
     # - Hybrid Windows: Native Direct3D 11/12 / Vulkan (vo=gpu, gpu-context=auto)
     # - macOS: Cocoa/Metal native windowing with vo=gpu, gpu-context=auto
@@ -1352,7 +1366,16 @@ cmd_video_toggle() {
     fi
 
     # Smart video format: 60 FPS prioritized, crisp Full HD / 2K, never blurry, never locked behind Premium, pristine Opus audio
+    local active_res
+    active_res=$(get_active_saved_res)
     local smart_fmt="$hotkey_0"
+    case "$active_res" in
+        low|720) smart_fmt="$hotkey_1" ;;
+        mid|1080) smart_fmt="$hotkey_2" ;;
+        high|1440) smart_fmt="$hotkey_3" ;;
+        max|4k|8k) smart_fmt="$hotkey_4" ;;
+        *) smart_fmt="$hotkey_0" ;;
+    esac
     echo "{\"command\":[\"set_property\",\"ytdl-format\",\"$smart_fmt\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
 
     # Enable video window directly on the active MPV player:
@@ -1372,15 +1395,20 @@ cmd_video_toggle() {
     # 14. pause=false -> Resume/continue playback
     echo -e "{\"command\":[\"set_property\",\"window-minimized\",false]}\n{\"command\":[\"set_property\",\"autofit\",\"$target_autofit\"]}\n{\"command\":[\"set_property\",\"window-scale\",$target_scale]}\n{\"command\":[\"set_property\",\"geometry\",\"50%:50%\"]}\n{\"command\":[\"set_property\",\"auto-window-resize\",false]}\n{\"command\":[\"set_property\",\"keepaspect-window\",false]}\n{\"command\":[\"apply-profile\",\"fast\"]}\n{\"command\":[\"set_property\",\"hwdec\",\"auto-safe\"]}\n{\"command\":[\"set_property\",\"opengl-pbo\",true]}\n{\"command\":[\"set_property\",\"swapchain-depth\",3]}\n{\"command\":[\"set_property\",\"video-sync\",\"audio\"]}\n{\"command\":[\"set_property\",\"gpu-context\",\"$gpu_ctx\"]}\n{\"command\":[\"set_property\",\"vo\",\"$vo_opt\"]}\n{\"command\":[\"set_property\",\"video\",\"auto\"]}\n{\"command\":[\"set_property\",\"vid\",\"auto\"]}\n{\"command\":[\"set_property\",\"fullscreen\",$target_fs]}\n{\"command\":[\"set_property\",\"force-window\",\"yes\"]}\n{\"command\":[\"set_property\",\"pause\",false]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1 || true
     touch "$HOME/.cache/mpv/video_active"
-    local cur_vid=$(echo '{"command":["get_property","vid"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // false')
-    if [ "$cur_vid" == "false" ] || [ "$cur_vid" == "no" ]; then
+    if [ "$reload_needed" = true ]; then
         local cur_time
         cur_time=$(echo '{"command":["get_property","time-pos"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // 0')
-        if (( $(echo "$cur_time > 1" | bc -l 2>/dev/null || echo 0) )); then
-            echo "{\"command\":[\"set_property\",\"start\",\"$cur_time\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+        local cur_path
+        cur_path=$(echo '{"command":["get_property","path"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // ""')
+        if [[ "$cur_path" =~ ^http.* ]] || [[ "$cur_path" =~ ^ytdl.* ]]; then
+            local r_batch=""
+            if (( $(echo "$cur_time > 1" | bc -l 2>/dev/null || echo 0) )); then
+                r_batch+="{\"command\":[\"set_property\",\"start\",\"$cur_time\"]}\n"
+                r_batch+="{\"command\":[\"script-message\",\"arm-resume-seek\",\"$cur_time\"]}\n"
+            fi
+            r_batch+="{\"command\":[\"playlist-play-index\",\"current\"]}\n"
+            echo -e "$r_batch" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
         fi
-        echo '{"command":["playlist-play-index","current"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-        echo '{"command":["set_property","start","none"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
     fi
 
     # Fetch track title and format notification
@@ -1392,6 +1420,119 @@ cmd_video_toggle() {
         echo -e "📺 ${C_PINK}Desktop Video Window Active (Standalone Mode):${C_RESET} ${C_CYAN}${title}${C_RESET}"
     fi
     echo -e "${C_GRAY}💡 Resizable window. Press ${C_WHITE}w${C_GRAY} (cycle small/med/large), ${C_WHITE}+${C_GRAY}/${C_WHITE}-${C_GRAY} scale, ${C_WHITE}F11${C_GRAY} fullscreen, ${C_WHITE}0${C_GRAY}-${C_WHITE}4${C_GRAY} quality, ${C_WHITE}q${C_GRAY} return to audio.${C_RESET}"
+}
+
+cmd_audio_mode() {
+    local action="$1"
+    action=$(echo "$action" | tr '[:upper:]' '[:lower:]')
+
+    local is_active=false
+    if is_audio_mode_active; then
+        is_active=true
+    fi
+
+    # Handle toggle
+    if [ "$action" == "toggle" ]; then
+        if [ "$is_active" = true ]; then
+            action="off"
+        else
+            action="on"
+        fi
+    fi
+
+    if [ "$action" == "on" ] || [ "$action" == "enable" ] || [ "$action" == "1" ]; then
+        set_audio_mode "true"
+        rm -f "$HOME/.cache/mpv/video_active" 2>/dev/null
+        if [ "$IS_WSL" = true ]; then
+            local win_dir
+            win_dir=$(get_windows_user_dir)
+            [ -n "$win_dir" ] && rm -f "$win_dir/.cache/mpv/video_active" 2>/dev/null
+        fi
+
+        local pure_audio_fmt="(bestaudio[acodec=opus]/bestaudio[acodec^=mp4a]/bestaudio)"
+        local cur_lang=""
+        [ -f "$HOME/.config/mpv/queue_lang" ] && cur_lang=$(cat "$HOME/.config/mpv/queue_lang" 2>/dev/null | tr -d '[:space:]')
+        if [ -n "$cur_lang" ] && [ "$cur_lang" != "auto" ]; then
+            pure_audio_fmt="(bestaudio[language=$cur_lang][acodec=opus]/bestaudio[language^=$cur_lang][acodec=opus]/bestaudio[language=$cur_lang]/bestaudio[language^=$cur_lang]/bestaudio[acodec=opus]/bestaudio[acodec^=mp4a]/bestaudio)"
+        fi
+
+        if [ "$MPV_RUNNING" = true ] && [ -S "$SOCKET" ]; then
+            local cur_pos cur_time
+            cur_time=$(echo '{"command":["get_property","time-pos"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // 0')
+            
+            # Send batch commands to MPV:
+            # 1. Hide/close window cleanly
+            # 2. Disable video track
+            # 3. Set ytdl-format to pure audio
+            # 4. Notify lua script
+            local batch=""
+            batch+="{\"command\":[\"set_property\",\"vid\",\"no\"]}\n"
+            batch+="{\"command\":[\"set_property\",\"video\",\"no\"]}\n"
+            batch+="{\"command\":[\"set_property\",\"force-window\",\"no\"]}\n"
+            batch+="{\"command\":[\"set_property\",\"window-minimized\",true]}\n"
+            batch+="{\"command\":[\"set_property\",\"ytdl-format\",\"$pure_audio_fmt\"]}\n"
+            batch+="{\"command\":[\"script-message\",\"set-audio-mode\",\"true\"]}\n"
+
+            # If playing remote stream, reload current index with start timestamp to fetch pure audio
+            local cur_path
+            cur_path=$(echo '{"command":["get_property","path"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // ""')
+            if [[ "$cur_path" =~ ^http.* ]] || [[ "$cur_path" =~ ^ytdl.* ]]; then
+                if (( $(echo "$cur_time > 1" | bc -l 2>/dev/null || echo 0) )); then
+                    batch+="{\"command\":[\"set_property\",\"start\",\"$cur_time\"]}\n"
+                    batch+="{\"command\":[\"script-message\",\"arm-resume-seek\",\"$cur_time\"]}\n"
+                fi
+                batch+="{\"command\":[\"playlist-play-index\",\"current\"]}\n"
+            fi
+            echo -e "$batch" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+        fi
+
+        echo -e "🎧 ${C_GREEN}Audio-Only Mode Enabled!${C_RESET}"
+        echo -e "   ${C_TEAL}• Bandwidth:${C_RESET}    ${C_WHITE}~98% reduction (Pure Opus 48 kHz @ ~128 kbps)${C_RESET}"
+        echo -e "   ${C_TEAL}• Video Demux:${C_RESET}  ${C_WHITE}0 video bytes requested from network${C_RESET}"
+        echo -e "   ${C_TEAL}• Video Window:${C_RESET} ${C_WHITE}Cleanly closed (No black or phantom window)${C_RESET}"
+        echo -e "   ${C_GRAY}💡 To restore desktop video anytime: ${C_WHITE}q -vid${C_GRAY} or ${C_WHITE}q -aud off${C_RESET}"
+        return 0
+    elif [ "$action" == "off" ] || [ "$action" == "disable" ] || [ "$action" == "0" ]; then
+        set_audio_mode "false"
+        echo -e "📺 ${C_CYAN}Restoring Video Pipeline...${C_RESET}"
+        cmd_video_toggle ""
+        return $?
+    elif [ "$action" == "status" ] || [ -z "$action" ]; then
+        local mode_status="${C_PINK}Disabled ❌ (Full Video Streaming)${C_RESET}"
+        local bw_status="${C_GRAY}Standard (Full video + audio stream)${C_RESET}"
+        local win_status="${C_GRAY}Open / Managed by q -vid${C_RESET}"
+        if [ "$is_active" = true ]; then
+            mode_status="${C_GREEN}Active ✅ (Audio-Only Mode)${C_RESET}"
+            bw_status="${C_GREEN}~98% Reduction (~128 kbps pure audio)${C_RESET}"
+            win_status="${C_GREEN}Cleanly Closed (0 video bytes demuxed)${C_RESET}"
+        fi
+
+        local cols=$(get_terminal_width)
+        local width=$((cols - 2)); [ "$width" -lt 50 ] && width=50
+        [ "$width" -gt 78 ] && width=78
+        printf -v T_LINE "╭%*s╮" "$width" ""; T_LINE=${T_LINE// /─}
+        printf -v M_LINE "├%*s┤" "$width" ""; M_LINE=${M_LINE// /─}
+        printf -v B_LINE "╰%*s╯" "$width" ""; B_LINE=${B_LINE// /─}
+
+        echo -e "${C_GRAY}${T_LINE}${C_RESET}"
+        print_boxed_line "🎧 ${C_PURPLE}Queue Audio-Only Pipeline Status${C_RESET}"
+        echo -e "${C_GRAY}${M_LINE}${C_RESET}"
+        print_boxed_line "${C_TEAL}Audio Mode:       ${mode_status}"
+        print_boxed_line "${C_TEAL}Bandwidth Saver:  ${bw_status}"
+        print_boxed_line "${C_TEAL}Video Window:     ${win_status}"
+        print_boxed_line "${C_TEAL}Audio Codec:      ${C_WHITE}Pristine Opus 48 kHz (Lossless Tunnel)${C_RESET}"
+        echo -e "${C_GRAY}${B_LINE}${C_RESET}"
+        if [ "$is_active" = true ]; then
+            echo -e "${C_GRAY}💡 To restore desktop video: ${C_WHITE}q -vid${C_GRAY} or ${C_WHITE}q -aud off${C_RESET}"
+        else
+            echo -e "${C_GRAY}💡 To enable audio-only mode: ${C_WHITE}q -aud on${C_GRAY} or ${C_WHITE}q -res audio${C_RESET}"
+        fi
+        return 0
+    else
+        echo -e "${C_PINK}❓ Unknown audio-only command: \"$action\"${C_RESET}"
+        echo -e "${C_GRAY}Usage: ${C_WHITE}q -aud [on|off|toggle|status]${C_RESET} or ${C_WHITE}q -res audio${C_RESET}"
+        return 1
+    fi
 }
 
 cmd_hybrid_toggle() {
@@ -1835,6 +1976,10 @@ cmd_resolution() {
     local label=""
 
     case "$target" in
+        audio|aud)
+            cmd_audio_mode "on"
+            return $?
+            ;;
         low|720|720p|hd)
             clean_target="low"
             label="Low / 720p HD (Fluid 60 FPS / bandwidth saver)"
@@ -1890,6 +2035,10 @@ cmd_resolution() {
             label="Auto / Smart (Hardware ceiling: ${hw_ceil}, protects buffer & frame-rate)"
             ;;
         "")
+            if is_audio_mode_active; then
+                cmd_audio_mode "status"
+                return 0
+            fi
             # Query / Show active resolution status
             local hw_ceil
             hw_ceil=$(get_hardware_ceiling)
@@ -1995,6 +2144,12 @@ cmd_resolution() {
             return 1
             ;;
     esac
+
+    # Setting an explicit video resolution automatically turns off audio-only mode
+    if is_audio_mode_active; then
+        set_audio_mode "false"
+        [ -S "$SOCKET" ] && echo "{\"command\":[\"script-message\",\"set-audio-mode\",\"false\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    fi
 
     # Persist choice to user config
     mkdir -p "$HOME/.config/mpv"
