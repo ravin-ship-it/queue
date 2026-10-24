@@ -255,34 +255,56 @@ ensure_piperelay_compiled() {
     local win_dir
     win_dir=$(get_windows_user_dir)
     [ -z "$win_dir" ] && return 1
-    local win_exe="$win_dir/PipeRelay.exe"
 
+    local ps1_src="$SCRIPT_DIR/scripts/PipeRelay.ps1"
+    [ ! -f "$ps1_src" ] && ps1_src="$HOME/.local/bin/mpv/scripts/PipeRelay.ps1"
+    [ ! -f "$ps1_src" ] && ps1_src="$(dirname "$MODULE_DIR")/scripts/PipeRelay.ps1"
+    if [ -f "$ps1_src" ]; then
+        cp -f "$ps1_src" "$win_dir/PipeRelay.ps1" 2>/dev/null
+    fi
+
+    local win_exe="$win_dir/PipeRelay.exe"
+    local win_ps1="$win_dir/PipeRelay.ps1"
+
+    # Test if win_exe is runnable (not blocked by Device Guard / Code Integrity)
     if [ -f "$win_exe" ] && [ -x "$win_exe" ]; then
-        echo "$win_exe"
+        local probe_out
+        probe_out=$("$win_exe" </dev/null 2>&1)
+        if [[ "$probe_out" != *"Invalid argument"* ]] && [[ "$probe_out" != *"blocked"* ]]; then
+            echo "$win_exe"
+            return 0
+        fi
+    fi
+
+    # If win_ps1 is available, return it as the preferred compliant relay
+    if [ -f "$win_ps1" ]; then
+        echo "$win_ps1"
         return 0
     fi
 
     local csc_compiler="/mnt/c/Windows/Microsoft.NET/Framework64/v4.0.30319/csc.exe"
     [ ! -f "$csc_compiler" ] && csc_compiler="/mnt/c/Windows/Microsoft.NET/Framework/v4.0.30319/csc.exe"
 
-    if [ ! -f "$csc_compiler" ]; then
-        return 1
-    fi
-
     local cs_src="$SCRIPT_DIR/scripts/PipeRelay.cs"
     [ ! -f "$cs_src" ] && cs_src="$HOME/.local/bin/mpv/scripts/PipeRelay.cs"
     [ ! -f "$cs_src" ] && cs_src="$(dirname "$MODULE_DIR")/scripts/PipeRelay.cs"
 
-    if [ ! -f "$cs_src" ]; then
-        return 1
+    if [ -f "$csc_compiler" ] && [ -f "$cs_src" ]; then
+        cp "$cs_src" "$win_dir/PipeRelay.cs" 2>/dev/null
+        (cd "$win_dir" && "$csc_compiler" /out:PipeRelay.exe /target:exe /nologo PipeRelay.cs </dev/null >/dev/null 2>&1)
+        rm -f "$win_dir/PipeRelay.cs" 2>/dev/null
+        if [ -f "$win_exe" ]; then
+            local probe_out2
+            probe_out2=$("$win_exe" </dev/null 2>&1)
+            if [[ "$probe_out2" != *"Invalid argument"* ]] && [[ "$probe_out2" != *"blocked"* ]]; then
+                echo "$win_exe"
+                return 0
+            fi
+        fi
     fi
 
-    cp "$cs_src" "$win_dir/PipeRelay.cs" 2>/dev/null
-    (cd "$win_dir" && "$csc_compiler" /out:PipeRelay.exe /target:exe /nologo PipeRelay.cs </dev/null >/dev/null 2>&1)
-    rm -f "$win_dir/PipeRelay.cs" 2>/dev/null
-
-    if [ -f "$win_exe" ]; then
-        echo "$win_exe"
+    if [ -f "$win_ps1" ]; then
+        echo "$win_ps1"
         return 0
     fi
     return 1
@@ -738,7 +760,7 @@ ensure_mpv_running() {
             if [ -n "$win_user_dir" ] && [ -d "$win_user_dir" ]; then
                 local win_mpv_dir="$win_user_dir/AppData/Roaming/mpv"
                 local win_mpv_scripts_dir="$win_mpv_dir/scripts"
-                mkdir -p "$win_mpv_scripts_dir" 2>/dev/null
+                mkdir -p "$win_mpv_scripts_dir" "$win_user_dir/.cache/mpv" 2>/dev/null
                 if [ -f "$script_path" ]; then
                     cp -f "$script_path" "$win_mpv_scripts_dir/queue_video.lua" 2>/dev/null
                     # Do not pass --script here; MPV already auto-loads all scripts in AppData/Roaming/mpv/scripts
@@ -907,6 +929,50 @@ notify_fzf_reload() {
     fi
 }
 
+sync_session_cache() {
+    if [ "$IS_WSL" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+        local win_dir
+        win_dir=$(get_windows_user_dir)
+        if [ -n "$win_dir" ] && [ -d "$win_dir/.cache/mpv" ]; then
+            local win_cache="$win_dir/.cache/mpv"
+            local lnx_cache="$HOME/.cache/mpv"
+            mkdir -p "$lnx_cache" "$win_cache" 2>/dev/null
+
+            # Sync state.json based on modification time (newer wins)
+            if [ -f "$win_cache/state.json" ] && [ -f "$lnx_cache/state.json" ]; then
+                local win_mtime lnx_mtime
+                win_mtime=$(get_file_mtime "$win_cache/state.json")
+                lnx_mtime=$(get_file_mtime "$lnx_cache/state.json")
+                if [ "$win_mtime" -ge "$lnx_mtime" ]; then
+                    cp -fp "$win_cache/state.json" "$lnx_cache/state.json" 2>/dev/null
+                else
+                    cp -fp "$lnx_cache/state.json" "$win_cache/state.json" 2>/dev/null
+                fi
+            elif [ -f "$win_cache/state.json" ]; then
+                cp -fp "$win_cache/state.json" "$lnx_cache/state.json" 2>/dev/null
+            elif [ -f "$lnx_cache/state.json" ]; then
+                cp -fp "$lnx_cache/state.json" "$win_cache/state.json" 2>/dev/null
+            fi
+
+            # Sync last_playlist.txt based on modification time (newer wins)
+            if [ -f "$win_cache/last_playlist.txt" ] && [ -f "$lnx_cache/last_playlist.txt" ]; then
+                local win_mtime lnx_mtime
+                win_mtime=$(get_file_mtime "$win_cache/last_playlist.txt")
+                lnx_mtime=$(get_file_mtime "$lnx_cache/last_playlist.txt")
+                if [ "$win_mtime" -ge "$lnx_mtime" ]; then
+                    cp -fp "$win_cache/last_playlist.txt" "$lnx_cache/last_playlist.txt" 2>/dev/null
+                else
+                    cp -fp "$lnx_cache/last_playlist.txt" "$win_cache/last_playlist.txt" 2>/dev/null
+                fi
+            elif [ -f "$win_cache/last_playlist.txt" ]; then
+                cp -fp "$win_cache/last_playlist.txt" "$lnx_cache/last_playlist.txt" 2>/dev/null
+            elif [ -f "$lnx_cache/last_playlist.txt" ]; then
+                cp -fp "$lnx_cache/last_playlist.txt" "$win_cache/last_playlist.txt" 2>/dev/null
+            fi
+        fi
+    fi
+}
+
 save_current_playlist() {
     local force="${1:-false}"
     local allow_empty="${2:-false}"
@@ -947,12 +1013,24 @@ save_current_playlist() {
             # Save state properties to state.json
             echo "$raw" | jq -c 'map(select(.data != null and (.data | type != "array"))) | {shuffle: .[0].data, loop_file: .[1].data, loop_playlist: .[2].data, pos: .[3].data}' 2>/dev/null > "$HOME/.cache/mpv/state.json.tmp"
             [ -s "$HOME/.cache/mpv/state.json.tmp" ] && mv "$HOME/.cache/mpv/state.json.tmp" "$HOME/.cache/mpv/state.json"
+
+            # Mirror to Windows cache in WSL hybrid mode
+            if [ "$IS_WSL" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+                local win_u_dir
+                win_u_dir=$(get_windows_user_dir)
+                if [ -n "$win_u_dir" ] && [ -d "$win_u_dir/.cache/mpv" ]; then
+                    [ -f "$LAST_PLAYLIST_FILE" ] && cp -fp "$LAST_PLAYLIST_FILE" "$win_u_dir/.cache/mpv/last_playlist.txt" 2>/dev/null
+                    [ -f "$HOME/.cache/mpv/state.json" ] && cp -fp "$HOME/.cache/mpv/state.json" "$win_u_dir/.cache/mpv/state.json" 2>/dev/null
+                fi
+            fi
+
             notify_fzf_reload
         fi
     fi
 }
 
 restore_state_properties() {
+    sync_session_cache
     local state_file="$HOME/.cache/mpv/state.json"
     [ ! -f "$state_file" ] && return
     
@@ -967,7 +1045,7 @@ restore_state_properties() {
     
     # Only restore position if it's valid
     if [ "$pos" != "null" ] && [ "$pos" -ge 0 ]; then
-        echo "{ \"command\": [\"set_property\", \"playlist-pos\", $pos] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+        echo "{ \"command\": [\"playlist-play-index\", $pos] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
     fi
 }
 

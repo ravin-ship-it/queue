@@ -954,6 +954,78 @@ local function on_file_end(event)
 end
 
 -- =========================================================================
+-- Persistent Session State Engine (Preserves track & playlist on [X] / exit)
+-- =========================================================================
+
+local function get_saved_pos()
+    local cache_dir = home ~= "" and (home .. "/.cache/mpv") or nil
+    if not cache_dir then return -1 end
+    local f = io.open(cache_dir .. "/state.json", "r")
+    if not f then return -1 end
+    local content = f:read("*a")
+    f:close()
+    if content and content ~= "" then
+        local u = require("mp.utils")
+        local parsed = u.parse_json(content)
+        if parsed and parsed.pos and type(parsed.pos) == "number" and parsed.pos >= 0 then
+            return math.floor(parsed.pos)
+        end
+    end
+    return -1
+end
+
+local target_restore_pos = get_saved_pos()
+local has_restored_session = (target_restore_pos <= 0)
+
+local function save_session_state()
+    if not has_restored_session then return end
+    local cache_dir = home ~= "" and (home .. "/.cache/mpv") or nil
+    if not cache_dir then return end
+
+    -- 1. Determine active playlist position
+    local pos = mp.get_property_number("playlist-pos", -1)
+    if pos < 0 and last_valid_pos and last_valid_pos >= 0 then
+        pos = last_valid_pos
+    end
+    if pos < 0 then pos = 0 end
+
+    -- 2. State properties
+    local shuffle = mp.get_property_bool("shuffle", false)
+    local loop_f = mp.get_property("loop-file", "no")
+    local loop_p = mp.get_property("loop-playlist", "no")
+
+    local u = require("mp.utils")
+    local state_data = {
+        shuffle = shuffle,
+        loop_file = loop_f,
+        loop_playlist = loop_p,
+        pos = pos
+    }
+    local state_json = u.format_json(state_data)
+    if state_json then
+        local sf = io.open(cache_dir .. "/state.json", "w")
+        if sf then
+            sf:write(state_json .. "\n")
+            sf:close()
+        end
+    end
+
+    -- 3. Save playlist items
+    local pl = mp.get_property_native("playlist")
+    if pl and type(pl) == "table" and #pl > 0 then
+        local pf = io.open(cache_dir .. "/last_playlist.txt", "w")
+        if pf then
+            for _, item in ipairs(pl) do
+                if item and item.filename and item.filename ~= "" then
+                    pf:write(item.filename .. "\n")
+                end
+            end
+            pf:close()
+        end
+    end
+end
+
+-- =========================================================================
 -- 6. Event Registrations & Script Messages
 -- =========================================================================
 
@@ -965,6 +1037,7 @@ local function on_file_loaded()
     consecutive_lag_checks = 0
     last_lag_check_time = 0
     track_start_time = mp.get_time()
+    save_session_state()
     local path = mp.get_property("path", "")
     local saved_sp = get_saved_speed()
     if saved_sp and saved_sp ~= 1.0 then
@@ -989,6 +1062,27 @@ end
 mp.register_event("end-file", on_file_end)
 mp.register_event("file-loaded", on_file_loaded)
 mp.register_event("playback-restart", do_resume_seek)
+mp.observe_property("playlist-count", "number", function(name, count)
+    if count and count > 0 and not has_restored_session and target_restore_pos > 0 then
+        if target_restore_pos < count then
+            mp.commandv("playlist-play-index", target_restore_pos)
+        end
+        has_restored_session = true
+    end
+end)
+mp.observe_property("playlist-pos", "number", function(name, val)
+    if val and val >= 0 then
+        if not has_restored_session then
+            if target_restore_pos > 0 and val == target_restore_pos then
+                has_restored_session = true
+            elseif target_restore_pos <= 0 then
+                has_restored_session = true
+            end
+        end
+        last_valid_pos = val
+        save_session_state()
+    end
+end)
 mp.observe_property("shuffle", "bool", on_shuffle_change)
 mp.observe_property("window-minimized", "bool", update_state)
 mp.observe_property("vo", "string", update_state)
@@ -1054,8 +1148,18 @@ mp.add_key_binding("_", "scale_sub_underscore", function() adjust_scale(-0.05) e
 
 -- Window Close & Session Exit Hotkeys (Cross button [X], Alt+F4, q, Q quits session)
 local function stop_session()
+    has_restored_session = true
+    save_session_state()
+    if state_file then pcall(os.remove, state_file) end
     mp.commandv("quit")
 end
+
+mp.register_script_message("stop-session", stop_session)
+mp.register_event("shutdown", function()
+    has_restored_session = true
+    save_session_state()
+    if state_file then pcall(os.remove, state_file) end
+end)
 
 mp.add_forced_key_binding("CLOSE_WIN", "stop_close_win", stop_session)
 mp.add_forced_key_binding("Alt+F4", "stop_altf4", stop_session)

@@ -405,6 +405,7 @@ cmd_update_ytdlp() {
         "q_modules/hybrid_bridge.py"
         "q_modules/android_stream_bridge.py"
         "scripts/PipeRelay.cs"
+        "scripts/PipeRelay.ps1"
         "scripts/queue_video.lua"
         "scripts/queue_android_bridge.lua"
         "install.sh"
@@ -454,6 +455,7 @@ cmd_update_ytdlp() {
                 (cd "$win_u_dir" && "$csc_comp" /out:PipeRelay.exe /target:exe /nologo PipeRelay.cs </dev/null >/dev/null 2>&1)
                 rm -f "$win_u_dir/PipeRelay.cs" 2>/dev/null
             fi
+            [ -f "$dest_dir/scripts/PipeRelay.ps1" ] && cp -f "$dest_dir/scripts/PipeRelay.ps1" "$win_u_dir/PipeRelay.ps1" 2>/dev/null
             print_boxed_line "  ${C_GREEN}✅ Windows Hybrid Boost Mode host components re-synchronized!${C_RESET}"
         fi
     fi

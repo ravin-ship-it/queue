@@ -1269,16 +1269,18 @@ cmd_video_toggle() {
     fi
     batch_keys+='{"command":["keybind","F11","cycle fullscreen"]}\n'
     batch_keys+='{"command":["keybind","f","cycle fullscreen"]}\n'
-    batch_keys+='{"command":["keybind","CLOSE_WIN","script-message safe-hide-video"]}\n'
-    batch_keys+='{"command":["keybind","q","script-message safe-hide-video"]}\n'
-    batch_keys+='{"command":["keybind","Q","script-message safe-hide-video"]}\n'
-    batch_keys+='{"command":["keybind","Ctrl+w","script-message safe-hide-video"]}\n'
-    batch_keys+='{"command":["keybind","Ctrl+W","script-message safe-hide-video"]}\n'
-    batch_keys+='{"command":["keybind","Meta+w","script-message safe-hide-video"]}\n'
-    batch_keys+='{"command":["keybind","Meta+W","script-message safe-hide-video"]}\n'
-    batch_keys+='{"command":["keybind","Meta+q","script-message safe-hide-video"]}\n'
-    batch_keys+='{"command":["keybind","Meta+Q","script-message safe-hide-video"]}\n'
-    batch_keys+='{"command":["keybind","Alt+F4","script-message safe-hide-video"]}\n'
+    batch_keys+='{"command":["keybind","CLOSE_WIN","script-message stop-session"]}\n'
+    batch_keys+='{"command":["keybind","q","script-message stop-session"]}\n'
+    batch_keys+='{"command":["keybind","Q","script-message stop-session"]}\n'
+    batch_keys+='{"command":["keybind","Ctrl+w","script-message stop-session"]}\n'
+    batch_keys+='{"command":["keybind","Ctrl+W","script-message stop-session"]}\n'
+    batch_keys+='{"command":["keybind","Meta+w","script-message stop-session"]}\n'
+    batch_keys+='{"command":["keybind","Meta+W","script-message stop-session"]}\n'
+    batch_keys+='{"command":["keybind","Meta+q","script-message stop-session"]}\n'
+    batch_keys+='{"command":["keybind","Meta+Q","script-message stop-session"]}\n'
+    batch_keys+='{"command":["keybind","Alt+F4","script-message stop-session"]}\n'
+    batch_keys+='{"command":["keybind","h","script-message safe-hide-video"]}\n'
+    batch_keys+='{"command":["keybind","H","script-message safe-hide-video"]}\n'
     batch_keys+='{"command":["keybind","ESC","set fullscreen no"]}\n'
     batch_keys+='{"command":["keybind","Ctrl+s","cycle shuffle"]}\n'
     batch_keys+='{"command":["keybind","r","playlist-shuffle"]}\n'
@@ -1631,7 +1633,7 @@ cmd_hybrid_toggle() {
         local relay_bin
         relay_bin=$(ensure_piperelay_compiled)
         if [ -z "$relay_bin" ]; then
-            echo -e "${C_PINK}❌ Failed to compile PipeRelay.exe using Windows .NET compiler.${C_RESET}"
+            echo -e "${C_PINK}❌ Failed to configure PipeRelay bridge (exe/ps1).${C_RESET}"
             return 1
         fi
     fi
@@ -2486,6 +2488,10 @@ cmd_play() {
     fi
 
     if [ "$MPV_RUNNING" = false ]; then
+        sync_session_cache
+        local saved_target_pos
+        saved_target_pos=$(jq -r '.pos // 0' "$HOME/.cache/mpv/state.json" 2>/dev/null)
+        [[ ! "$saved_target_pos" =~ ^[0-9]+$ ]] && saved_target_pos=0
         if [ ! -f "$LAST_PLAYLIST_FILE" ] || [ ! -s "$LAST_PLAYLIST_FILE" ]; then
             if [ -f "${LAST_PLAYLIST_FILE}.bak" ] && [ -s "${LAST_PLAYLIST_FILE}.bak" ]; then
                 cp -f "${LAST_PLAYLIST_FILE}.bak" "$LAST_PLAYLIST_FILE"
@@ -2514,7 +2520,7 @@ cmd_play() {
         restore_state_properties
         
         # Determine start index (Saved position or first)
-        local start_idx=$(jq -r '.pos // 0' "$HOME/.cache/mpv/state.json" 2>/dev/null)
+        local start_idx="${saved_target_pos:-0}"
         [[ ! "$start_idx" =~ ^[0-9]+$ ]] && start_idx=0
 
         # Force Playback Start
@@ -2557,6 +2563,7 @@ cmd_play() {
             IFS=$'\t' read -r cur_pause is_idle is_eof cur_pos cur_count <<< "$state_raw"
 
             if [[ ! "$cur_count" =~ ^[0-9]+$ ]] || [ "$cur_count" -le 0 ]; then
+                sync_session_cache
                 if [ -f "$LAST_PLAYLIST_FILE" ] && [ -s "$LAST_PLAYLIST_FILE" ]; then
                     echo -e "${C_PINK}🚀 Loading saved playlist into MPV...${C_RESET}"
                     load_playlist_file_to_mpv "$LAST_PLAYLIST_FILE" "replace"
