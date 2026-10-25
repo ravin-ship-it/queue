@@ -343,11 +343,18 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
             case "$auto_action" in
                 status)
                     shift
-                    if [ -f "$HOME/.cache/mpv/auto_enabled" ]; then
-                        echo -e "${C_PINK}🤖 Auto Mode:${C_RESET} ${C_GREEN}ENABLED ✅${C_RESET} ${C_GRAY}(24/7 Zero-Gap discovery active)${C_RESET}"
-                    else
-                        echo -e "${C_PINK}🤖 Auto Mode:${C_RESET} ${C_GRAY}DISABLED ❌${C_RESET}"
-                    fi
+                    cmd_auto_status
+                    ;;
+                fetch|next)
+                    shift
+                    echo -e "${C_PINK}🤖 Auto Mode:${C_RESET} ${C_CYAN}Triggering smart discovery with fresh seed...${C_RESET}"
+                    rm -f "$HOME/.cache/mpv/auto_cooldown"
+                    auto_queue_related "" "" true
+                    ;;
+                reset|clear-history|clear)
+                    shift
+                    rm -f "$HOME/.cache/mpv/auto_seed_history" "$HOME/.cache/mpv/auto_recent_artists" "$HOME/.cache/mpv/auto_removed_recent" "$HOME/.cache/mpv/auto_cooldown"
+                    echo -e "${C_GREEN}✨ Auto Mode seed rotation memory, artist fatigue buffer, and cooldowns reset.${C_RESET}"
                     ;;
                 on|enable|start)
                     shift
@@ -1066,8 +1073,11 @@ if [ -z "$1" ]; then
                      fi
                  fi
 
-                 # Proactive auto-queue check after removal (Pass removed playing track meta to maintain discovery vibe)
-                 ( auto_queue_related "$removed_playing_title" "$removed_playing_filename" ) >/dev/null 2>&1 & disown
+                 # Record removed track in recent removed buffer and trigger fresh auto-discovery
+                 local rem_v_id=""
+                 [[ "$removed_playing_filename" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && rem_v_id="${BASH_REMATCH[2]}"
+                 [ -n "$rem_v_id" ] && echo "$rem_v_id" >> "$HOME/.cache/mpv/auto_removed_recent"
+                 ( auto_queue_related ) >/dev/null 2>&1 & disown
 
              # 7. Remove from Queue (Normal removal, no blacklist)
              elif echo "$action" | grep -q "Remove"; then
@@ -1092,6 +1102,10 @@ if [ -z "$1" ]; then
                          removed_playing_title="$mpv_title"
                      fi
 
+                     local rem_one_id=""
+                     [[ "$filename" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && rem_one_id="${BASH_REMATCH[2]}"
+                     [ -n "$rem_one_id" ] && echo "$rem_one_id" >> "$HOME/.cache/mpv/auto_removed_recent"
+
                      echo "{ \"command\": [\"playlist-remove\", $((idx - 1))] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
                  done < <(echo "$selection" | sort -nr)
                  
@@ -1108,8 +1122,8 @@ if [ -z "$1" ]; then
                      fi
                  fi
 
-                 # Proactive auto-queue check after removal (Pass removed playing track meta to maintain discovery vibe)
-                 ( auto_queue_related "$removed_playing_title" "$removed_playing_filename" ) >/dev/null 2>&1 & disown
+                 # Proactive auto-queue check after removal with fresh rotated seed
+                 ( auto_queue_related ) >/dev/null 2>&1 & disown
              fi
         else
              cmd_play "$selection"

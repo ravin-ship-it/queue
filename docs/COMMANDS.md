@@ -93,6 +93,37 @@ q -lp         # or: q loop-playlist
 
 ---
 
+## 🤖 24/7 Smart Auto-Discovery Engine (`q -auto`)
+
+Queue features a zero-gap, continuous auto-discovery radio engine with **Dynamic Seed Rotation** and an **Anti-Artist Echo Chamber Guard**:
+
+```bash
+# Toggle Auto Mode ON/OFF
+q -auto             # or: q auto
+
+# Explicitly enable or disable
+q -auto on          # Enable 24/7 continuous discovery
+q -auto off         # Disable auto-queuing
+
+# View Auto-Discovery Engine Dashboard
+q -auto status      # View active seed, rotation depth, fatigue buffer, & taste stats
+
+# Trigger immediate discovery fetch with a fresh seed
+q -auto fetch       # or: q auto next
+
+# Reset seed memory & artist fatigue buffers
+q -auto reset       # or: q auto clear-history
+```
+
+### Smart Intelligence Highlights:
+* **Anti-Echo Chamber & Artist Fatigue**: Automatically prevents consecutive songs by the same artist (`-120` penalty) and limits recent artist repetition (`-50` fatigue penalty).
+* **Removed Track Exclusion**: Removing or disliking a song permanently isolates it from becoming a seed, guaranteeing fresh recommendations instead of repeating removed artists.
+* **Dynamic Seed Rotation**: Rotates through unused tracks in your active queue (depth of 15) so your entire playlist influences discovery rather than just the last track.
+* **User Taste Profile Integration**: Analyzes your saved playlists (`~/.local/share/mpv/playlists/`) and boosts matching artists (`+45`) and preferred genres (`+30` for nightcore, slowed+reverb, acoustic covers, remixes).
+* **Empty Queue Resurrection**: If your queue runs empty, Auto Mode automatically seeds from your saved playlists rather than repeating the same history track.
+
+---
+
 ## 📺 Desktop Video Controller (`q -vid` / `q -res`)
 
 Queue allows you to watch high-definition music videos alongside background audio playback.

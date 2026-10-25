@@ -328,6 +328,13 @@ cmd_remove() {
             
             local formatted_track=$(format_track_log "$idx" "$filename" "$mpv_title")
 
+            local rem_v_id=""
+            [[ "$filename" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && rem_v_id="${BASH_REMATCH[2]}"
+            if [ -n "$rem_v_id" ]; then
+                echo "$rem_v_id" >> "$HOME/.cache/mpv/auto_removed_recent"
+                tail -n 30 "$HOME/.cache/mpv/auto_removed_recent" > "$HOME/.cache/mpv/auto_removed_recent.tmp" 2>/dev/null && mv "$HOME/.cache/mpv/auto_removed_recent.tmp" "$HOME/.cache/mpv/auto_removed_recent"
+            fi
+
             echo "{ \"command\": [\"playlist-remove\", $((idx - 1))] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
             if [ "$also_dislike" = true ]; then
                 add_to_auto_blacklist "$filename" "$mpv_title"
@@ -351,14 +358,14 @@ cmd_remove() {
             IFS=$'\t' read -r rem_count rem_pos rem_idle rem_paused <<< "$cur_status"
             
             # If removing the track made MPV idle (e.g. removed last song or queue became empty)
-            # AND auto-mode is enabled, discover and queue the next track before logging
+            # AND auto-mode is enabled, discover and queue the next track with a FRESH rotated seed
             if { [ "$rem_idle" == "true" ] || [ "$rem_pos" -eq -1 ]; } && [ -f "$HOME/.cache/mpv/auto_enabled" ]; then
                 echo -ne "${C_GRAY}⏳ Discovering related track...${C_RESET}\r"
-                auto_queue_related "$removed_playing_title" "$removed_playing_filename" true
+                auto_queue_related "" "" true
                 echo -ne "\033[2K\r"
             elif [ -f "$HOME/.cache/mpv/auto_enabled" ]; then
-                # Queue still has tracks and is continuing playback, trigger auto-discovery in background
-                ( auto_queue_related "$removed_playing_title" "$removed_playing_filename" ) >/dev/null 2>&1 & disown
+                # Queue still has tracks and is continuing playback, trigger auto-discovery with fresh seed
+                ( auto_queue_related ) >/dev/null 2>&1 & disown
             fi
 
             wait_for_playback_start
@@ -376,8 +383,8 @@ cmd_remove() {
                 log_now_playing "|> Still Playing: "
             fi
             
-            # Background auto-queue check
-            ( auto_queue_related "$removed_playing_title" "$removed_playing_filename" ) >/dev/null 2>&1 & disown
+            # Background auto-queue check with fresh seed
+            ( auto_queue_related ) >/dev/null 2>&1 & disown
         fi
         
         # Delay save to avoid racing with mpv during track transition
@@ -1144,33 +1151,153 @@ parse_duration_to_seconds() {
     echo "$s"
 }
 
+normalize_artist() {
+    local uploader="$1"
+    local title="$2"
+    local art="$uploader"
+
+    # If uploader is a generic topic channel or vevo/official, extract artist from title if available
+    if [[ "$uploader" =~ -[[:space:]]*topic$ ]] || [[ "$uploader" =~ (vevo|records|official)$ ]] || [ -z "$uploader" ] || [ "$uploader" == "null" ]; then
+        if [[ "$title" == *" - "* ]]; then
+            local cand="${title%% - *}"
+            cand=$(echo "$cand" | sed -E 's/^\[[^]]+\][[:space:]]*//; s/^\([^)]+\)[[:space:]]*//')
+            [ -n "$cand" ] && art="$cand"
+        fi
+    fi
+
+    art=$(echo "$art" | tr '[:upper:]' '[:lower:]' | sed -E 's/-[[:space:]]*topic$//; s/[[:space:]]+official$//; s/[[:space:]]+vevo$//; s/[[:space:]]+records$//; s/[[:space:]]+music$//' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')
+    echo "$art"
+}
+
+normalize_song_title() {
+    local t="$1"
+    [[ "$t" == *" - "* ]] && t="${t#* - }"
+    t=$(echo "$t" | sed -E 's/(\[|\()[^]]*(\]|\))//g' | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9 ]/ /g' | awk '{$1=$1};1')
+    echo "${t:0:30}"
+}
+
+ensure_taste_profile_cached() {
+    local taste_file="$HOME/.cache/mpv/auto_taste.cache"
+    local now=$(date +%s)
+    local last_mtime=$(get_file_mtime "$taste_file")
+
+    # Regenerate if older than 2 hours or missing
+    if [ ! -f "$taste_file" ] || [ $((now - last_mtime)) -gt 7200 ]; then
+        mkdir -p "$HOME/.cache/mpv"
+        python3 -c '
+import os, glob, re
+
+playlist_dir = os.path.expanduser("~/.local/share/mpv/playlists")
+titles_file = os.path.expanduser("~/.cache/mpv/titles.txt")
+taste_file = os.path.expanduser("~/.cache/mpv/auto_taste.cache")
+
+title_cache = {}
+if os.path.isfile(titles_file):
+    with open(titles_file, "r", errors="ignore") as f:
+        for line in f:
+            parts = line.strip().split("\t")
+            if len(parts) >= 2:
+                title_cache[parts[0]] = parts[1]
+
+artists = set()
+for p in glob.glob(os.path.join(playlist_dir, "*.txt")):
+    with open(p, "r", errors="ignore") as f:
+        for line in f:
+            url = line.strip()
+            title = title_cache.get(url, "")
+            if not title:
+                continue
+            if " - " in title:
+                art = title.split(" - ")[0].strip()
+                art = re.sub(r"^\[[^]]+\]\s*", "", art)
+                art = re.sub(r"^\([^)]+\)\s*", "", art)
+                art = re.sub(r"(?i)-[ ]*topic$", "", art)
+                art = art.strip().lower()
+                if len(art) >= 2 and len(art) <= 40:
+                    artists.add(art)
+
+with open(taste_file, "w") as f:
+    for a in sorted(artists):
+        f.write(a + "\n")
+' 2>/dev/null
+    fi
+}
+
 score_candidate_track() {
     local title="$1"
     local uploader="$2"
     local dur="$3"
+    local seed_artist="$4"
+    local recent_artists_file="$5"
+    local cur_titles_file="$6"
+    local taste_file="$7"
+
     local score=10
     local lower_title=$(echo "$title" | tr '[:upper:]' '[:lower:]')
     local lower_uploader=$(echo "$uploader" | tr '[:upper:]' '[:lower:]')
+    local cand_art=$(normalize_artist "$uploader" "$title")
+    local base_title=$(normalize_song_title "$title")
 
-    # Hard Reject: Non-music, Spoken Skits, Reviews, Teasers
+    # Hard Reject: Non-music, Spoken Skits, Reviews, Teasers, Reactions
     if [[ "$lower_title" =~ (teaser|trailer|reaction|reacts|review|full[[:space:]]+movie|short[[:space:]]+film|interview|behind[[:space:]]+the[[:space:]]+scenes|bts|episode|ep\.|making[[:space:]]+of) ]]; then
         echo -9999
         return
     fi
 
-    # Bonus: Studio Topic upload (+60) - Clean album release from music distributor
-    if [[ "$lower_uploader" =~ -[[:space:]]*topic$ ]] || [[ "$lower_title" =~ -[[:space:]]*topic$ ]]; then
-        score=$((score + 60))
+    # Duplicate song/cover detection: Reject if identical song title is already in queue
+    if [ -n "$base_title" ] && [ ${#base_title} -ge 5 ]; then
+        if [ -f "$cur_titles_file" ] && grep -Fqi "$base_title" "$cur_titles_file" 2>/dev/null; then
+            echo -9999
+            return
+        fi
     fi
 
-    # Bonus: Clean studio audio releases (+40)
-    if [[ "$lower_title" =~ (official[[:space:]]+audio|audio[[:space:]]+only|lyric[[:space:]]+video|lyrics|clean[[:space:]]+audio|studio[[:space:]]+version|original[[:space:]]+track) ]]; then
+    # Bonus: Clean Studio Topic upload (+40) - Clean distributor master
+    if [[ "$lower_uploader" =~ -[[:space:]]*topic$ ]] || [[ "$lower_title" =~ -[[:space:]]*topic$ ]]; then
         score=$((score + 40))
     fi
 
-    # Penalty: Official music videos without audio/lyric tags (-15, so studio tracks take precedence)
+    # Bonus: Clean studio audio releases (+35)
+    if [[ "$lower_title" =~ (official[[:space:]]+audio|audio[[:space:]]+only|lyric[[:space:]]+video|lyrics|clean[[:space:]]+audio|studio[[:space:]]+version|original[[:space:]]+track) ]]; then
+        score=$((score + 35))
+    fi
+
+    # Penalty: Music videos without audio/lyric tags (-15)
     if [[ "$lower_title" =~ (official[[:space:]]+music[[:space:]]+video|official[[:space:]]+video) ]] && [[ ! "$lower_title" =~ (audio|lyric) ]]; then
         score=$((score - 15))
+    fi
+
+    # --- Artist Diversity & Echo-Chamber Breaker ---
+    if [ -n "$cand_art" ] && [ -f "$recent_artists_file" ]; then
+        local last_artist=$(tail -n 1 "$recent_artists_file" 2>/dev/null)
+        # 1. Consecutive artist penalty: Never back-to-back same artist
+        if [ -n "$last_artist" ] && [ "$cand_art" == "$last_artist" ]; then
+            score=$((score - 120))
+        fi
+
+        # 2. Recent artist fatigue: appeared in last 3 tracks
+        local fatigue_count=$(tail -n 3 "$recent_artists_file" 2>/dev/null | grep -Fxc "$cand_art")
+        if [ "$fatigue_count" -ge 1 ]; then
+            score=$((score - (fatigue_count * 50)))
+        fi
+
+        # 3. Seed artist diversity: if candidate is by the seed artist, apply mild penalty to favor related artists
+        if [ -n "$seed_artist" ] && [ "$cand_art" == "$seed_artist" ]; then
+            score=$((score - 35))
+        fi
+    fi
+
+    # --- User Taste Profile Affinity ---
+    if [ -f "$taste_file" ]; then
+        # Check if candidate artist is in user taste profile
+        if [ -n "$cand_art" ] && grep -Fqxi "$cand_art" "$taste_file" 2>/dev/null; then
+            score=$((score + 45))
+        fi
+
+        # Check signature genre keywords
+        if [[ "$lower_title" =~ (nightcore|remix|slowed|reverb|cover|lofi|vocaloid|rock|arabic|acoustic|mashup|anime|r&b) ]]; then
+            score=$((score + 30))
+        fi
     fi
 
     # Duration scoring:
@@ -1192,7 +1319,7 @@ auto_queue_related() {
     local input_title="$1"; local input_filename="$2"; local force_fetch="${3:-false}"
     local auto_file="$HOME/.cache/mpv/auto_enabled"
     local debug_log="$HOME/.cache/mpv/auto_debug.log"
-    
+
     [ ! -f "$auto_file" ] && return
 
     # --- PROTOCOL: Liveness Check ---
@@ -1210,7 +1337,7 @@ auto_queue_related() {
         map(select(.event == null)) |
         (.[0].data // 0), "\t", (if .[1].data == null then -1 else .[1].data end), "\t", (.[2].data // "false"), "\t", (.[3].data // "no"), "\t", (.[4].data // "no"), "\t", (.[5].data // "false"), "\t", (.[6].data // "false")
     ' 2>/dev/null)
-    
+
     if [ -z "$raw_status" ]; then return; fi
     IFS=$'\t' read -r count pos idle loop_p loop_f is_paused is_eof <<< "$raw_status"
 
@@ -1226,7 +1353,7 @@ auto_queue_related() {
     fi
 
     if [ "$force_fetch" != "true" ]; then
-        # Intelligent Discovery Timing: only trigger when near end
+        # Intelligent Discovery Timing: trigger when 1-2 tracks left
         if [ "$pos" -ne -1 ] && [ "$count" -gt $((pos + 2)) ]; then
             return
         fi
@@ -1244,51 +1371,107 @@ auto_queue_related() {
 
     local history_file="$HOME/.cache/mpv/auto_history"
     local blacklist_file="$HOME/.cache/mpv/auto_blacklist"
-    [ ! -f "$history_file" ] && touch "$history_file"
-    [ ! -f "$blacklist_file" ] && touch "$blacklist_file"
+    local seed_history_file="$HOME/.cache/mpv/auto_seed_history"
+    local removed_file="$HOME/.cache/mpv/auto_removed_recent"
+    local recent_artists_file="$HOME/.cache/mpv/auto_recent_artists"
+    local taste_file="$HOME/.cache/mpv/auto_taste.cache"
 
-    # --- PROTOCOL: Personalized Seed Determination ---
+    touch "$history_file" "$blacklist_file" "$seed_history_file" "$removed_file" "$recent_artists_file" 2>/dev/null
+    ensure_taste_profile_cached
+
+    # --- PROTOCOL: Dynamic Seed Determination & Rotation ---
     local seed_id=""
-    local seed_title="$input_title"
+    local seed_title=""
+    local pl_json=""
 
-    # 1. If explicit input given:
-    if [ -n "$input_filename" ] && [[ "$input_filename" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]]; then
-        seed_id="${BASH_REMATCH[2]}"
+    # Retrieve current playlist from MPV
+    if [ "$count" -gt 0 ] && [ -S "$SOCKET" ]; then
+        pl_json=$(echo '{"command":["get_property","playlist"]}' | nc $NC_OPTS -w 2 "$SOCKET" 2>/dev/null)
     fi
 
-    # 2. If no explicit input or queue empty:
-    if [ -z "$seed_id" ]; then
-        if [ "$count" -gt 0 ]; then
-            # Strictly seed from current active queue / currently playing playlist
-            local target_idx=0
-            if [ "$count" -gt 1 ]; then
-                # Prefer the currently playing or most recent tracks in queue to preserve current vibe/genre
-                if [ "$pos" -ge 0 ] && [ $((RANDOM % 10)) -lt 8 ]; then
-                    target_idx="$pos"
-                else
-                    # Fallback to a random recent track in the second half of queue
-                    local half=$((count / 2))
-                    target_idx=$(( (RANDOM % (count - half)) + half ))
-                fi
-            fi
-
-            local seed_json=$(echo "{\"command\":[\"get_property\", \"playlist/$target_idx\"]}" | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // empty')
-            local s_file=$(echo "$seed_json" | jq -r '.filename // ""')
-            seed_title=$(echo "$seed_json" | jq -r '.title // ""')
-            if [[ "$s_file" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]]; then
-                seed_id="${BASH_REMATCH[2]}"
-            fi
-            echo "[$(date +%T)] [Seed] Current Session Seed: Index $target_idx ($seed_id - ${seed_title:-Unknown})" >> "$debug_log"
-        else
-            # Queue is completely empty:
-            # Continue from the track you last listened to in active history (never touching saved playlists)
-            local last_hist_id=$(tail -n 1 "$history_file" 2>/dev/null)
-            if [ -n "$last_hist_id" ] && [[ "$last_hist_id" =~ ^[a-zA-Z0-9_-]{11}$ ]]; then
-                seed_id="$last_hist_id"
-                echo "[$(date +%T)] [Seed] Empty Queue Initialized from Last Listened History: $seed_id" >> "$debug_log"
-            fi
+    # Never use a removed or blacklisted track as seed!
+    if [ -n "$input_filename" ] && [[ "$input_filename" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]]; then
+        local test_id="${BASH_REMATCH[2]}"
+        if ! grep -qx -- "$test_id" "$removed_file" 2>/dev/null && ! grep -E -q "^${test_id}([[:blank:]]|$)" "$blacklist_file" 2>/dev/null; then
+            seed_id="$test_id"
+            seed_title="$input_title"
         fi
     fi
+
+    # Dynamic seed rotation from current queue
+    if [ -z "$seed_id" ] && [ -n "$pl_json" ]; then
+        local q_tracks_raw
+        q_tracks_raw=$(echo "$pl_json" | jq -s -r 'map(select(.event == null)) | .[0].data | to_entries[] | "\(.key)\t\(.value.filename // "")\t\(.value.title // "")"' 2>/dev/null)
+
+        declare -a eligible_seeds=()
+        while IFS=$'\t' read -r q_idx q_file q_title; do
+            [ -z "$q_file" ] && continue
+            local v_id=""
+            [[ "$q_file" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && v_id="${BASH_REMATCH[2]}"
+            [ -z "$v_id" ] && continue
+
+            # Exclude if blacklisted or recently removed
+            grep -E -q "^${v_id}([[:blank:]]|$)" "$blacklist_file" 2>/dev/null && continue
+            grep -qx -- "$v_id" "$removed_file" 2>/dev/null && continue
+
+            # Check if used recently as seed
+            if ! grep -qx -- "$v_id" "$seed_history_file" 2>/dev/null; then
+                eligible_seeds+=("$v_id"$'\t'"$q_title")
+            fi
+        done <<< "$q_tracks_raw"
+
+        # If all tracks in queue have been used as seeds, cycle by dropping older seed history
+        if [ ${#eligible_seeds[@]} -eq 0 ]; then
+            local recent_two=$(tail -n 2 "$seed_history_file" 2>/dev/null)
+            while IFS=$'\t' read -r q_idx q_file q_title; do
+                [ -z "$q_file" ] && continue
+                local v_id=""
+                [[ "$q_file" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && v_id="${BASH_REMATCH[2]}"
+                [ -z "$v_id" ] && continue
+                grep -E -q "^${v_id}([[:blank:]]|$)" "$blacklist_file" 2>/dev/null && continue
+                grep -qx -- "$v_id" "$removed_file" 2>/dev/null && continue
+                if ! echo "$recent_two" | grep -qx -- "$v_id"; then
+                    eligible_seeds+=("$v_id"$'\t'"$q_title")
+                fi
+            done <<< "$q_tracks_raw"
+        fi
+
+        if [ ${#eligible_seeds[@]} -gt 0 ]; then
+            local pick_idx=$((RANDOM % ${#eligible_seeds[@]}))
+            IFS=$'\t' read -r seed_id seed_title <<< "${eligible_seeds[$pick_idx]}"
+            echo "[$(date +%T)] [Seed] Rotated Seed: $seed_id ($seed_title)" >> "$debug_log"
+        elif [ "$pos" -ge 0 ]; then
+            local s_item=$(echo "$pl_json" | jq -s -r 'map(select(.event == null)) | .[0].data['$pos'] // empty' 2>/dev/null)
+            local s_file=$(echo "$s_item" | jq -r '.filename // ""')
+            seed_title=$(echo "$s_item" | jq -r '.title // ""')
+            [[ "$s_file" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && seed_id="${BASH_REMATCH[2]}"
+        fi
+    fi
+
+    # Empty Queue Fallback: Resurrect with a random track from user playlists!
+    if [ -z "$seed_id" ]; then
+        local pl_tracks=()
+        if [ -d "$PLAYLIST_DIR" ]; then
+            mapfile -t pl_tracks < <(find "$PLAYLIST_DIR" -maxdepth 1 -name "*.txt" -exec cat {} + 2>/dev/null | grep -E '^http' | sort -u)
+        fi
+        if [ ${#pl_tracks[@]} -gt 0 ]; then
+            local rand_pl_track="${pl_tracks[$((RANDOM % ${#pl_tracks[@]}))]}"
+            [[ "$rand_pl_track" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && seed_id="${BASH_REMATCH[2]}"
+            seed_title=$(get_cached_title "$rand_pl_track")
+            echo "[$(date +%T)] [Seed] Empty Queue Initialized from User Playlists: $seed_id" >> "$debug_log"
+        else
+            seed_id=$(tail -n 1 "$history_file" 2>/dev/null)
+            echo "[$(date +%T)] [Seed] Empty Queue Initialized from History: $seed_id" >> "$debug_log"
+        fi
+    fi
+
+    # Record Seed in Rotation History
+    if [ -n "$seed_id" ]; then
+        echo "$seed_id" >> "$seed_history_file"
+        tail -n 15 "$seed_history_file" > "$seed_history_file.tmp" 2>/dev/null && mv "$seed_history_file.tmp" "$seed_history_file"
+    fi
+
+    local seed_artist=$(normalize_artist "" "$seed_title")
 
     # --- 2. Candidate Discovery (Radio & Studio Prioritization) ---
     local fields="%(webpage_url)s"$'\t'"%(title)s"$'\t'"%(uploader)s"$'\t'"%(duration_string)s"
@@ -1300,9 +1483,9 @@ auto_queue_related() {
     command -v node >/dev/null 2>&1 && ytdl_disc_opts+=("--js-runtimes" "node")
     [ -n "$COOKIES_FILE" ] && [ -f "$COOKIES_FILE" ] && ytdl_disc_opts+=("--cookies" "$COOKIES_FILE")
 
-    # Strategy A: YouTube Song Radio Mix (RD<ID>) - NOT RDAMVM
+    # Strategy A: YouTube Song Radio Mix (RD<ID>)
     if [ -n "$seed_id" ]; then
-        echo "[$(date +%T)] [Discovery] Radio Mix for Seed ID: $seed_id" >> "$debug_log"
+        echo "[$(date +%T)] [Discovery] Radio Mix for Seed ID: $seed_id (Anchor Artist: ${seed_artist:-Unknown})" >> "$debug_log"
         candidates=$(run_with_timeout 25 "${nice_cmd[@]}" yt-dlp "${ytdl_disc_opts[@]}" --print "$fields" --flat-playlist --playlist-end 20 "https://www.youtube.com/watch?v=${seed_id}&list=RD${seed_id}" 2>/dev/null)
     fi
 
@@ -1325,8 +1508,14 @@ auto_queue_related() {
     fi
 
     # --- 3. Deduplication, Blacklist Check & Studio Scoring ---
-    local pl_json=$(echo '{"command":["get_property","playlist"]}' | nc $NC_OPTS -w 2 "$SOCKET" 2>/dev/null)
-    local cur_ids=$(echo "$pl_json" | jq -r '.data[].filename // empty' 2>/dev/null | grep -oP '(?<=[v=be/])[a-zA-Z0-9_-]{11}' | sort -u)
+    local cur_ids=""
+    local cur_titles_file=$(mktemp)
+    if [ -n "$pl_json" ]; then
+        cur_ids=$(echo "$pl_json" | jq -r '.data[].filename // empty' 2>/dev/null | grep -oP '(?<=[v=be/])[a-zA-Z0-9_-]{11}' | sort -u)
+        echo "$pl_json" | jq -r '.data[].title // empty' 2>/dev/null | while IFS= read -r qt; do
+            [ -n "$qt" ] && normalize_song_title "$qt" >> "$cur_titles_file"
+        done
+    fi
 
     declare -a scored_pool
     # scored_pool entries: "SCORE\tURL\tTITLE\tARTIST\tDUR"
@@ -1336,18 +1525,21 @@ auto_queue_related() {
         [[ "$url" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && c_id="${BASH_REMATCH[2]}"
         [ -z "$c_id" ] && continue
 
-        # Exclusions: seed itself, already in current queue, played recently in history, or in blacklist
+        # Exclusions: seed itself, already in current queue, recently removed, played recently in history, or in blacklist
         [ -n "$seed_id" ] && [ "$c_id" == "$seed_id" ] && continue
-        echo "$cur_ids" | grep -qx -- "$c_id" && continue
+        echo "$cur_ids" | grep -qx -- "$c_id" 2>/dev/null && continue
+        grep -qx -- "$c_id" "$removed_file" 2>/dev/null && continue
         grep -qx -- "$c_id" "$history_file" 2>/dev/null && continue
         grep -E -q "^${c_id}([[:blank:]]|$)" "$blacklist_file" 2>/dev/null && continue
 
-        # Evaluate Candidate Score
-        local s=$(score_candidate_track "$t" "$a" "$d")
+        # Evaluate Candidate Score with Anti-Echo Chamber & Diversity Scoring
+        local s=$(score_candidate_track "$t" "$a" "$d" "$seed_artist" "$recent_artists_file" "$cur_titles_file" "$taste_file")
         if [ "$s" -gt -100 ]; then
             scored_pool+=("$s"$'\t'"$url"$'\t'"$t"$'\t'"$a"$'\t'"$d")
         fi
     done <<< "$candidates"
+
+    rm -f "$cur_titles_file" 2>/dev/null
 
     # --- 4. Intelligent Selection from Top-Scored Candidates ---
     if [ ${#scored_pool[@]} -gt 0 ]; then
@@ -1356,7 +1548,7 @@ auto_queue_related() {
         # Sort pool by score descending
         mapfile -t sorted_pool < <(printf "%s\n" "${scored_pool[@]}" | sort -t$'\t' -k1 -nr)
 
-        # Pick randomly from the top 3 (or fewer) highest-ranked candidates to balance studio quality & variety
+        # Pick randomly from the top 3 highest-ranked candidates to balance studio quality & variety
         local max_pick=3
         [ ${#sorted_pool[@]} -lt 3 ] && max_pick=${#sorted_pool[@]}
         local pick_idx=$((RANDOM % max_pick))
@@ -1366,8 +1558,19 @@ auto_queue_related() {
         echo "[$(date +%T)] [Success] Queuing (Score: $chosen_score): $chosen_t (by $chosen_a)" >> "$debug_log"
         queue_item_ipc "$chosen_url" "$chosen_t" "$chosen_a" "$chosen_d"
 
+        # Record in history & recent artists
         [[ "$chosen_url" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && echo "${BASH_REMATCH[2]}" >> "$history_file"
-        tail -n 100 "$history_file" > "$history_file.tmp" && mv "$history_file.tmp" "$history_file"
+        tail -n 100 "$history_file" > "$history_file.tmp" 2>/dev/null && mv "$history_file.tmp" "$history_file"
+
+        local chosen_art=$(normalize_artist "$chosen_a" "$chosen_t")
+        if [ -n "$chosen_art" ]; then
+            echo "$chosen_art" >> "$recent_artists_file"
+            tail -n 10 "$recent_artists_file" > "$recent_artists_file.tmp" 2>/dev/null && mv "$recent_artists_file.tmp" "$recent_artists_file"
+        fi
+
+        if [ "$force_fetch" = "true" ]; then
+            echo -e "${C_GREEN}✨ Auto-Discovered & Queued:${C_RESET} ${C_CYAN}${chosen_t}${C_RESET} ${C_GRAY}by${C_RESET} ${C_LIGHT_PINK}${chosen_a}${C_RESET} ${C_GRAY}[Score: ${chosen_score}]${C_RESET}"
+        fi
 
         touch "$HOME/.cache/mpv/auto_cooldown"
         ( sleep 20; rm -f "$HOME/.cache/mpv/auto_cooldown" ) & disown
@@ -1376,4 +1579,61 @@ auto_queue_related() {
         touch "$HOME/.cache/mpv/auto_cooldown"
         ( sleep 45; rm -f "$HOME/.cache/mpv/auto_cooldown" ) & disown
     fi
+}
+
+cmd_auto_status() {
+    local auto_file="$HOME/.cache/mpv/auto_enabled"
+    local seed_history_file="$HOME/.cache/mpv/auto_seed_history"
+    local recent_artists_file="$HOME/.cache/mpv/auto_recent_artists"
+    local blacklist_file="$HOME/.cache/mpv/auto_blacklist"
+    touch "$seed_history_file" "$recent_artists_file" "$blacklist_file" 2>/dev/null
+
+    print_header_box "${C_PINK}🤖 Queue Auto-Discovery Engine Status${C_RESET}"
+
+    if [ -f "$auto_file" ]; then
+        print_boxed_line "${C_TEAL}Auto Mode:     ${C_GREEN}ENABLED ✅${C_RESET} ${C_GRAY}(24/7 Zero-Gap discovery active)${C_RESET}"
+    else
+        print_boxed_line "${C_TEAL}Auto Mode:     ${C_GRAY}DISABLED ❌${C_RESET} ${C_GRAY}(Enable with: q -auto on)${C_RESET}"
+    fi
+
+    print_boxed_line "${C_TEAL}Algorithm:     ${C_WHITE}Dynamic Seed Rotation + Anti-Artist Echo Chamber ⚡${C_RESET}"
+
+    # Active / Last Seed
+    local last_seed=$(tail -n 1 "$seed_history_file" 2>/dev/null)
+    if [ -n "$last_seed" ]; then
+        local s_title=$(get_cached_title "https://www.youtube.com/watch?v=$last_seed")
+        [ -z "$s_title" ] && s_title="Seed ($last_seed)"
+        print_boxed_line "${C_TEAL}Active Seed:   ${C_CYAN}${s_title:0:$((INNER_WIDTH-17))}${C_RESET}"
+    else
+        print_boxed_line "${C_TEAL}Active Seed:   ${C_GRAY}Queue Dynamic Selection${C_RESET}"
+    fi
+
+    # Seed rotation count
+    local seed_count=$(wc -l < "$seed_history_file" 2>/dev/null || echo "0")
+    print_boxed_line "${C_TEAL}Seed Rotation: ${C_ORANGE}${seed_count} unique seeds rotated${C_RESET} ${C_GRAY}(Cycle depth: 15)${C_RESET}"
+
+    # Recent Artists (Diversity Buffer)
+    if [ -s "$recent_artists_file" ]; then
+        local recent_arts=$(tail -n 3 "$recent_artists_file" 2>/dev/null | paste -sd ", " -)
+        print_boxed_line "${C_TEAL}Artist Guard:  ${C_GREEN}Active${C_RESET} ${C_GRAY}(Fatigue buffer: ${recent_arts:0:$((INNER_WIDTH-35))})${C_RESET}"
+    else
+        print_boxed_line "${C_TEAL}Artist Guard:  ${C_GREEN}Active${C_RESET} ${C_GRAY}(Fatigue buffer clear)${C_RESET}"
+    fi
+
+    # Taste Profile
+    local pl_count=$(find "$PLAYLIST_DIR" -maxdepth 1 -name "*.txt" 2>/dev/null | wc -l)
+    local bl_count=$(wc -l < "$blacklist_file" 2>/dev/null || echo "0")
+    print_boxed_line "${C_TEAL}Taste Profile: ${C_PURPLE}${pl_count} saved playlists analyzed${C_RESET} ${C_GRAY}(${bl_count} tracks blacklisted)${C_RESET}"
+
+    # Cooldown status
+    if [ -f "$HOME/.cache/mpv/auto_cooldown" ]; then
+        print_boxed_line "${C_TEAL}Cooldown:      ${C_YELLOW}Cooling down ⏳${C_RESET}"
+    else
+        print_boxed_line "${C_TEAL}Cooldown:      ${C_GREEN}Ready for next trigger ✅${C_RESET}"
+    fi
+
+    printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
+    B_LINE=${B_LINE// /─}
+    echo -e "${C_GRAY}${B_LINE}${C_RESET}"
+    echo -e "${C_GRAY}💡 Quick Controls: ${C_WHITE}q -auto on${C_GRAY} | ${C_WHITE}q -auto off${C_GRAY} | ${C_WHITE}q -auto fetch${C_GRAY} (Force next) | ${C_WHITE}q -auto reset${C_RESET}"
 }
