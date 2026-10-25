@@ -932,6 +932,89 @@ ensure_mpv_running() {
     fi
 }
 
+AUTO_TRACKS_FILE="$HOME/.cache/mpv/auto_tracks"
+declare -gA AUTO_TRACKS_MEM=()
+
+load_auto_tracks_to_memory() {
+    AUTO_TRACKS_MEM=()
+    [ -f "$AUTO_TRACKS_FILE" ] || return 0
+    while IFS= read -r line; do
+        [ -n "$line" ] && AUTO_TRACKS_MEM["$line"]=1
+    done < "$AUTO_TRACKS_FILE"
+}
+
+is_auto_track() {
+    local fname="$1"
+    local opt_id="$2"
+    if [ ${#AUTO_TRACKS_MEM[@]} -eq 0 ] && [ -f "$AUTO_TRACKS_FILE" ]; then
+        load_auto_tracks_to_memory
+    fi
+    [ ${#AUTO_TRACKS_MEM[@]} -eq 0 ] && return 1
+
+    [ -n "$opt_id" ] && [ -n "${AUTO_TRACKS_MEM[$opt_id]}" ] && return 0
+    [ -n "$fname" ] && [ -n "${AUTO_TRACKS_MEM[$fname]}" ] && return 0
+
+    local clean="$fname"
+    if [[ "$fname" =~ ^http ]]; then
+        clean=$(echo "$fname" | sed -e 's/^[[:space:]]*//; s/[[:space:]]*$//; s/\\t.*//; s/\t.*//')
+    fi
+    [ -n "${AUTO_TRACKS_MEM[$clean]}" ] && return 0
+
+    local vid=""
+    [[ "$clean" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && vid="${BASH_REMATCH[2]}"
+    [ -n "$vid" ] && [ -n "${AUTO_TRACKS_MEM[$vid]}" ] && return 0
+
+    return 1
+}
+
+mark_track_auto() {
+    local target="$1"
+    local opt_id="$2"
+    [ -z "$target" ] && return 0
+    mkdir -p "$(dirname "$AUTO_TRACKS_FILE")" 2>/dev/null
+    touch "$AUTO_TRACKS_FILE" 2>/dev/null
+
+    local clean="$target"
+    if [[ "$target" =~ ^http ]]; then
+        clean=$(echo "$target" | sed -e 's/^[[:space:]]*//; s/[[:space:]]*$//; s/\\t.*//; s/\t.*//')
+    fi
+    local vid="$opt_id"
+    if [ -z "$vid" ]; then
+        [[ "$clean" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && vid="${BASH_REMATCH[2]}"
+    fi
+
+    [ -n "$clean" ] && ! grep -Fqx "$clean" "$AUTO_TRACKS_FILE" 2>/dev/null && echo "$clean" >> "$AUTO_TRACKS_FILE"
+    [ -n "$vid" ] && ! grep -Fqx "$vid" "$AUTO_TRACKS_FILE" 2>/dev/null && echo "$vid" >> "$AUTO_TRACKS_FILE"
+
+    [ -n "$clean" ] && AUTO_TRACKS_MEM["$clean"]=1
+    [ -n "$vid" ] && AUTO_TRACKS_MEM["$vid"]=1
+}
+
+unmark_track_auto() {
+    local target="$1"
+    [ -z "$target" ] || [ ! -f "$AUTO_TRACKS_FILE" ] && return 0
+    local clean="$target"
+    if [[ "$target" =~ ^http ]]; then
+        clean=$(echo "$target" | sed -e 's/^[[:space:]]*//; s/[[:space:]]*$//; s/\\t.*//; s/\t.*//')
+    fi
+    local vid=""
+    [[ "$clean" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && vid="${BASH_REMATCH[2]}"
+
+    if [ -n "$clean" ]; then
+        sed -i "\#^${clean}\$#d" "$AUTO_TRACKS_FILE" 2>/dev/null || true
+        unset 'AUTO_TRACKS_MEM["$clean"]' 2>/dev/null || true
+    fi
+    if [ -n "$vid" ]; then
+        sed -i "\#^${vid}\$#d" "$AUTO_TRACKS_FILE" 2>/dev/null || true
+        unset 'AUTO_TRACKS_MEM["$vid"]' 2>/dev/null || true
+    fi
+}
+
+clear_auto_tracks() {
+    rm -f "$AUTO_TRACKS_FILE" 2>/dev/null
+    AUTO_TRACKS_MEM=()
+}
+
 send_ipc() {
     echo "$1" | nc $NC_OPTS -w 1 "$SOCKET"
 }
@@ -986,6 +1069,22 @@ sync_session_cache() {
                 cp -fp "$win_cache/last_playlist.txt" "$lnx_cache/last_playlist.txt" 2>/dev/null
             elif [ -f "$lnx_cache/last_playlist.txt" ]; then
                 cp -fp "$lnx_cache/last_playlist.txt" "$win_cache/last_playlist.txt" 2>/dev/null
+            fi
+
+            # Sync auto_tracks between WSL and Windows
+            if [ -f "$win_cache/auto_tracks" ] && [ -f "$lnx_cache/auto_tracks" ]; then
+                local win_mtime lnx_mtime
+                win_mtime=$(get_file_mtime "$win_cache/auto_tracks")
+                lnx_mtime=$(get_file_mtime "$lnx_cache/auto_tracks")
+                if [ "$win_mtime" -ge "$lnx_mtime" ]; then
+                    cp -fp "$win_cache/auto_tracks" "$lnx_cache/auto_tracks" 2>/dev/null
+                else
+                    cp -fp "$lnx_cache/auto_tracks" "$win_cache/auto_tracks" 2>/dev/null
+                fi
+            elif [ -f "$win_cache/auto_tracks" ]; then
+                cp -fp "$win_cache/auto_tracks" "$lnx_cache/auto_tracks" 2>/dev/null
+            elif [ -f "$lnx_cache/auto_tracks" ]; then
+                cp -fp "$lnx_cache/auto_tracks" "$win_cache/auto_tracks" 2>/dev/null
             fi
 
             # Sync queue_audio_mode between WSL and Windows
@@ -1046,6 +1145,7 @@ save_current_playlist() {
                 if [ -n "$win_u_dir" ] && [ -d "$win_u_dir/.cache/mpv" ]; then
                     [ -f "$LAST_PLAYLIST_FILE" ] && cp -fp "$LAST_PLAYLIST_FILE" "$win_u_dir/.cache/mpv/last_playlist.txt" 2>/dev/null
                     [ -f "$HOME/.cache/mpv/state.json" ] && cp -fp "$HOME/.cache/mpv/state.json" "$win_u_dir/.cache/mpv/state.json" 2>/dev/null
+                    [ -f "$AUTO_TRACKS_FILE" ] && cp -fp "$AUTO_TRACKS_FILE" "$win_u_dir/.cache/mpv/auto_tracks" 2>/dev/null
                 fi
             fi
 

@@ -358,7 +358,12 @@ format_track_log() {
     fi
     [ -n "$cached_duration" ] && [ "$cached_duration" != "null" ] && [ "$cached_duration" != "0:00" ] && dur_part=" ${C_ORANGE}[$cached_duration]${C_RESET}"
     
-    echo -e "${C_WHITE}[${C_ORANGE}${idx}${C_WHITE}] ${C_CYAN}${display_title}${C_RESET}${artist_part}${dur_part}"
+    local auto_tag=""
+    if is_auto_track "$clean_fname" "$vid_id"; then
+        auto_tag="${C_PURPLE}Ⓐ ${C_RESET}"
+    fi
+
+    echo -e "${C_WHITE}[${C_ORANGE}${idx}${C_WHITE}] ${auto_tag}${C_CYAN}${display_title}${C_RESET}${artist_part}${dur_part}"
 }
 
 format_track_fzf() {
@@ -435,7 +440,12 @@ format_track_fzf() {
     
     [ -n "$cached_duration" ] && [ "$cached_duration" != "null" ] && [ "$cached_duration" != "0:00" ] && dur_part=" ${C_ORANGE}[$cached_duration]${C_RESET}"
     
-    printf "%s. %s%s%s" "${C_ORANGE}${idx}${C_RESET}" "$display_title" "$artist_part" "$dur_part"
+    local auto_tag=""
+    if is_auto_track "$clean_fname" "$vid_id"; then
+        auto_tag="${C_PURPLE}Ⓐ ${C_RESET}"
+    fi
+
+    printf "%s. %s%s%s%s" "${C_ORANGE}${idx}${C_RESET}" "$auto_tag" "$display_title" "$artist_part" "$dur_part"
 }
 
 log_now_playing() {

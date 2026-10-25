@@ -125,6 +125,7 @@ execute_batch() {
 
     # 2. Process Queue/Play (If New Queue selected, Active Queue selected, or implicit queue)
     if [ "$DO_NEW_QUEUE" = true ]; then
+        clear_auto_tracks
         echo -e "${C_PINK}✨ Initializing Fresh New Queue...${C_RESET}"
         ensure_mpv_running
 
@@ -214,6 +215,9 @@ execute_batch() {
                     q_clean_url="${q_clean_url%%[[:space:]]*}"
                     q_clean_url=$(echo "$q_clean_url" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
                 fi
+
+                # Unmark if previously auto-added because user is manually queueing it now
+                unmark_track_auto "$q_clean_url"
 
                 if [ -n "$q_title" ] && [ "$q_title" != "$q_url" ]; then
                     printf "%s\t%s\t%s\t%s\n" "$q_clean_url" "$q_title" "$q_artist" "$q_dur" >> "$CACHE_FILE"

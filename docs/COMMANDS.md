@@ -121,6 +121,7 @@ q -auto reset       # or: q auto clear-history
 * **Dynamic Seed Rotation**: Rotates through unused tracks in your active queue (depth of 15) so your entire playlist influences discovery rather than just the last track.
 * **User Taste Profile Integration**: Analyzes your saved playlists (`~/.local/share/mpv/playlists/`) and boosts matching artists (`+45`) and preferred genres (`+30` for nightcore, slowed+reverb, acoustic covers, remixes).
 * **Empty Queue Resurrection**: If your queue runs empty, Auto Mode automatically seeds from your saved playlists rather than repeating the same history track.
+* **Auto-Added Track Indicator (`Ⓐ`)**: Tracks discovered and queued automatically by Auto Mode are branded with a distinctive purple `Ⓐ` indicator across the interactive FZF queue, terminal logs, and playback banners so you can effortlessly distinguish auto-discovered tracks from your handpicked manual tracks.
 
 ---
 

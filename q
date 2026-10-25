@@ -680,15 +680,20 @@ if [ -z "$1" ]; then
     width=$((cols - 2)); [ "$width" -lt 0 ] && width=0
     printf -v LINE "%*s" "$width" ""; LINE=${LINE// /─}
 
+    local init_filename=""
+    [[ "$init_idx" =~ ^[0-9]+$ ]] && [ "$init_idx" -gt 0 ] && init_filename=$(echo "$init_fingerprint" | cut -d';' -f"$init_idx" 2>/dev/null)
+    local h_auto=""
+    is_auto_track "$init_filename" && h_auto="${C_PURP}Ⓐ ${C_RST}"
+
     if [ "$init_idle" == "true" ]; then
         [ "$init_title" == "😴💤" ] && init_msg="$init_title" || init_msg="(Idle - Queue Finished)"
         INITIAL_HEADER="${C_PURP}🪷 Idle: ${C_RST}${C_PINK}${C_BLD}${init_msg}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
     elif [ "$init_paused" == "true" ]; then
         init_clean_title=$(echo "$init_title" | sed 's/"/\"/g')
-        INITIAL_HEADER="${C_PURP}🪷 Paused ${C_WHT}[${C_ORNG}${init_idx}${C_WHT}] ${C_RST}${C_PINK}${C_BLD}${init_clean_title}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
+        INITIAL_HEADER="${C_PURP}🪷 Paused ${C_WHT}[${C_ORNG}${init_idx}${C_WHT}] ${h_auto}${C_RST}${C_PINK}${C_BLD}${init_clean_title}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
     else
         init_clean_title=$(echo "$init_title" | sed 's/"/\"/g')
-        INITIAL_HEADER="${C_PURP}🪷 Playing ${C_WHT}[${C_ORNG}${init_idx}${C_WHT}] ${C_RST}${C_PINK}${C_BLD}${init_clean_title}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
+        INITIAL_HEADER="${C_PURP}🪷 Playing ${C_WHT}[${C_ORNG}${init_idx}${C_WHT}] ${h_auto}${C_RST}${C_PINK}${C_BLD}${init_clean_title}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
     fi
 
     FZF_SOCK="$HOME/.cache/mpv/fzf_$$.sock"
@@ -755,13 +760,18 @@ if [ -z "$1" ]; then
                 width=$((curr_cols - 2)); [ "$width" -lt 0 ] && width=0
                 printf -v LINE "%*s" "$width" ""; LINE=${LINE// /─}
                 
+                local live_fname=""
+                [[ "$curr_idx" =~ ^[0-9]+$ ]] && [ "$curr_idx" -gt 0 ] && live_fname=$(echo "$curr_fingerprint" | cut -d';' -f"$curr_idx" 2>/dev/null)
+                local live_h_auto=""
+                is_auto_track "$live_fname" && live_h_auto="${C_PURP}Ⓐ ${C_RST}"
+
                 if [ "$idle" == "true" ]; then
                     [ "$curr_title" == "😴💤" ] && msg="$curr_title" || msg="(Idle - Queue Finished)"
                     header_text="${C_PURP}🪷 Idle: ${C_RST}${C_PINK}${C_BLD}${msg}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
                 elif [ "$curr_paused" == "true" ]; then
-                    header_text="${C_PURP}🪷 Paused ${C_WHT}[${C_ORNG}${curr_idx}${C_WHT}] ${C_RST}${C_PINK}${C_BLD}${clean_title}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
+                    header_text="${C_PURP}🪷 Paused ${C_WHT}[${C_ORNG}${curr_idx}${C_WHT}] ${live_h_auto}${C_RST}${C_PINK}${C_BLD}${clean_title}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
                 else
-                    header_text="${C_PURP}🪷 Playing ${C_WHT}[${C_ORNG}${curr_idx}${C_WHT}] ${C_RST}${C_PINK}${C_BLD}${clean_title}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
+                    header_text="${C_PURP}🪷 Playing ${C_WHT}[${C_ORNG}${curr_idx}${C_WHT}] ${live_h_auto}${C_RST}${C_PINK}${C_BLD}${clean_title}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
                 fi
                 curl -s -X POST --unix-socket "$FZF_SOCK" -d "change-header~${header_text}~" http://localhost/ >/dev/null 2>&1
             fi

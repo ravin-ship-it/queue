@@ -26,6 +26,7 @@ show_queue() {
 
     # Load cache into memory ONCE at the start
     load_cache_to_memory
+    load_auto_tracks_to_memory
 
     local mpv_raw=$(echo -e '{"command":["get_property","playlist"]}\n{"command":["get_property","pause"]}\n{"command":["get_property","idle-active"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
     local is_paused=$(echo "$mpv_raw" | jq -s -r 'map(select(.event == null)) | .[1].data // false')
@@ -155,6 +156,12 @@ show_queue() {
         [ -n "$meta_artist" ] && [ "$meta_artist" != "null" ] && [ "$meta_artist" != "$CLEAN_FILENAME" ] && artist_part=" ${C_GRAY}by${C_RESET} ${C_LIGHT_PINK}$meta_artist${C_RESET}"
         [ -n "$meta_duration" ] && [ "$meta_duration" != "null" ] && [ "$meta_duration" != "0:00" ] && dur_part=" ${C_ORANGE}[$meta_duration]${C_RESET}"
         
+        # Auto-Discovery Indicator (Ⓐ)
+        local auto_tag=""
+        if is_auto_track "$CLEAN_FILENAME" "$vid_id"; then
+            auto_tag="${C_PURPLE}Ⓐ${C_RESET} "
+        fi
+
         # Player Indicator (|>/||) and Active Track Highlighting
         local ind="   "
         local title_color="${C_CYAN}"
@@ -172,19 +179,19 @@ show_queue() {
         fi
 
         if [ -t 1 ] && [ "$IN_FZF" != "true" ]; then
-            # Truncate title to fit terminal while keeping artist/duration
+            # Truncate title to fit terminal while keeping artist/duration and auto tag
             local index_w=${#i}
-            local meta_w=$(get_visual_width "$(strip_colors "$artist_part$dur_part")")
+            local meta_w=$(get_visual_width "$(strip_colors "$artist_part$dur_part$auto_tag")")
             # INNER_WIDTH is (TERM_WIDTH - 6) for borders and padding
             local title_max_w=$((TERM_WIDTH - index_w - meta_w - 13))
             [ "$title_max_w" -lt 15 ] && title_max_w=15
             
             local final_title=$(truncate_text "$DISPLAY_TITLE" "$title_max_w")
-            printf -v LINE_CONTENT "%s%s. %s%s%s%s%s" "$ind" "${C_ORANGE}$i${C_RESET}" "$title_color" "$final_title" "${C_RESET}" "$artist_part" "$dur_part"
+            printf -v LINE_CONTENT "%s%s. %s%s%s%s%s%s" "$ind" "${C_ORANGE}$i${C_RESET}" "$auto_tag" "$title_color" "$final_title" "${C_RESET}" "$artist_part" "$dur_part"
             print_boxed_line "$LINE_CONTENT"
         else
             # Simple format for FZF or Raw output
-            printf "%s%s. %s%s%s%s%s\n" "$ind" "${C_ORANGE}$i${C_RESET}" "$fzf_title_prefix" "$DISPLAY_TITLE" "$fzf_title_suffix" "$artist_part" "$dur_part"
+            printf "%s%s. %s%s%s%s%s%s\n" "$ind" "${C_ORANGE}$i${C_RESET}" "$auto_tag" "$fzf_title_prefix" "$DISPLAY_TITLE" "$fzf_title_suffix" "$artist_part" "$dur_part"
         fi
         
         # Pass NEEDS_FETCH status out of the loop via a temp file or similar if needed, 
@@ -521,6 +528,7 @@ cmd_swap() {
 }
 
 cmd_clear() {
+    clear_auto_tracks
     echo '{"command": ["playlist-clear"]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
     echo -e "${C_PINK}🧹 Queue cleared.${C_RESET}"
     save_current_playlist true true >/dev/null 2>&1 & disown
@@ -765,6 +773,9 @@ queue_item_ipc() {
         clean_url="${clean_url%%[[:space:]]*}"
         clean_url=$(echo "$clean_url" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
     fi
+    
+    # Mark as auto-added track (tagged with Ⓐ)
+    mark_track_auto "$clean_url"
     
     # Get current playlist size to determine new index efficiently
     local count=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // 0')
@@ -1556,6 +1567,7 @@ auto_queue_related() {
         IFS=$'\t' read -r chosen_score chosen_url chosen_t chosen_a chosen_d <<< "${sorted_pool[$pick_idx]}"
 
         echo "[$(date +%T)] [Success] Queuing (Score: $chosen_score): $chosen_t (by $chosen_a)" >> "$debug_log"
+        mark_track_auto "$chosen_url"
         queue_item_ipc "$chosen_url" "$chosen_t" "$chosen_a" "$chosen_d"
 
         # Record in history & recent artists
@@ -1569,7 +1581,7 @@ auto_queue_related() {
         fi
 
         if [ "$force_fetch" = "true" ]; then
-            echo -e "${C_GREEN}✨ Auto-Discovered & Queued:${C_RESET} ${C_CYAN}${chosen_t}${C_RESET} ${C_GRAY}by${C_RESET} ${C_LIGHT_PINK}${chosen_a}${C_RESET} ${C_GRAY}[Score: ${chosen_score}]${C_RESET}"
+            echo -e "${C_GREEN}✨ Auto-Discovered & Queued:${C_RESET} ${C_PURPLE}Ⓐ${C_RESET} ${C_CYAN}${chosen_t}${C_RESET} ${C_GRAY}by${C_RESET} ${C_LIGHT_PINK}${chosen_a}${C_RESET} ${C_GRAY}[Score: ${chosen_score}]${C_RESET}"
         fi
 
         touch "$HOME/.cache/mpv/auto_cooldown"
@@ -1618,6 +1630,23 @@ cmd_auto_status() {
         print_boxed_line "${C_TEAL}Artist Guard:  ${C_GREEN}Active${C_RESET} ${C_GRAY}(Fatigue buffer: ${recent_arts:0:$((INNER_WIDTH-35))})${C_RESET}"
     else
         print_boxed_line "${C_TEAL}Artist Guard:  ${C_GREEN}Active${C_RESET} ${C_GRAY}(Fatigue buffer clear)${C_RESET}"
+    fi
+
+    # Auto Tracks in Queue
+    local auto_q_count=0
+    if [ "$MPV_RUNNING" = true ] && [ -S "$SOCKET" ]; then
+        load_auto_tracks_to_memory
+        local pl_json=$(echo '{"command":["get_property","playlist"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
+        if [ -n "$pl_json" ]; then
+            while IFS= read -r f; do
+                [ -n "$f" ] && is_auto_track "$f" && ((auto_q_count++))
+            done < <(echo "$pl_json" | jq -r 'select(.event == null) | .data[].filename // empty' 2>/dev/null)
+        fi
+    fi
+    if [ "$auto_q_count" -gt 0 ]; then
+        print_boxed_line "${C_TEAL}Auto Tracks:   ${C_PURPLE}Ⓐ ${C_CYAN}${auto_q_count} tracks in queue${C_RESET} ${C_GRAY}(marked Ⓐ)${C_RESET}"
+    else
+        print_boxed_line "${C_TEAL}Auto Tracks:   ${C_GRAY}0 auto tracks in queue${C_RESET} ${C_GRAY}(marked with Ⓐ)${C_RESET}"
     fi
 
     # Taste Profile

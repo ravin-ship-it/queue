@@ -122,6 +122,10 @@ cmd_playlist_load() {
     local is_first_replace=true
     local total_loaded=0
 
+    if { [[ "$load_mode" == *"Replace"* ]] || [[ "$load_mode" == *"New Queue"* ]]; }; then
+        clear_auto_tracks
+    fi
+
     # Iterate over newline-separated inputs
     while IFS= read -r item; do
         [ -z "$item" ] && continue
@@ -153,6 +157,7 @@ cmd_playlist_load() {
                 clean_url="${clean_url%%[[:space:]]*}"
                 clean_url=$(echo "$clean_url" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
             fi
+            unmark_track_auto "$clean_url"
             
             local m="append-play"
             if { [[ "$load_mode" == *"Replace"* ]] || [[ "$load_mode" == *"New Queue"* ]]; } && [ "$is_first_replace" = true ]; then
