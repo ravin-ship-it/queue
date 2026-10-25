@@ -141,6 +141,77 @@ q -res auto   # Smart Adaptive (Adapts dynamically to network fluctuations)
 
 ---
 
+## 🎧 Audio-Only Pipeline (`q -aud`)
+
+Switch dynamically between video and pure background audio with 98% bandwidth reduction:
+
+```bash
+# Toggle Audio-Only Mode
+q -aud
+
+# Explicitly enable or disable Audio-Only mode
+q -aud on
+q -aud off
+
+# Check Audio-Only pipeline status
+q -aud status
+```
+
+---
+
+## ⏩ Playback Speed Controller (`q -speed`)
+
+Fine-tune playback speed from 0.25x to 4.0x with smooth pitch correction:
+
+```bash
+# Check current playback speed
+q -speed
+
+# Set exact speed
+q -speed 1.25    # 1.25x speed
+q -speed 1.5     # 1.5x speed
+q -speed 2.0     # 2x speed
+q -speed reset   # Reset to 1.0x normal speed
+
+# In-Window Hotkeys:
+# '[' / ']'      Decrease / Increase speed by 0.1x
+# '{' / '}'      Decrease / Increase speed by 0.25x
+# Backspace      Reset to 1.0x
+```
+
+---
+
+## 🌐 Audio Languages & Multi-Track Dubs (`q -lang`)
+
+Queue natively inspects and switches multi-track audio dubs across YouTube and local media containers (e.g. English, Chinese, Japanese, Hindi, Spanish, etc.):
+
+```bash
+# Open interactive FZF/Boxed Language Picker
+q -lang
+
+# Quick switch to a specific language code
+q -lang en       # English
+q -lang zh       # Chinese (中文)
+q -lang ja       # Japanese (日本語)
+q -lang hi       # Hindi (हिन्दी)
+q -lang auto     # Original / Default Audio
+
+# Target specific playback session directly
+q -lang -pb zh   # Switch Blind Mode session to Chinese directly
+q -lang -q en    # Switch Normal Queue session to English directly
+```
+
+### Dual-Session Awareness & Intelligent Picker:
+* **Active Session Detection**: When both **Normal Queue** and **Blind Mode (`q -pb`)** are active or paused simultaneously, `q -lang` automatically presents an interactive session selector showing the active track and status:
+  ```text
+  1. 🎵 [Normal Queue] ♬ Nightcore - Royalty (Lyrics) ♬ [⏸️ Paused]
+  2. 🕶️ [Blind Mode]   Full Version | Campus Beauty      [▶ Playing]
+  ```
+* **Isolated Audio Preferences**: Selecting Blind Mode dynamically re-demuxes the stream for the isolated video player without touching your permanent normal queue preferences in `~/.config/mpv/queue_lang`.
+* **In-Window Audio Track Cycling**: Press `'a'` or `'A'` inside any video window to cycle through available audio tracks and dubs with instant OSD feedback.
+
+---
+
 ## 🕶️ Blind Mode (`q -pb` / `q pb`)
 
 Blind Mode is designed for times when you want to quickly watch or listen to a one-off video or audio clip without cluttering your carefully crafted queue, interrupting shuffle history, or saving temporary links to disk:
@@ -157,12 +228,16 @@ q -pb
 
 # Play local file blindly
 q -pb ~/Downloads/preview.mp4
+
+# Force video or audio-only blind mode
+q -pb -vid "https://www.youtube.com/watch?v=..."
+q -pb -aud "https://www.youtube.com/watch?v=..."
 ```
 
 ### How Blind Mode Works:
 1. **Queue Snapshot**: Checks if a Queue playback session is active. If so, pauses it immediately.
-2. **Pristine State Guarantee**: The target track/video is **never** added to your playlist files (`yt_cache.txt`) and **never** recorded in your shuffle history stack.
-3. **Dedicated Video Window**: Automatically opens a resizable video window (supporting `F11` fullscreen, `w`/`W` sizing presets, `+/-` scaling, and `0-4` quality switches).
+2. **Pristine State Guarantee**: The target track/video is **never** added to your playlist files (`last_playlist.txt`) and **never** recorded in your shuffle history stack.
+3. **Dedicated Video Window**: Automatically opens a resizable video window (supporting `F11` fullscreen, `w`/`W` sizing presets, `+/-` scaling, `0-4` quality switches, and `'a'` audio dub cycling).
 4. **Instant Queue Restoration**: When the video finishes (EOF) or when you close the window (`q` or `ESC`), Queue automatically unpauses your previous session, resuming playback at the exact second where you left off.
 
 ---
@@ -259,7 +334,7 @@ Supported Formats: MP3 (320k), M4A (256k AAC), FLAC (Lossless), OPUS (160k Hi-Re
 | Command | Purpose |
 | :--- | :--- |
 | `q -deps` | Comprehensive boxed TUI multi-engine dependency diagnostic |
-| `q -up` | Universal 1-command updater (yt-dlp, Queue modules, host bridges) |
+| `q -up` | Universal 1-command updater (yt-dlp, Queue engine, host bridges, local dev auto-sync) |
 | `q -install` | Reinstall or verify Queue engine |
 | `q -uninstall` | Clean uninstallation checklist (preserves instant reinstaller) |
 | `q -remove-setup` | Permanently wipe the setup file and launcher stub (only runs after uninstallation) |

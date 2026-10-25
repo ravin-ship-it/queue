@@ -2298,7 +2298,9 @@ cmd_resolution() {
 normalize_lang_code() {
     local l
     l=$(echo "$1" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')
-    case "$l" in
+    local base="${l%%[-_]*}"
+    case "$base" in
+        auto|orig|original|def|default|"") echo "auto" ;;
         en|eng|english|us|uk) echo "en" ;;
         zh|chi|zho|chinese|mandarin|cn) echo "zh" ;;
         ja|jpn|japanese|jp) echo "ja" ;;
@@ -2310,13 +2312,20 @@ normalize_lang_code() {
         hi|hin|hindi) echo "hi" ;;
         pt|por|portuguese) echo "pt" ;;
         it|ita|italian) echo "it" ;;
-        auto|orig|original|def|default) echo "auto" ;;
-        *) echo "$l" ;;
+        ar|ara|arabic) echo "ar" ;;
+        id|ind|indonesian|bahasa) echo "id" ;;
+        th|tha|thai) echo "th" ;;
+        vi|vie|vietnamese) echo "vi" ;;
+        tr|tur|turkish) echo "tr" ;;
+        pl|pol|polish) echo "pl" ;;
+        nl|nld|dutch) echo "nl" ;;
+        *) echo "$base" ;;
     esac
 }
 
 get_human_lang_name() {
     case "$1" in
+        auto) echo "Original Audio (Auto)" ;;
         en) echo "English" ;;
         zh) echo "Chinese (中文)" ;;
         ja) echo "Japanese (日本語)" ;;
@@ -2328,13 +2337,217 @@ get_human_lang_name() {
         hi) echo "Hindi (हिन्दी)" ;;
         pt) echo "Portuguese (Português)" ;;
         it) echo "Italian (Italiano)" ;;
-        auto) echo "Original Audio (Auto)" ;;
+        ar) echo "Arabic (العربية)" ;;
+        id) echo "Indonesian (Bahasa Indonesia)" ;;
+        th) echo "Thai (ไทย)" ;;
+        vi) echo "Vietnamese (Tiếng Việt)" ;;
+        tr) echo "Turkish (Türkçe)" ;;
+        pl) echo "Polish (Polski)" ;;
+        nl) echo "Dutch (Nederlands)" ;;
         *) echo "$1" ;;
     esac
 }
 
 cmd_language() {
-    local target="$1"
+    local target=""
+    local session_choice=""
+
+    for arg in "$@"; do
+        case "$arg" in
+            -pb|-b|--blind) session_choice="blind" ;;
+            -q|--queue|-norm|--normal) session_choice="normal" ;;
+            normal|blind|global) [ -z "$session_choice" ] && session_choice="$arg" || target="$arg" ;;
+            *) [ -z "$target" ] && target="$arg" || target="$target $arg" ;;
+        esac
+    done
+
+    local -a ALL_SUPPORTED_LANGS=(
+        "auto:Original Audio (Auto):🌟"
+        "en:English:🇬🇧"
+        "zh:Chinese (中文):🇨🇳"
+        "ja:Japanese (日本語):🇯🇵"
+        "ko:Korean (한국어):🇰🇷"
+        "es:Spanish (Español):🇪🇸"
+        "fr:French (Français):🇫🇷"
+        "de:German (Deutsch):🇩🇪"
+        "ru:Russian (Русский):🇷🇺"
+        "hi:Hindi (हिन्दी):🇮🇳"
+        "pt:Portuguese (Português):🇵🇹"
+        "it:Italian (Italiano):🇮🇹"
+        "ar:Arabic (العربية):🇸🇦"
+        "id:Indonesian (Bahasa Indonesia):🇮🇩"
+        "th:Thai (ไทย):🇹🇭"
+        "vi:Vietnamese (Tiếng Việt):🇻🇳"
+        "tr:Turkish (Türkçe):🇹🇷"
+        "pl:Polish (Polski):🇵🇱"
+        "nl:Dutch (Nederlands):🇳🇱"
+    )
+
+    local nc_opts="${NC_OPTS:--U}"
+
+    # 1. Probe Normal Queue Session
+    local normal_available=false
+    local normal_title=""
+    local normal_path=""
+    local normal_status=""
+    local normal_paused="false"
+    local normal_socket="${SOCKET:-$HOME/.mpv-socket}"
+    if [ -S "$normal_socket" ]; then
+        local raw_norm
+        raw_norm=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","pause"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","path"]}' | nc $nc_opts -w 1 "$normal_socket" 2>/dev/null | jq -s -r 'map(select(.event == null)) | (if .[0].data == null then "true" else (.[0].data | tostring) end), (if .[1].data == null then "false" else (.[1].data | tostring) end), (.[2].data // ""), (.[3].data // "")')
+        if [ -n "$raw_norm" ]; then
+            mapfile -t norm_props <<< "$raw_norm"
+            local norm_idle="${norm_props[0]}"
+            normal_paused="${norm_props[1]}"
+            normal_title="${norm_props[2]}"
+            normal_path="${norm_props[3]}"
+            if [ "$norm_idle" != "true" ] && [ -n "$normal_path" ]; then
+                normal_available=true
+                if [ "$normal_paused" == "true" ]; then
+                    normal_status="[⏸️ Paused]"
+                else
+                    normal_status="[▶ Playing]"
+                fi
+                if [ -z "$normal_title" ] || [ "$normal_title" == "$normal_path" ]; then
+                    local c
+                    c=$(get_cached_title "$normal_path")
+                    [ -n "$c" ] && normal_title="$c"
+                fi
+                [ -z "$normal_title" ] && normal_title="$normal_path"
+            fi
+        fi
+    fi
+
+    # 2. Probe Blind Mode Session
+    local blind_available=false
+    local blind_title=""
+    local blind_path=""
+    local blind_status=""
+    local blind_paused="false"
+    local blind_socket="$HOME/.cache/mpv/blind.sock"
+
+    if [ -f "$HOME/.cache/mpv/blind_active" ]; then
+        blind_path=$(grep -m1 '^path=' "$HOME/.cache/mpv/blind_active" 2>/dev/null | cut -d= -f2-)
+        blind_title=$(grep -m1 '^title=' "$HOME/.cache/mpv/blind_active" 2>/dev/null | cut -d= -f2-)
+        local rec_sock
+        rec_sock=$(grep -m1 '^socket=' "$HOME/.cache/mpv/blind_active" 2>/dev/null | cut -d= -f2-)
+        [ -n "$rec_sock" ] && blind_socket="$rec_sock"
+    fi
+
+    if [ -S "$blind_socket" ]; then
+        local raw_b
+        raw_b=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","pause"]}\n{"command":["get_property","media-title"]}\n{"command":["get_property","path"]}' | nc $nc_opts -w 1 "$blind_socket" 2>/dev/null | jq -s -r 'map(select(.event == null)) | (if .[0].data == null then "true" else (.[0].data | tostring) end), (if .[1].data == null then "false" else (.[1].data | tostring) end), (.[2].data // ""), (.[3].data // "")')
+        if [ -n "$raw_b" ]; then
+            mapfile -t b_props <<< "$raw_b"
+            local b_idle="${b_props[0]}"
+            blind_paused="${b_props[1]}"
+            local b_t="${b_props[2]}"
+            local b_p="${b_props[3]}"
+            [ -n "$b_t" ] && blind_title="$b_t"
+            [ -n "$b_p" ] && blind_path="$b_p"
+            if [ "$b_idle" != "true" ] || [ -n "$blind_path" ]; then
+                blind_available=true
+                if [ "$blind_paused" == "true" ]; then
+                    blind_status="[⏸️ Paused]"
+                else
+                    blind_status="[▶ Playing]"
+                fi
+            fi
+        elif [ -f "$HOME/.cache/mpv/blind_active" ]; then
+            blind_available=true
+            blind_status="[▶ Playing]"
+        fi
+    elif [ -f "$HOME/.cache/mpv/blind_active" ]; then
+        if pgrep -f "mpv-blind-pipe" >/dev/null 2>&1 || pgrep -f "Queue \[Blind Mode\]" >/dev/null 2>&1; then
+            blind_available=true
+            blind_status="[▶ Playing]"
+        else
+            rm -f "$HOME/.cache/mpv/blind_active" 2>/dev/null
+        fi
+    fi
+
+    # 3. Session Selection: If both are active and no session specified, prompt user
+    if [ -z "$session_choice" ] && [ "$normal_available" = true ] && [ "$blind_available" = true ]; then
+        if command -v fzf >/dev/null 2>&1 && [ -t 0 ] && [ -t 1 ]; then
+            local LINE=$(get_fzf_divider)
+            local status_icons=$(get_player_status_icons)
+            local fzf_prompt="🎵 ${C_TEAL}Select Session${status_icons}${C_RESET} > "
+            local fzf_header="${C_PURPLE}🪷 Active Playback Sessions${C_RESET} ${C_GRAY}(Choose session to change audio language)${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
+
+            local opt_norm="🎵 [Normal Queue] ${normal_title} ${C_GREEN}${normal_status}${C_RESET}"
+            local opt_blind="🕶️ [Blind Mode]   ${blind_title} ${C_GREEN}${blind_status}${C_RESET}"
+
+            local s_choice
+            s_choice=$(echo -e "${opt_norm}\n${opt_blind}" | fzf --height=40% --layout=reverse --border --ansi \
+                --header="$fzf_header" \
+                --info=inline-right \
+                $FZF_COLOR_OPTS \
+                --prompt="$fzf_prompt")
+
+            if [ -z "$s_choice" ]; then
+                return 0
+            fi
+            if [[ "$s_choice" =~ "Normal Queue" ]]; then
+                session_choice="normal"
+            else
+                session_choice="blind"
+            fi
+        else
+            print_header_box "${C_PINK}🪷 Active Playback Sessions${C_RESET}"
+            print_boxed_line "  ${C_ORANGE} 1.${C_RESET} 🎵 ${C_WHITE}[Normal Queue]${C_RESET} ${C_CYAN}${normal_title:0:$((INNER_WIDTH-34))}${C_RESET} ${C_GREEN}${normal_status}${C_RESET}"
+            print_boxed_line "  ${C_ORANGE} 2.${C_RESET} 🕶️ ${C_WHITE}[Blind Mode]${C_RESET}   ${C_CYAN}${blind_title:0:$((INNER_WIDTH-34))}${C_RESET} ${C_GREEN}${blind_status}${C_RESET}"
+            printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
+            B_LINE=${B_LINE// /─}
+            echo -e "${C_PURPLE}${B_LINE}${C_RESET}"
+
+            echo -ne "${C_PINK}>>> Select session to change audio language (1-2) or ENTER to cancel: ${C_RESET}"
+            local s_inp=""
+            if [ -t 0 ]; then
+                read -r s_inp < /dev/tty 2>/dev/null || read -r s_inp
+            else
+                read -r s_inp
+            fi
+            case "$s_inp" in
+                1|[nN]*|[qQ]*) session_choice="normal" ;;
+                2|[bB]*) session_choice="blind" ;;
+                *) return 0 ;;
+            esac
+        fi
+    fi
+
+    # Auto-resolve single active session
+    if [ -z "$session_choice" ]; then
+        if [ "$blind_available" = true ] && [ "$normal_available" != true ]; then
+            session_choice="blind"
+        elif [ "$normal_available" = true ]; then
+            session_choice="normal"
+        else
+            session_choice="global"
+        fi
+    fi
+
+    local active_socket=""
+    local is_blind_session=false
+    local cur_path=""
+    local cur_title=""
+    local cur_status=""
+
+    if [ "$session_choice" == "blind" ]; then
+        active_socket="$blind_socket"
+        is_blind_session=true
+        cur_path="$blind_path"
+        cur_title="$blind_title"
+        cur_status="$blind_status"
+    elif [ "$session_choice" == "normal" ]; then
+        active_socket="$normal_socket"
+        is_blind_session=false
+        cur_path="$normal_path"
+        cur_title="$normal_title"
+        cur_status="$normal_status"
+    else
+        active_socket=""
+        is_blind_session=false
+    fi
 
     # CASE A: If target is provided and is NOT a URL -> Update preference and switch dynamically
     if [ -n "$target" ] && [[ ! "$target" =~ ^http.* ]]; then
@@ -2343,7 +2556,34 @@ cmd_language() {
         local lang_name
         lang_name=$(get_human_lang_name "$clean_lang")
 
-        # Save preference
+        if [ "$is_blind_session" = true ]; then
+            mkdir -p "$HOME/.cache/mpv"
+            echo "$clean_lang" > "$HOME/.cache/mpv/blind_lang"
+
+            local is_live=false
+            if [ -n "$active_socket" ] && [ -S "$active_socket" ]; then
+                is_live=true
+                echo "{\"command\":[\"set_property\",\"alang\",\"$clean_lang,auto,en,eng\"]}" | nc $nc_opts -w 1 "$active_socket" >/dev/null 2>&1
+                echo "{\"command\":[\"script-message\",\"change-language\",\"$clean_lang\"]}" | nc $nc_opts -w 1 "$active_socket" >/dev/null 2>&1
+            fi
+
+            print_header_box "${C_PINK}🕶️ Blind Mode Audio Language Profile${C_RESET}"
+            [ -n "$cur_title" ] && print_boxed_line "${C_TEAL}Track:      ${C_CYAN}${cur_title:0:$((INNER_WIDTH-14))}${C_RESET}"
+            print_boxed_line "${C_TEAL}Preference: ${C_WHITE}[${C_PINK}${clean_lang}${C_WHITE}] ${lang_name}${C_RESET}"
+            if [ "$is_live" = true ]; then
+                print_boxed_line "${C_TEAL}Status:     ${C_GREEN}Applied to Blind playback (Position preserved) ✅${C_RESET}"
+            else
+                print_boxed_line "${C_TEAL}Status:     ${C_GRAY}Saved for active Blind session${C_RESET}"
+            fi
+            printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
+            B_LINE=${B_LINE// /─}
+            echo -e "${C_PURPLE}${B_LINE}${C_RESET}"
+            echo -e "${C_GRAY}💡 Quick Switch: ${C_WHITE}q -lang en${C_GRAY} | ${C_WHITE}q -lang zh${C_GRAY} | ${C_WHITE}q -lang ja${C_GRAY} | ${C_WHITE}q -lang auto${C_RESET}"
+            echo -e "${C_GRAY}   Or in video window: press ${C_WHITE}'a'${C_GRAY} / ${C_WHITE}'A'${C_GRAY} to cycle audio tracks${C_RESET}"
+            return 0
+        fi
+
+        # Normal Queue or Global Mode
         mkdir -p "$HOME/.config/mpv"
         echo "$clean_lang" > "$HOME/.config/mpv/queue_lang"
 
@@ -2351,26 +2591,28 @@ cmd_language() {
             local win_u_dir
             win_u_dir=$(get_windows_user_dir)
             if [ -n "$win_u_dir" ] && [ -d "$win_u_dir" ]; then
-                mkdir -p "$win_u_dir/.config/mpv" 2>/dev/null
+                mkdir -p "$win_u_dir/.config/mpv" "$win_u_dir/AppData/Roaming/mpv" 2>/dev/null
                 cp -f "$HOME/.config/mpv/queue_lang" "$win_u_dir/.config/mpv/queue_lang" 2>/dev/null
+                cp -f "$HOME/.config/mpv/queue_lang" "$win_u_dir/AppData/Roaming/mpv/queue_lang" 2>/dev/null
             fi
         fi
 
         # Invalidate Android bridge stream cache if present
         rm -f "$HOME/.cache/mpv/android_stream_cache.json"
 
-        # Apply to live MPV session if running
         local is_live=false
-        if [ -S "$SOCKET" ] && echo '{"command":["get_property","idle-active"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1; then
+        if [ -n "$active_socket" ] && [ -S "$active_socket" ]; then
             local is_idle
-            is_idle=$(echo '{"command":["get_property","idle-active"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // true')
+            is_idle=$(echo '{"command":["get_property","idle-active"]}' | nc $nc_opts -w 1 "$active_socket" 2>/dev/null | jq -r 'if .data == null then "true" else (.data | tostring) end')
             if [ "$is_idle" == "false" ]; then
                 is_live=true
-                echo "{\"command\":[\"script-message\",\"change-language\",\"$clean_lang\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+                echo "{\"command\":[\"set_property\",\"alang\",\"$clean_lang,auto,en,eng\"]}" | nc $nc_opts -w 1 "$active_socket" >/dev/null 2>&1
+                echo "{\"command\":[\"script-message\",\"change-language\",\"$clean_lang\"]}" | nc $nc_opts -w 1 "$active_socket" >/dev/null 2>&1
             fi
         fi
 
         print_header_box "${C_PINK}🌐 Queue Audio Language Profile${C_RESET}"
+        [ -n "$cur_title" ] && print_boxed_line "${C_TEAL}Track:      ${C_CYAN}${cur_title:0:$((INNER_WIDTH-14))}${C_RESET}"
         print_boxed_line "${C_TEAL}Preference: ${C_WHITE}[${C_PINK}${clean_lang}${C_WHITE}] ${lang_name}${C_RESET}"
         if [ "$is_live" = true ]; then
             print_boxed_line "${C_TEAL}Status:     ${C_GREEN}Applied to active playback (Position preserved) ✅${C_RESET}"
@@ -2385,147 +2627,202 @@ cmd_language() {
         return 0
     fi
 
-    # CASE B: No target provided -> Inspect currently playing or specified track
-    local cur_lang="en"
-    [ -f "$HOME/.config/mpv/queue_lang" ] && cur_lang=$(cat "$HOME/.config/mpv/queue_lang" 2>/dev/null | tr -d '[:space:]')
-    [ -z "$cur_lang" ] && cur_lang="en"
+    # CASE B: No target provided (or target is a URL) -> Inspect and show language selection
+    local cur_lang="auto"
+    if [ "$is_blind_session" = true ]; then
+        if [ -f "$HOME/.cache/mpv/blind_lang" ]; then
+            cur_lang=$(cat "$HOME/.cache/mpv/blind_lang" 2>/dev/null | tr -d '[:space:]')
+        elif [ -f "$HOME/.config/mpv/queue_lang" ]; then
+            cur_lang=$(cat "$HOME/.config/mpv/queue_lang" 2>/dev/null | tr -d '[:space:]')
+        fi
+    else
+        [ -f "$HOME/.config/mpv/queue_lang" ] && cur_lang=$(cat "$HOME/.config/mpv/queue_lang" 2>/dev/null | tr -d '[:space:]')
+    fi
+    [ -z "$cur_lang" ] && cur_lang="auto"
 
-    local cur_path=""
-    local cur_title=""
     if [[ "$target" =~ ^http.* ]]; then
         cur_path="$target"
-    elif [ -S "$SOCKET" ] && echo '{"command":["get_property","idle-active"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1; then
-        local raw_track
-        raw_track=$(echo -e '{"command":["get_property","path"]}\n{"command":["get_property","media-title"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | (.[0].data // empty), (.[1].data // empty)')
-        mapfile -t t_arr <<< "$raw_track"
-        cur_path="${t_arr[0]}"
-        cur_title="${t_arr[1]}"
+        cur_title="$target"
     fi
 
-    # If nothing is running or no path from MPV, inspect head of queue
-    if [ -z "$cur_path" ] && [ -f "$QUEUE_FILE" ] && [ -s "$QUEUE_FILE" ]; then
+    if [ -z "$cur_path" ] && [ "$is_blind_session" != true ] && [ -f "$QUEUE_FILE" ] && [ -s "$QUEUE_FILE" ]; then
         cur_path=$(head -n 1 "$QUEUE_FILE" | cut -f1)
         cur_title=$(head -n 1 "$QUEUE_FILE" | cut -f2)
     fi
 
-    # If still no track, display global profile
-    if [ -z "$cur_path" ]; then
-        print_header_box "${C_PINK}🌐 Queue Audio Language Preference${C_RESET}"
-        print_boxed_line "${C_TEAL}Active Language:${C_RESET} ${C_WHITE}[${C_PINK}${cur_lang}${C_WHITE}] $(get_human_lang_name "$cur_lang")${C_RESET}"
-        print_boxed_line "${C_TEAL}Status:         ${C_GRAY}Idle (No track actively playing)${C_RESET}"
-        printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
-        B_LINE=${B_LINE// /─}
-        echo -e "${C_PURPLE}${B_LINE}${C_RESET}"
-        echo -e "${C_GRAY}💡 Set language: ${C_WHITE}q -lang en${C_GRAY} | ${C_WHITE}q -lang zh${C_GRAY} | ${C_WHITE}q -lang ja${C_GRAY} | ${C_WHITE}q -lang auto${C_RESET}"
-        return 0
+    declare -A TRACK_LANGS_MAP=()
+    local stream_info="Single Audio Stream (Original/Default)"
+
+    local langs_cache_file="$HOME/.cache/mpv/current_audio_langs.json"
+    local langs_url_file="$HOME/.cache/mpv/current_audio_langs_url"
+    if [ "$is_blind_session" = true ]; then
+        langs_cache_file="$HOME/.cache/mpv/blind_audio_langs.json"
+        langs_url_file="$HOME/.cache/mpv/blind_audio_langs_url"
     fi
 
-    # Track exists: Inspect its available audio tracks
-    echo -e "${C_PINK}🔍 Inspecting audio tracks for:${C_RESET} ${C_CYAN}${cur_title:-$cur_path}${C_RESET}..."
-
-    local langs_json=""
-    if [[ "$cur_path" =~ ^http.* ]]; then
-        # Check cache file first
-        if [ -f "$HOME/.cache/mpv/current_audio_langs.json" ] && [ -s "$HOME/.cache/mpv/current_audio_langs.json" ]; then
-            langs_json=$(cat "$HOME/.cache/mpv/current_audio_langs.json" 2>/dev/null)
+    if [ -n "$cur_path" ]; then
+        if [ -z "$cur_title" ] || [ "$cur_title" == "$cur_path" ]; then
+            local c
+            c=$(get_cached_title "$cur_path")
+            [ -n "$c" ] && cur_title="$c"
         fi
-        if [ -z "$langs_json" ] || [ "$langs_json" == "[]" ]; then
-            local ytdl_cmd=("yt-dlp" "--dump-json" "--skip-download" "--flat-playlist" "--no-warnings")
-            command -v node >/dev/null 2>&1 && ytdl_cmd+=("--js-runtimes" "node")
-            local raw_json
-            raw_json=$(run_with_timeout 15 "${ytdl_cmd[@]}" -- "$cur_path" 2>/dev/null)
-            if [ -n "$raw_json" ]; then
-                [ -z "$cur_title" ] && cur_title=$(echo "$raw_json" | jq -r '.title // empty')
-                langs_json=$(echo "$raw_json" | jq -c '[.formats[]? | select(.vcodec == "none" and .acodec != "none") | {lang: (.language // "auto"), note: (.format_note // "")}] | unique_by(.lang)' 2>/dev/null)
-                if [ -n "$langs_json" ] && [ "$langs_json" != "[]" ]; then
-                    mkdir -p "$HOME/.cache/mpv"
-                    echo "$langs_json" > "$HOME/.cache/mpv/current_audio_langs.json"
-                    if [ "$IS_WSL" = true ]; then
-                        local win_u_dir
-                        win_u_dir=$(get_windows_user_dir)
-                        if [ -n "$win_u_dir" ] && [ -d "$win_u_dir" ]; then
-                            mkdir -p "$win_u_dir/.cache/mpv" 2>/dev/null
-                            cp -f "$HOME/.cache/mpv/current_audio_langs.json" "$win_u_dir/.cache/mpv/current_audio_langs.json" 2>/dev/null
+        [ -z "$cur_title" ] && cur_title="$cur_path"
+
+        local langs_json=""
+        if [[ "$cur_path" =~ ^http.* ]]; then
+            if [ -f "$langs_cache_file" ] && [ -s "$langs_cache_file" ] && { [ ! -f "$langs_url_file" ] || [ "$(cat "$langs_url_file" 2>/dev/null)" == "$cur_path" ]; }; then
+                langs_json=$(cat "$langs_cache_file" 2>/dev/null)
+            else
+                local ytdl_cmd=("yt-dlp" "--dump-json" "--skip-download" "--flat-playlist" "--no-warnings")
+                command -v node >/dev/null 2>&1 && ytdl_cmd+=("--js-runtimes" "node")
+                local raw_json
+                raw_json=$(run_with_timeout 15 "${ytdl_cmd[@]}" -- "$cur_path" 2>/dev/null)
+                if [ -n "$raw_json" ]; then
+                    [ -z "$cur_title" ] && cur_title=$(echo "$raw_json" | jq -r '.title // empty')
+                    langs_json=$(echo "$raw_json" | jq -c '[.formats[]? | select(.vcodec == "none" and .acodec != "none") | {lang: (.language // "auto"), note: (.format_note // "")}] | unique_by(.lang)' 2>/dev/null)
+                    if [ -n "$langs_json" ] && [ "$langs_json" != "[]" ]; then
+                        mkdir -p "$HOME/.cache/mpv"
+                        echo "$langs_json" > "$langs_cache_file"
+                        echo "$cur_path" > "$langs_url_file"
+                        if [ "$IS_WSL" = true ]; then
+                            local win_u_dir
+                            win_u_dir=$(get_windows_user_dir)
+                            if [ -n "$win_u_dir" ] && [ -d "$win_u_dir" ]; then
+                                mkdir -p "$win_u_dir/.cache/mpv" 2>/dev/null
+                                cp -f "$langs_cache_file" "$win_u_dir/.cache/mpv/$(basename "$langs_cache_file")" 2>/dev/null
+                                cp -f "$langs_url_file" "$win_u_dir/.cache/mpv/$(basename "$langs_url_file")" 2>/dev/null
+                            fi
                         fi
                     fi
                 fi
             fi
         fi
+
+        if [ -n "$langs_json" ] && [ "$langs_json" != "[]" ]; then
+            while IFS=$'\t' read -r l_code l_note; do
+                [ -z "$l_code" ] && continue
+                local clean_lc
+                clean_lc=$(normalize_lang_code "$l_code")
+                TRACK_LANGS_MAP["$clean_lc"]="${l_note:-Available}"
+            done < <(echo "$langs_json" | jq -r '.[] | "\(.lang)\t\(.note)"' 2>/dev/null)
+            if [ ${#TRACK_LANGS_MAP[@]} -gt 1 ]; then
+                stream_info="Multi-Track (${#TRACK_LANGS_MAP[@]} audio dubs available)"
+            fi
+        elif [ -n "$active_socket" ] && [ -S "$active_socket" ]; then
+            local mpv_tracks
+            mpv_tracks=$(echo '{"command":["get_property","track-list"]}' | nc $nc_opts -w 1 "$active_socket" 2>/dev/null | jq -c '[.data[]? | select(.type=="audio")]' 2>/dev/null)
+            if [ -n "$mpv_tracks" ] && [ "$mpv_tracks" != "[]" ]; then
+                while IFS=$'\t' read -r t_id t_lang t_title; do
+                    [ -z "$t_lang" ] || [ "$t_lang" == "und" ] && continue
+                    local clean_lc
+                    clean_lc=$(normalize_lang_code "$t_lang")
+                    TRACK_LANGS_MAP["$clean_lc"]="${t_title:-Track #$t_id}"
+                done < <(echo "$mpv_tracks" | jq -r '.[] | "\(.id)\t\(.lang // "und")\t\(.title // "")"' 2>/dev/null)
+                if [ ${#TRACK_LANGS_MAP[@]} -gt 1 ]; then
+                    stream_info="Multi-Track (${#TRACK_LANGS_MAP[@]} audio streams available)"
+                fi
+            fi
+        fi
     fi
 
-    if [ -z "$cur_title" ] || [ "$cur_title" == "$cur_path" ]; then
-        local c
-        c=$(get_cached_title "$cur_path")
-        [ -n "$c" ] && cur_title="$c"
-    fi
-    [ -z "$cur_title" ] && cur_title="$cur_path"
+    local cur_human=$(get_human_lang_name "$cur_lang")
 
-    print_header_box "${C_PINK}🌐 Available Audio Tracks & Languages${C_RESET}"
-    print_boxed_line "${C_TEAL}Track:    ${C_CYAN}${cur_title:0:$((INNER_WIDTH-12))}${C_RESET}"
-    print_boxed_line "${C_TEAL}Source:   ${C_VIOLET}${cur_path:0:$((INNER_WIDTH-12))}${C_RESET}"
-    print_boxed_line "${C_TEAL}Active:   ${C_WHITE}[${C_PINK}${cur_lang}${C_WHITE}] $(get_human_lang_name "$cur_lang")${C_RESET}"
+    # If running interactively with FZF available -> Launch polished FZF picker with all languages
+    if command -v fzf >/dev/null 2>&1 && [ -t 0 ] && [ -t 1 ]; then
+        local fzf_items=""
+        for item in "${ALL_SUPPORTED_LANGS[@]}"; do
+            IFS=: read -r code name icon <<< "$item"
+            local tags=""
+            if [ "$code" == "$cur_lang" ]; then
+                tags=" ${C_GREEN}★ ACTIVE${C_RESET}"
+            fi
+            if [ -n "${TRACK_LANGS_MAP[$code]}" ]; then
+                tags="${tags} ${C_CYAN}✓ On Track${C_RESET}"
+            fi
+            fzf_items+="${icon}  [${code}]  ${name}${tags}\n"
+        done
+
+        local LINE=$(get_fzf_divider)
+        local status_icons=$(get_player_status_icons)
+        local fzf_title="🪷 Audio Languages & Dubs"
+        [ "$is_blind_session" = true ] && fzf_title="🕶️ Blind Mode Audio Languages"
+        local fzf_header
+        if [ -n "$cur_title" ]; then
+            fzf_header="${C_PURPLE}${fzf_title}${C_RESET} ${C_GRAY}(Track: ${cur_title:0:36} • Active: [${cur_lang}] ${cur_human})${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
+        else
+            fzf_header="${C_PURPLE}${fzf_title}${C_RESET} ${C_GRAY}(Active: [${cur_lang}] ${cur_human})${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
+        fi
+        local fzf_prompt="🎵 ${C_TEAL}Select Language${status_icons}${C_RESET} > "
+        [ "$is_blind_session" = true ] && fzf_prompt="🕶️ ${C_TEAL}Select Language (Blind Mode)${status_icons}${C_RESET} > "
+
+        local sel
+        sel=$(echo -ne "$fzf_items" | fzf --height=100% --layout=reverse --border --ansi \
+            --header="$fzf_header" \
+            --info=inline-right \
+            $FZF_COLOR_OPTS \
+            --prompt="$fzf_prompt")
+
+        if [ -n "$sel" ]; then
+            local chosen_code
+            chosen_code=$(echo "$sel" | grep -oP '(?<=\[)[a-zA-Z0-9_-]+(?=\])')
+            if [ -n "$chosen_code" ]; then
+                cmd_language "$chosen_code" "$session_choice"
+                return 0
+            fi
+        fi
+        return 0
+    fi
+
+    # Fallback mode (no FZF or non-interactive): Print clean boxed overview with all available languages
+    if [ "$is_blind_session" = true ]; then
+        print_header_box "${C_PINK}🕶️ Blind Mode Audio Tracks & Languages (Active Isolated Playback)${C_RESET}"
+    else
+        print_header_box "${C_PINK}🌐 Available Audio Tracks & Languages${C_RESET}"
+    fi
+    if [ -n "$cur_title" ]; then
+        print_boxed_line "${C_TEAL}Track:    ${C_CYAN}${cur_title:0:$((INNER_WIDTH-12))}${C_RESET}"
+        print_boxed_line "${C_TEAL}Source:   ${C_VIOLET}${cur_path:0:$((INNER_WIDTH-12))}${C_RESET}"
+        print_boxed_line "${C_TEAL}Streams:  ${C_WHITE}${stream_info}${C_RESET}"
+    fi
+    print_boxed_line "${C_TEAL}Active:   ${C_WHITE}[${C_PINK}${cur_lang}${C_WHITE}] ${cur_human}${C_RESET}"
     echo -e "${C_PURPLE}├${H_LINE:2}┤${C_RESET}"
 
     local count=0
     declare -a opt_langs=()
-
-    if [ -n "$langs_json" ] && [ "$langs_json" != "[]" ]; then
-        local raw_lines
-        raw_lines=$(echo "$langs_json" | jq -r '.[] | "\(.lang)\t\(.note)"' 2>/dev/null)
-        while IFS=$'\t' read -r l_code l_note; do
-            [ -z "$l_code" ] && continue
-            ((count++))
-            opt_langs+=("$l_code")
-            local active_tag=""
-            if [ "$l_code" == "$cur_lang" ]; then
-                active_tag=" ${C_GREEN}★ ACTIVE${C_RESET}"
-            elif [ "$cur_lang" == "auto" ] && [[ "$l_note" =~ [Oo]riginal|[Dd]efault ]]; then
-                active_tag=" ${C_GREEN}★ ACTIVE (Default)${C_RESET}"
-            fi
-            local h_name
-            h_name=$(get_human_lang_name "$l_code")
-            local desc="${h_name}"
-            [ -n "$l_note" ] && desc="${desc} (${l_note})"
-            print_boxed_line "  ${C_ORANGE}${count}.${C_RESET} ${C_WHITE}[${C_PINK}${l_code}${C_WHITE}] ${desc}${active_tag}"
-        done <<< "$raw_lines"
-    else
-        # Local file or unknown stream
-        local mpv_tracks
-        mpv_tracks=$(echo '{"command":["get_property","track-list"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -c '[.data[]? | select(.type=="audio")]' 2>/dev/null)
-        if [ -n "$mpv_tracks" ] && [ "$mpv_tracks" != "[]" ]; then
-            local raw_tracks
-            raw_tracks=$(echo "$mpv_tracks" | jq -r '.[] | "\(.id)\t\(.lang // "und")\t\(.title // "Audio Track")\t\(.selected // false)"' 2>/dev/null)
-            while IFS=$'\t' read -r t_id t_lang t_title t_sel; do
-                [ -z "$t_id" ] && continue
-                ((count++))
-                opt_langs+=("$t_lang")
-                local active_tag=""
-                [ "$t_sel" == "true" ] && active_tag=" ${C_GREEN}★ ACTIVE${C_RESET}"
-                print_boxed_line "  ${C_ORANGE}${count}.${C_RESET} ${C_WHITE}[${C_PINK}${t_lang}${C_WHITE}] Track #${t_id} - ${t_title}${active_tag}"
-            done <<< "$raw_tracks"
-        else
-            print_boxed_line "  ${C_GRAY}Single audio stream detected (no alternate multi-language dubs).${C_RESET}"
+    for item in "${ALL_SUPPORTED_LANGS[@]}"; do
+        IFS=: read -r code name icon <<< "$item"
+        ((count++))
+        opt_langs+=("$code")
+        local tags=""
+        if [ "$code" == "$cur_lang" ]; then
+            tags=" ${C_GREEN}★ ACTIVE${C_RESET}"
         fi
-    fi
+        if [ -n "${TRACK_LANGS_MAP[$code]}" ]; then
+            tags="${tags} ${C_CYAN}✓ On Track${C_RESET}"
+        fi
+        printf -v pad_num "%2d" "$count"
+        print_boxed_line "  ${C_ORANGE}${pad_num}.${C_RESET} ${icon}  ${C_WHITE}[${C_PINK}${code}${C_WHITE}] ${name}${tags}"
+    done
 
     printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
     B_LINE=${B_LINE// /─}
     echo -e "${C_PURPLE}${B_LINE}${C_RESET}"
-    echo -e "${C_GRAY}💡 Quick Switch: ${C_WHITE}q -lang zh${C_GRAY} | ${C_WHITE}q -lang en${C_GRAY} | ${C_WHITE}q -lang auto${C_RESET}"
+    echo -e "${C_GRAY}💡 Quick Switch: ${C_WHITE}q -lang zh${C_GRAY} | ${C_WHITE}q -lang en${C_GRAY} | ${C_WHITE}q -lang ja${C_GRAY} | ${C_WHITE}q -lang auto${C_RESET}"
     echo -e "${C_GRAY}   Or inside video window press: ${C_WHITE}'a'${C_GRAY} / ${C_WHITE}'A'${C_GRAY} to cycle audio tracks${C_RESET}"
 
-    # Interactive prompt if running in interactive terminal
-    if [ -t 0 ] && [ -t 1 ] && [ "$count" -gt 0 ]; then
-        echo -ne "${C_PINK}>>> Enter language code or number to switch (or ENTER to cancel): ${C_RESET}"
-        local user_input
+    echo -ne "${C_PINK}>>> Enter language code or number to switch (or ENTER to cancel): ${C_RESET}"
+    local user_input=""
+    if [ -t 0 ]; then
         read -r user_input < /dev/tty 2>/dev/null || read -r user_input
-        if [ -n "$user_input" ]; then
-            if [[ "$user_input" =~ ^[0-9]+$ ]] && [ "$user_input" -ge 1 ] && [ "$user_input" -le "$count" ]; then
-                local chosen_lang="${opt_langs[$((user_input - 1))]}"
-                cmd_language "$chosen_lang"
-            else
-                cmd_language "$user_input"
-            fi
+    else
+        read -r user_input
+    fi
+    if [ -n "$user_input" ]; then
+        if [[ "$user_input" =~ ^[0-9]+$ ]] && [ "$user_input" -ge 1 ] && [ "$user_input" -le "$count" ]; then
+            local chosen_lang="${opt_langs[$((user_input - 1))]}"
+            cmd_language "$chosen_lang" "$session_choice"
+        else
+            cmd_language "$user_input" "$session_choice"
         fi
     fi
 }
@@ -2918,7 +3215,18 @@ cmd_play() {
 }
 
 cmd_blind_play() {
-    local target="$*"
+    local raw_target="$*"
+    local target=""
+    local force_vid=false
+    local force_aud=false
+
+    for arg in "$@"; do
+        case "$arg" in
+            -vid|--vid|-video|--video) force_vid=true ;;
+            -aud|--aud|-audio|--audio) force_aud=true ;;
+            *) [ -z "$target" ] && target="$arg" || target="$target $arg" ;;
+        esac
+    done
 
     # If target is empty, inspect clipboard or ask via fzf input
     if [ -z "$target" ]; then
@@ -2953,10 +3261,82 @@ cmd_blind_play() {
         fi
     fi
 
+    local blind_socket="$HOME/.cache/mpv/blind.sock"
+    mkdir -p "$HOME/.cache/mpv"
+    rm -f "$blind_socket"
+    local blind_pipe="mpv-blind-pipe-$$"
+    local bridge_pid=""
+    local mpv_pid=""
+    local is_cleaned_up=false
+
+    # Snapshot session state to safeguard against any rogue write
+    local cache_dir="$HOME/.cache/mpv"
+    [ -f "$cache_dir/last_playlist.txt" ] && cp -f "$cache_dir/last_playlist.txt" "$cache_dir/blind_backup_playlist.txt"
+    [ -f "$cache_dir/state.json" ] && cp -f "$cache_dir/state.json" "$cache_dir/blind_backup_state.json"
+
+    local win_u_dir=""
+    if [ "$IS_WSL" = true ]; then
+        win_u_dir=$(get_windows_user_dir)
+        if [ -n "$win_u_dir" ] && [ -d "$win_u_dir/.cache/mpv" ]; then
+            [ -f "$win_u_dir/.cache/mpv/last_playlist.txt" ] && cp -f "$win_u_dir/.cache/mpv/last_playlist.txt" "$win_u_dir/.cache/mpv/blind_backup_playlist.txt" 2>/dev/null
+            [ -f "$win_u_dir/.cache/mpv/state.json" ] && cp -f "$win_u_dir/.cache/mpv/state.json" "$win_u_dir/.cache/mpv/blind_backup_state.json" 2>/dev/null
+        fi
+    fi
+
     # Safety cleanup trap to guarantee unpausing the previous session on exit or Ctrl-C
     cleanup_blind_mode() {
+        [ "$is_cleaned_up" = true ] && return
+        is_cleaned_up=true
         trap - EXIT INT TERM
-        rm -f "/tmp/mpv-blind-$$.sock" 2>/dev/null || true
+
+        # 1. Gracefully tell the blind MPV instance to quit via its IPC socket
+        if [ -S "$blind_socket" ]; then
+            echo '{"command":["quit"]}' | nc $NC_OPTS -w 1 "$blind_socket" >/dev/null 2>&1
+        fi
+
+        # 2. Terminate the background MPV process if still running
+        if [ -n "$mpv_pid" ] && kill -0 "$mpv_pid" 2>/dev/null; then
+            kill "$mpv_pid" 2>/dev/null || true
+            wait "$mpv_pid" 2>/dev/null || true
+        fi
+
+        # 3. For Windows Hybrid, ensure any orphaned mpv instance with this blind pipe is terminated
+        if [ "$IS_WSL" = true ]; then
+            powershell.exe -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name = 'mpv.exe'\" | Where-Object { \$_.CommandLine -like '*$blind_pipe*' } | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force }" </dev/null >/dev/null 2>&1
+        fi
+
+        # 4. Terminate bridge process
+        if [ -n "$bridge_pid" ]; then
+            kill "$bridge_pid" 2>/dev/null || true
+            wait "$bridge_pid" 2>/dev/null || true
+        fi
+        rm -f "$blind_socket" "$HOME/.cache/mpv/blind_active" "$HOME/.cache/mpv/blind_lang" "$HOME/.cache/mpv/blind_audio_langs.json" "$HOME/.cache/mpv/blind_audio_langs_url" "/tmp/mpv-blind-$$.sock" 2>/dev/null || true
+        if [ "$IS_WSL" = true ] && [ -n "$win_u_dir" ] && [ -d "$win_u_dir/.cache/mpv" ]; then
+            rm -f "$win_u_dir/.cache/mpv/blind_active" "$win_u_dir/.cache/mpv/blind_lang" "$win_u_dir/.cache/mpv/blind_audio_langs.json" "$win_u_dir/.cache/mpv/blind_audio_langs_url" 2>/dev/null || true
+        fi
+
+        # 5. Restore last_playlist.txt and state.json to guarantee 100% session preservation
+        local cdir="$HOME/.cache/mpv"
+        if [ -f "$cdir/blind_backup_playlist.txt" ]; then
+            cp -f "$cdir/blind_backup_playlist.txt" "$cdir/last_playlist.txt" 2>/dev/null
+            rm -f "$cdir/blind_backup_playlist.txt" 2>/dev/null
+        fi
+        if [ -f "$cdir/blind_backup_state.json" ]; then
+            cp -f "$cdir/blind_backup_state.json" "$cdir/state.json" 2>/dev/null
+            rm -f "$cdir/blind_backup_state.json" 2>/dev/null
+        fi
+
+        if [ "$IS_WSL" = true ] && [ -n "$win_u_dir" ] && [ -d "$win_u_dir/.cache/mpv" ]; then
+            if [ -f "$win_u_dir/.cache/mpv/blind_backup_playlist.txt" ]; then
+                cp -f "$win_u_dir/.cache/mpv/blind_backup_playlist.txt" "$win_u_dir/.cache/mpv/last_playlist.txt" 2>/dev/null
+                rm -f "$win_u_dir/.cache/mpv/blind_backup_playlist.txt" 2>/dev/null
+            fi
+            if [ -f "$win_u_dir/.cache/mpv/blind_backup_state.json" ]; then
+                cp -f "$win_u_dir/.cache/mpv/blind_backup_state.json" "$win_u_dir/.cache/mpv/state.json" 2>/dev/null
+                rm -f "$win_u_dir/.cache/mpv/blind_backup_state.json" 2>/dev/null
+            fi
+        fi
+
         echo -e "\n${C_GREEN}🎬 Blind playback finished.${C_RESET}"
         if [ "$was_main_playing" = true ] && [ -S "$main_socket" ]; then
             echo -e "${C_CYAN}🎧 Resuming your previous queue playback...${C_RESET}"
@@ -2985,9 +3365,29 @@ cmd_blind_play() {
     elif [[ "$target" =~ ^http.* ]]; then
         play_target="$target"
         echo -e "${C_CYAN}🔍 Inspecting stream metadata...${C_RESET}"
-        local ytdl_title_cmd=("yt-dlp" "--no-warnings" "--skip-download" "--print" "%(title)s")
+        local ytdl_title_cmd=("yt-dlp" "--no-warnings" "--skip-download" "--dump-json")
         command -v node >/dev/null 2>&1 && ytdl_title_cmd+=("--js-runtimes" "node")
-        display_title=$(run_with_timeout 10 "${ytdl_title_cmd[@]}" -- "$play_target" 2>/dev/null | head -n 1)
+        local raw_json
+        raw_json=$(run_with_timeout 12 "${ytdl_title_cmd[@]}" -- "$play_target" 2>/dev/null)
+        if [ -n "$raw_json" ]; then
+            display_title=$(echo "$raw_json" | jq -r '.title // empty' 2>/dev/null)
+            local b_langs
+            b_langs=$(echo "$raw_json" | jq -c '[.formats[]? | select(.vcodec == "none" and .acodec != "none") | {lang: (.language // "auto"), note: (.format_note // "")}] | unique_by(.lang)' 2>/dev/null)
+            if [ -n "$b_langs" ] && [ "$b_langs" != "[]" ]; then
+                mkdir -p "$HOME/.cache/mpv"
+                echo "$b_langs" > "$HOME/.cache/mpv/blind_audio_langs.json"
+                echo "$play_target" > "$HOME/.cache/mpv/blind_audio_langs_url"
+                if [ "$IS_WSL" = true ]; then
+                    local win_u_dir_tmp
+                    win_u_dir_tmp=$(get_windows_user_dir)
+                    if [ -n "$win_u_dir_tmp" ] && [ -d "$win_u_dir_tmp" ]; then
+                        mkdir -p "$win_u_dir_tmp/.cache/mpv" 2>/dev/null
+                        cp -f "$HOME/.cache/mpv/blind_audio_langs.json" "$win_u_dir_tmp/.cache/mpv/blind_audio_langs.json" 2>/dev/null
+                        cp -f "$HOME/.cache/mpv/blind_audio_langs_url" "$win_u_dir_tmp/.cache/mpv/blind_audio_langs_url" 2>/dev/null
+                    fi
+                fi
+            fi
+        fi
         [ -z "$display_title" ] && display_title="$play_target"
     # 4. Search Query (e.g. "q -pb funny cat video" or "q -pb yt lofi hip hop")
     else
@@ -3013,15 +3413,17 @@ cmd_blind_play() {
     fi
 
     # Display Boxed TUI Header
-    local blind_lang="en"
+    local blind_lang="auto"
     [ -f "$HOME/.config/mpv/queue_lang" ] && blind_lang=$(cat "$HOME/.config/mpv/queue_lang" 2>/dev/null | tr -d '[:space:]')
-    [ -z "$blind_lang" ] && blind_lang="en"
+    [ -z "$blind_lang" ] && blind_lang="auto"
+    mkdir -p "$HOME/.cache/mpv"
+    echo "$blind_lang" > "$HOME/.cache/mpv/blind_lang"
 
     local blind_audio_fmt=""
     if [ "$blind_lang" == "auto" ]; then
-        blind_audio_fmt="(bestaudio[acodec=opus]/bestaudio)"
+        blind_audio_fmt="(bestaudio[acodec=opus]/bestaudio[acodec^=mp4a]/bestaudio)"
     else
-        blind_audio_fmt="(bestaudio[language=${blind_lang}][acodec=opus]/bestaudio[language^=${blind_lang}][acodec=opus]/bestaudio[language=${blind_lang}]/bestaudio[language^=${blind_lang}]/bestaudio[acodec=opus]/bestaudio)"
+        blind_audio_fmt="(bestaudio[language=${blind_lang}][acodec=opus]/bestaudio[language^=${blind_lang}][acodec=opus]/bestaudio[language=${blind_lang}]/bestaudio[language^=${blind_lang}]/bestaudio[acodec=opus]/bestaudio[acodec^=mp4a]/bestaudio)"
     fi
     local blind_ytdl_fmt="bestvideo[height<=1080][fps<=60][vcodec^=avc1][format_note!*=Premium]+${blind_audio_fmt}/bestvideo[height<=1080]+${blind_audio_fmt}/best"
 
@@ -3050,6 +3452,40 @@ cmd_blind_play() {
         if [ -n "$win_mpv" ] && [ -f "$win_mpv" ]; then
             local win_u_dir
             win_u_dir=$(get_windows_user_dir)
+            local relay_bin
+            relay_bin=$(ensure_piperelay_compiled)
+
+            # Sync queue_video.lua and language settings to Windows AppData
+            if [ -n "$win_u_dir" ] && [ -d "$win_u_dir" ]; then
+                local win_scripts="$win_u_dir/AppData/Roaming/mpv/scripts"
+                mkdir -p "$win_scripts" "$win_u_dir/.cache/mpv" 2>/dev/null
+                local src_lua="$SCRIPT_DIR/scripts/queue_video.lua"
+                [ ! -f "$src_lua" ] && src_lua="$HOME/.local/bin/mpv/scripts/queue_video.lua"
+                [ ! -f "$src_lua" ] && src_lua="$(dirname "$MODULE_DIR")/scripts/queue_video.lua"
+                [ -f "$src_lua" ] && cp -f "$src_lua" "$win_scripts/queue_video.lua" 2>/dev/null
+
+                # Ensure language preferences are mirrored to Windows configs
+                [ -f "$HOME/.config/mpv/queue_lang" ] && cp -f "$HOME/.config/mpv/queue_lang" "$win_u_dir/AppData/Roaming/mpv/queue_lang" 2>/dev/null
+                [ -f "$HOME/.config/mpv/queue_lang" ] && cp -f "$HOME/.config/mpv/queue_lang" "$win_u_dir/.config/mpv/queue_lang" 2>/dev/null
+            fi
+
+            # Start background Named Pipe IPC bridge for this isolated session
+            local bridge_script="$MODULE_DIR/hybrid_bridge.py"
+            [ ! -f "$bridge_script" ] && bridge_script="$SCRIPT_DIR/q_modules/hybrid_bridge.py"
+            if [ -f "$bridge_script" ] && [ -n "$relay_bin" ]; then
+                python3 "$bridge_script" "$blind_socket" "$blind_pipe" "$relay_bin" </dev/null >/dev/null 2>&1 &
+                bridge_pid=$!
+            fi
+
+            # Record active blind session metadata
+            echo -e "path=${play_target}\ntitle=${display_title}\nsocket=${blind_socket}" > "$HOME/.cache/mpv/blind_active"
+
+            local alang_arg="${blind_lang},en,eng,enUS,en-US"
+            [ "$blind_lang" == "auto" ] && alang_arg="auto,en,eng,enUS,en-US"
+
+            local blind_script_opts="queue_video-blind=yes,queue-blind=yes,blind=yes"
+            [ -n "$win_ytdl" ] && blind_script_opts="${blind_script_opts},ytdl_hook-ytdl_path=${win_ytdl}"
+
             local win_opts=(
                 "--force-window=yes"
                 "--video=auto"
@@ -3058,15 +3494,18 @@ cmd_blind_play() {
                 "--gpu-context=auto"
                 "--hwdec=auto-safe"
                 "--keep-open=no"
-                "--alang=${blind_lang},en,eng,enUS,en-US"
-                "--slang=${blind_lang},en,eng,enUS,en-US"
+                "--alang=${alang_arg}"
+                "--slang=${alang_arg}"
                 "--ytdl-format=${blind_ytdl_fmt}"
                 "--title=Queue [Blind Mode]: $display_title"
                 "--geometry=50%x50%"
-                "--input-ipc-server=\\\\.\\pipe\\mpv-blind-$RANDOM"
+                "--input-ipc-server=\\\\.\\pipe\\$blind_pipe"
                 "--msg-level=all=warn,ao=error"
+                "--script-opts=${blind_script_opts}"
             )
-            [ -n "$win_ytdl" ] && win_opts+=("--script-opts=ytdl_hook-ytdl_path=$win_ytdl")
+            [ "$force_vid" = true ] && win_opts+=("--video=auto" "--vid=auto" "--force-window=yes")
+            [ "$force_aud" = true ] && win_opts+=("--video=no" "--vid=no" "--force-window=no")
+
             if [ -n "$win_u_dir" ] && [ -f "$win_u_dir/AppData/Roaming/mpv/scripts/queue_video.lua" ]; then
                 local win_lua
                 win_lua=$(wslpath -w "$win_u_dir/AppData/Roaming/mpv/scripts/queue_video.lua" 2>/dev/null)
@@ -3078,8 +3517,10 @@ cmd_blind_play() {
                 [ -n "$win_input" ] && win_opts+=("--input-conf=$win_input")
             fi
 
-            # Run Windows MPV synchronously (blocks until window closed or video ends)
-            "$win_mpv" "${win_opts[@]}" "$play_target" </dev/null
+            # Run Windows MPV in background and wait so signals can be intercepted
+            "$win_mpv" "${win_opts[@]}" "$play_target" </dev/null &
+            mpv_pid=$!
+            wait "$mpv_pid" 2>/dev/null
             cleanup_blind_mode
             return 0
         fi
@@ -3095,7 +3536,9 @@ cmd_blind_play() {
             cleanup_blind_mode
             return 0
         else
-            mpv "$play_target"
+            mpv "$play_target" &
+            mpv_pid=$!
+            wait "$mpv_pid" 2>/dev/null
             cleanup_blind_mode
             return 0
         fi
@@ -3117,15 +3560,29 @@ cmd_blind_play() {
         export XCURSOR_SIZE="${XCURSOR_SIZE:-36}"
     fi
 
+    # Record active blind session metadata
+    echo -e "path=${play_target}\ntitle=${display_title}\nsocket=${blind_socket}" > "$HOME/.cache/mpv/blind_active"
+
+    local alang_arg="${blind_lang},en,eng,enUS,en-US"
+    [ "$blind_lang" == "auto" ] && alang_arg="auto,en,eng,enUS,en-US"
+
     local standalone_opts=(
         "--keep-open=no"
         "--title=Queue [Blind Mode]: $display_title"
-        "--input-ipc-server=/tmp/mpv-blind-$$.sock"
+        "--input-ipc-server=$blind_socket"
         "--msg-level=all=warn,ao=error,pw.conf=error"
-        "--alang=${blind_lang},en,eng,enUS,en-US"
-        "--slang=${blind_lang},en,eng,enUS,en-US"
+        "--alang=${alang_arg}"
+        "--slang=${alang_arg}"
+        "--script-opts=queue_video-blind=yes,queue-blind=yes,blind=yes"
     )
-    if [ "$has_display" = true ]; then
+    if [ "$force_aud" = true ]; then
+        standalone_opts+=(
+            "--force-window=no"
+            "--video=no"
+            "--vo=null"
+            "--ytdl-format=${blind_audio_fmt}"
+        )
+    elif [ "$force_vid" = true ] || [ "$has_display" = true ]; then
         standalone_opts+=(
             "--force-window=yes"
             "--video=auto"
@@ -3146,7 +3603,9 @@ cmd_blind_play() {
     [ -f "$HOME/.config/mpv/scripts/queue_video.lua" ] && standalone_opts+=("--script=$HOME/.config/mpv/scripts/queue_video.lua")
     [ -f "$HOME/.config/mpv/input.conf" ] && standalone_opts+=("--input-conf=$HOME/.config/mpv/input.conf")
 
-    mpv "${standalone_opts[@]}" "$play_target"
+    mpv "${standalone_opts[@]}" "$play_target" &
+    mpv_pid=$!
+    wait "$mpv_pid" 2>/dev/null
 
     cleanup_blind_mode
     return 0

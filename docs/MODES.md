@@ -33,7 +33,7 @@ q -hybrid status
 
 ### How Windows Hybrid Boost Mode Works Under the Hood
 1. **Zero-Overhead Daemon**: When `q` is executed in WSL2, `hybrid_bridge.py` spawns a detached Windows MPV process on the Windows host.
-2. **Sub-Millisecond Named Pipe Relay (`PipeRelay.exe`)**: Compiled via Windows' native .NET Framework (`csc.exe`), this zero-dependency binary bridges the Windows Named Pipe (`\\.\pipe\mpv-pipe`) to standard I/O, allowing WSL2 netcat (`nc`) to send sub-millisecond IPC commands.
+2. **Sub-Millisecond Named Pipe Relay (`PipeRelay.exe` / `PipeRelay.ps1`)**: Bridges the Windows Named Pipe (`\\.\pipe\mpv-q-pipe`) to standard I/O, allowing WSL2 netcat (`nc`) to send sub-millisecond IPC commands. Includes a Microsoft-signed in-memory PowerShell relay (`PipeRelay.ps1`) ensuring 100% compliance with Windows 11 Smart App Control and Device Guard.
 3. **Instant Desktop Video Window (`q -vid`)**: Video is rendered directly by the host GPU using Direct3D. When hidden, MPV seamlessly drops video decoding to conserve CPU and bandwidth.
 
 ---

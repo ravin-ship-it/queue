@@ -13,11 +13,40 @@ local home = raw_home:gsub("\\", "/")
 local state_file = home ~= "" and (home .. "/.cache/mpv/video_active") or nil
 local hist_file = home ~= "" and (home .. "/.cache/mpv/shuffle_history") or nil
 
+local is_blind_instance = false
+local function check_blind_mode()
+    if is_blind_instance then return true end
+    local opt1 = mp.get_opt("queue_video-blind")
+    local opt2 = mp.get_opt("queue-blind")
+    local opt3 = mp.get_opt("blind")
+    if opt1 == "yes" or opt2 == "yes" or opt3 == "yes" or opt1 == "true" or opt2 == "true" or opt3 == "true" then
+        is_blind_instance = true
+        return true
+    end
+    local title = mp.get_property("title", "")
+    if title:find("%[Blind Mode%]") then
+        is_blind_instance = true
+        return true
+    end
+    local mtitle = mp.get_property("media-title", "")
+    if mtitle:find("%[Blind Mode%]") then
+        is_blind_instance = true
+        return true
+    end
+    local ipc = mp.get_property("input-ipc-server", "")
+    if ipc:lower():find("blind") then
+        is_blind_instance = true
+        return true
+    end
+    return false
+end
+
 -- =========================================================================
 -- 1. Virtual Shuffle Engine & Persistent History
 -- =========================================================================
 
 local function record_history(idx)
+    if check_blind_mode() then return end
     if not hist_file or not idx then return end
     local f = io.open(hist_file, "a")
     if f then
@@ -136,6 +165,7 @@ local function safe_show()
 end
 
 local function update_state()
+    if check_blind_mode() then return end
     local minimized = mp.get_property_bool("window-minimized", false)
     local vo = mp.get_property("vo")
     local vid = mp.get_property("vid")
@@ -157,8 +187,8 @@ end
 -- 3. Audio Language & Quality Profile Engine
 -- =========================================================================
 
-local lang_file = home ~= "" and (home .. "/.config/mpv/queue_lang") or nil
-local langs_cache_file = home ~= "" and (home .. "/.cache/mpv/current_audio_langs.json") or nil
+local lang_file = nil
+local langs_cache_file = nil
 local res_file = nil
 local hw_ceiling_file = nil
 local speed_file = nil
@@ -169,11 +199,15 @@ if home ~= "" then
         hw_ceiling_file = home .. "/AppData/Roaming/mpv/queue_hw_ceiling"
         speed_file = home .. "/AppData/Roaming/mpv/queue_speed"
         audio_mode_file = home .. "/AppData/Roaming/mpv/queue_audio_mode"
+        lang_file = home .. "/AppData/Roaming/mpv/queue_lang"
+        langs_cache_file = home .. "/.cache/mpv/current_audio_langs.json"
     else
         res_file = home .. "/.config/mpv/queue_res"
         hw_ceiling_file = home .. "/.config/mpv/queue_hw_ceiling"
         speed_file = home .. "/.config/mpv/queue_speed"
         audio_mode_file = home .. "/.config/mpv/queue_audio_mode"
+        lang_file = home .. "/.config/mpv/queue_lang"
+        langs_cache_file = home .. "/.cache/mpv/current_audio_langs.json"
     end
 end
 
@@ -288,24 +322,40 @@ local function save_hw_ceiling(tier)
 end
 
 local function get_saved_lang()
-    if not lang_file then return "en" end
-    local f = io.open(lang_file, "r")
-    if not f then return "en" end
-    local content = f:read("*a")
-    f:close()
-    if content then
-        local trimmed = content:match("^%s*(.-)%s*$")
-        if trimmed and trimmed ~= "" then return trimmed:lower() end
+    local paths = {}
+    if lang_file then table.insert(paths, lang_file) end
+    if home ~= "" then
+        table.insert(paths, home .. "/AppData/Roaming/mpv/queue_lang")
+        table.insert(paths, home .. "/.config/mpv/queue_lang")
     end
-    return "en"
+    for _, p in ipairs(paths) do
+        local f = io.open(p, "r")
+        if f then
+            local content = f:read("*a")
+            f:close()
+            if content then
+                local trimmed = content:match("^%s*(.-)%s*$")
+                if trimmed and trimmed ~= "" then return trimmed:lower() end
+            end
+        end
+    end
+    return "auto"
 end
 
 local function save_lang_pref(lang)
-    if not lang_file or not lang then return end
-    local f = io.open(lang_file, "w")
-    if f then
-        f:write(lang .. "\n")
-        f:close()
+    if not lang or check_blind_mode() then return end
+    local paths = {}
+    if lang_file then table.insert(paths, lang_file) end
+    if home ~= "" then
+        table.insert(paths, home .. "/AppData/Roaming/mpv/queue_lang")
+        table.insert(paths, home .. "/.config/mpv/queue_lang")
+    end
+    for _, p in ipairs(paths) do
+        local f = io.open(p, "w")
+        if f then
+            f:write(lang .. "\n")
+            f:close()
+        end
     end
 end
 
@@ -315,6 +365,7 @@ local cached_audio_langs = {}
 
 local function get_lang_label(code)
     code = (code or "auto"):lower()
+    code = code:match("^([a-z]+)") or code
     if code == "en" then return "English"
     elseif code == "zh" then return "Chinese (中文)"
     elseif code == "ja" then return "Japanese (日本語)"
@@ -326,6 +377,13 @@ local function get_lang_label(code)
     elseif code == "hi" then return "Hindi (हिन्दी)"
     elseif code == "pt" then return "Portuguese (Português)"
     elseif code == "it" then return "Italian (Italiano)"
+    elseif code == "ar" then return "Arabic (العربية)"
+    elseif code == "id" then return "Indonesian (Bahasa Indonesia)"
+    elseif code == "th" then return "Thai (ไทย)"
+    elseif code == "vi" then return "Vietnamese (Tiếng Việt)"
+    elseif code == "tr" then return "Turkish (Türkçe)"
+    elseif code == "pl" then return "Polish (Polski)"
+    elseif code == "nl" then return "Dutch (Nederlands)"
     elseif code == "auto" or code == "orig" or code == "original" then return "Original Audio (Auto)"
     else return code:upper() end
 end
@@ -595,7 +653,7 @@ local function change_language(lang, label)
     for _, t in ipairs(tracks) do
         if t.type == "audio" then
             local_audio_count = local_audio_count + 1
-            local t_lang = string.lower(t.lang or "")
+            local t_lang = string.lower(t.lang or ""):match("^([a-z]+)") or ""
             if t_lang == lang or (lang == "auto" and t.default) then
                 matched_track = t
             end
@@ -610,12 +668,26 @@ local function change_language(lang, label)
     end
 
     -- 2. Remote / YouTube DASH stream reload
+    if lang == "auto" then
+        pcall(mp.set_property, "alang", "auto,en,eng,und")
+        pcall(mp.set_property, "slang", "auto,en,eng,und")
+    else
+        pcall(mp.set_property, "alang", string.format("%s,%s-*,auto,en,eng", lang, lang))
+        pcall(mp.set_property, "slang", string.format("%s,%s-*,auto,en,eng", lang, lang))
+    end
     local fmt = get_quality_format(current_tier, current_lang)
     mp.set_property("ytdl-format", fmt)
     mp.commandv("playlist-play-index", "current")
 
     local display = label or string.format("[%s] %s", lang, get_lang_label(lang))
     mp.commandv("show-text", "🔊 Audio Language: " .. display, 2500)
+end
+
+local function get_langs_cache_file()
+    if check_blind_mode() then
+        return home ~= "" and (home .. "/.cache/mpv/blind_audio_langs.json") or nil
+    end
+    return langs_cache_file
 end
 
 local function get_available_langs_cached()
@@ -626,18 +698,28 @@ local function get_available_langs_cached()
         return cached_audio_langs
     end
 
-    if langs_cache_file then
-        local f = io.open(langs_cache_file, "r")
+    local c_file = get_langs_cache_file()
+    if c_file then
+        local f = io.open(c_file, "r")
         if f then
             local content = f:read("*a")
             f:close()
             if content and content ~= "" then
                 local u = require("mp.utils")
                 local parsed = u.parse_json(content)
-                if parsed and type(parsed) == "table" and #parsed > 0 then
-                    cached_track_url = path
-                    cached_audio_langs = parsed
-                    return cached_audio_langs
+                if parsed and type(parsed) == "table" then
+                    -- Support structured format: { url = "...", langs = [...] }
+                    if parsed.url and parsed.langs and type(parsed.langs) == "table" then
+                        if parsed.url == path and #parsed.langs > 0 then
+                            cached_track_url = path
+                            cached_audio_langs = parsed.langs
+                            return cached_audio_langs
+                        end
+                    -- Legacy array format: accept only if path matches cached_track_url
+                    elseif #parsed > 0 and cached_track_url == path then
+                        cached_audio_langs = parsed
+                        return cached_audio_langs
+                    end
                 end
             end
         end
@@ -670,8 +752,10 @@ local function cycle_audio_language()
     end
 
     local cur_idx = 1
+    local clean_cur = (current_lang or "auto"):lower():match("^([a-z]+)") or "auto"
     for i, item in ipairs(langs) do
-        if item.lang == current_lang then
+        local clean_item = (item.lang or ""):lower():match("^([a-z]+)") or ""
+        if clean_item == clean_cur or item.lang == current_lang then
             cur_idx = i
             break
         end
@@ -679,20 +763,31 @@ local function cycle_audio_language()
 
     local next_idx = (cur_idx % #langs) + 1
     local next_item = langs[next_idx]
-    local banner = string.format("[%s] %s (%d/%d)", next_item.lang, (next_item.note ~= "" and next_item.note or get_lang_label(next_item.lang)), next_idx, #langs)
-    change_language(next_item.lang, banner)
+    local clean_next = (next_item.lang or ""):lower():match("^([a-z]+)") or next_item.lang
+    local banner = string.format("[%s] %s (%d/%d)", clean_next, (next_item.note ~= "" and next_item.note or get_lang_label(clean_next)), next_idx, #langs)
+    change_language(clean_next, banner)
 end
 
 local function fetch_stream_languages_async(url)
     if not url or not (url:match("^http://") or url:match("^https://")) then return end
     if cached_track_url == url and #cached_audio_langs > 0 then return end
 
+    cached_track_url = url
+    cached_audio_langs = {}
+
     local ytdl = "yt-dlp"
     local raw_h = os.getenv("USERPROFILE") or ""
     if raw_h ~= "" and (raw_h:find("^[a-zA-Z]:") ~= nil) then
-        local w_ytdl = home .. "/AppData/Local/Microsoft/WinGet/Packages/yt-dlp.yt-dlp_Microsoft.Winget.Source_8wekyb3d8bbwe/yt-dlp.exe"
-        local f = io.open(w_ytdl, "r")
-        if f then f:close(); ytdl = w_ytdl end
+        local w_ytdl1 = home .. "/yt-dlp.exe"
+        local f1 = io.open(w_ytdl1, "r")
+        if f1 then
+            f1:close()
+            ytdl = w_ytdl1
+        else
+            local w_ytdl2 = home .. "/AppData/Local/Microsoft/WinGet/Packages/yt-dlp.yt-dlp_Microsoft.Winget.Source_8wekyb3d8bbwe/yt-dlp.exe"
+            local f2 = io.open(w_ytdl2, "r")
+            if f2 then f2:close(); ytdl = w_ytdl2 end
+        end
     end
 
     mp.command_native_async({
@@ -709,11 +804,12 @@ local function fetch_stream_languages_async(url)
                 local list = {}
                 for _, fmt in ipairs(d.formats) do
                     if fmt.vcodec == "none" and fmt.acodec and fmt.acodec ~= "none" then
-                        local l = fmt.language or "default"
-                        if not found[l] then
-                            found[l] = true
+                        local raw_l = fmt.language or "default"
+                        local clean_l = raw_l:lower():match("^([a-z]+)") or raw_l
+                        if not found[clean_l] then
+                            found[clean_l] = true
                             table.insert(list, {
-                                lang = l,
+                                lang = clean_l,
                                 note = fmt.format_note or ""
                             })
                         end
@@ -722,9 +818,10 @@ local function fetch_stream_languages_async(url)
                 if #list > 0 then
                     cached_track_url = url
                     cached_audio_langs = list
-                    if langs_cache_file then
-                        local out_json = u.format_json(list)
-                        local fw = io.open(langs_cache_file, "w")
+                    local c_file = get_langs_cache_file()
+                    if c_file then
+                        local out_json = u.format_json({ url = url, langs = list })
+                        local fw = io.open(c_file, "w")
                         if fw then
                             fw:write(out_json .. "\n")
                             fw:close()
@@ -1063,6 +1160,7 @@ local target_restore_pos = get_saved_pos()
 local has_restored_session = (target_restore_pos <= 0)
 
 local function save_session_state()
+    if check_blind_mode() then return end
     if not has_restored_session then return end
     local cache_dir = home ~= "" and (home .. "/.cache/mpv") or nil
     if not cache_dir then return end

@@ -524,12 +524,12 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
             ;;
         -lang|--lang|-audio|--audio)
             shift
-            if [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]] && [[ ! "$1" =~ $SMART_CMDS ]]; then
-                cmd_language "$1"
+            declare -a lang_args=()
+            while [[ -n "$1" ]] && { [[ ! "$1" =~ ^- ]] || [[ "$1" =~ ^(-pb|-b|--blind|-q|--queue|-norm|--normal)$ ]]; } && { [[ ! "$1" =~ $SMART_CMDS ]] || [[ "$1" =~ ^(auto|orig|original|def|default)$ ]]; }; do
+                lang_args+=("$1")
                 shift
-            else
-                cmd_language ""
-            fi
+            done
+            cmd_language "${lang_args[@]}"
             ;;
         -hybrid|--hybrid)
             shift

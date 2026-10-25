@@ -99,6 +99,7 @@ prompt_remove "$HOME/.config/mpv/input.conf.bak" "MPV Input Backup Config" "fals
 prompt_remove "$HOME/.config/mpv/scripts" "MPV Helper Scripts (~/.config/mpv/scripts)" "true"
 prompt_remove "$HOME/.config/mpv/cookies.txt" "YouTube-DL Cookies" "false"
 prompt_remove "$HOME/.config/mpv/queue_mode" "Queue Engine Choice (queue_mode)" "false"
+prompt_remove "$HOME/.config/mpv/queue_lang" "Queue Audio Language Profile (queue_lang)" "false"
 
 # Windows Host Components (WSL2)
 if [ "$IS_WSL" = true ]; then
@@ -125,10 +126,12 @@ if [ "$IS_WSL" = true ]; then
 
     if [ -n "$win_dir" ]; then
         prompt_remove "$win_dir/PipeRelay.exe" "Windows Pipe Relay Bridge (PipeRelay.exe)" "false"
+        prompt_remove "$win_dir/PipeRelay.ps1" "Windows Pipe Relay Script (PipeRelay.ps1)" "false"
         prompt_remove "$win_dir/yt-dlp.exe" "Windows yt-dlp binary (yt-dlp.exe)" "false"
         prompt_remove "$win_dir/yt-dlp.conf" "Windows yt-dlp configuration (yt-dlp.conf)" "false"
         prompt_remove "$win_dir/AppData/Roaming/mpv/scripts/queue_video.lua" "Windows MPV Helper Script (queue_video.lua)" "false"
         prompt_remove "$win_dir/AppData/Roaming/mpv/input.conf" "Windows MPV Input Config (input.conf)" "false"
+        prompt_remove "$win_dir/AppData/Roaming/mpv/queue_lang" "Windows Audio Language Profile" "false"
         prompt_remove "$win_dir/AppData/Roaming/yt-dlp/config" "Windows yt-dlp Roaming Config" "false"
         prompt_remove "$win_dir/.cache/mpv" "Windows Host MPV Cache & Shuffle History" "true"
     fi

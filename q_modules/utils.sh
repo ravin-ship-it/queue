@@ -1,4 +1,4 @@
-QUEUE_VERSION="1.2.0"
+QUEUE_VERSION="1.3.0"
 
 # Platform Detection (Universal for WSL2, Bare-Metal Linux, macOS, and Android/Termux)
 if [ -z "$IS_WSL" ] || [ -z "$IS_LINUX" ] || [ -z "$IS_MACOS" ] || [ -z "$IS_ANDROID" ]; then

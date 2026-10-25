@@ -97,7 +97,10 @@ CORE_FILES=(
 
 # Environment additions
 if [ "$IS_WSL" = true ]; then
-    CORE_FILES+=("scripts/PipeRelay.cs")
+    CORE_FILES+=(
+        "scripts/PipeRelay.cs"
+        "scripts/PipeRelay.ps1"
+    )
 fi
 
 if [ "$IS_ANDROID" = true ]; then

@@ -272,9 +272,10 @@ check_dependencies() {
 
         local relay_bin=$(ensure_piperelay_compiled 2>/dev/null)
         if [ -n "$relay_bin" ] && [ -f "$relay_bin" ]; then
-            print_boxed_line "  ${C_TEAL}PipeRelay.exe:   ${C_GREEN}Ready ✅${C_RESET} ${C_GRAY}(Sub-millisecond Windows Named Pipe bridge)${C_RESET}"
+            local relay_name=$(basename "$relay_bin")
+            print_boxed_line "  ${C_TEAL}PipeRelay:       ${C_GREEN}Ready ✅${C_RESET} ${C_GRAY}(${relay_name} bridge)${C_RESET}"
         else
-            print_boxed_line "  ${C_TEAL}PipeRelay.exe:   ${C_PINK}Missing ❌${C_RESET} ${C_GRAY}(Run ./install.sh to auto-compile)${C_RESET}"
+            print_boxed_line "  ${C_TEAL}PipeRelay:       ${C_PINK}Missing ❌${C_RESET} ${C_GRAY}(Run ./install.sh to configure)${C_RESET}"
         fi
 
         local win_u_dir=$(get_windows_user_dir)
@@ -419,7 +420,7 @@ cmd_update_ytdlp() {
     # Update Windows Host yt-dlp if on WSL2
     if [ "$IS_WSL" = true ]; then
         if cmd.exe /c "where winget" </dev/null >/dev/null 2>&1; then
-            cmd.exe /c "winget upgrade yt-dlp.yt-dlp --accept-source-agreements --accept-package-agreements" </dev/null >/dev/null 2>&1 || true
+            run_with_timeout 15 cmd.exe /c "winget upgrade yt-dlp.yt-dlp --accept-source-agreements --accept-package-agreements" </dev/null >/dev/null 2>&1 || true
         fi
         local win_ytdlp=$(find_windows_ytdlp)
         if [ -n "$win_ytdlp" ]; then
@@ -429,43 +430,87 @@ cmd_update_ytdlp() {
     [ "$ytdl_updated" = false ] && print_boxed_line "  ${C_ORANGE}⚠️ Could not auto-update yt-dlp. Check network or package manager.${C_RESET}"
 
     # 2. Update Queue Engine directly into destination directory
-    print_boxed_line "${C_BOLD}${C_CYAN}📦 [2/3] Fetching Latest Queue Engine Components from GitHub...${C_RESET}"
     local dest_dir="$HOME/.local/bin/mpv"
     mkdir -p "$dest_dir/q_modules" "$dest_dir/scripts" "$HOME/.config/mpv/scripts"
-    
-    local files=(
-        "q"
-        "q_modules/ui.sh"
-        "q_modules/utils.sh"
-        "q_modules/media.sh"
-        "q_modules/queue.sh"
-        "q_modules/search.sh"
-        "q_modules/batch.sh"
-        "q_modules/playlist.sh"
-        "q_modules/download.sh"
-        "q_modules/hybrid_bridge.py"
-        "q_modules/android_stream_bridge.py"
-        "scripts/PipeRelay.cs"
-        "scripts/PipeRelay.ps1"
-        "scripts/queue_video.lua"
-        "scripts/queue_android_bridge.lua"
-        "install.sh"
-        "uninstall.sh"
-        "setup.sh"
-        "input.conf.example"
-        "mpv.conf.example"
-    )
-    local success=true
-    local base_url="https://raw.githubusercontent.com/ravin-ship-it/queue/main"
-    
-    for f in "${files[@]}"; do
-        if curl -sSL -f -H "Cache-Control: no-cache" "${base_url}/${f}" -o "${dest_dir}/${f}.tmp" 2>/dev/null; then
-            mv "${dest_dir}/${f}.tmp" "${dest_dir}/${f}"
-        else
-            success=false
-            rm -f "${dest_dir}/${f}.tmp"
+
+    # Check if executed inside a local Git clone with active or unpushed development
+    local local_repo=""
+    if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        local git_root
+        git_root=$(git rev-parse --show-toplevel 2>/dev/null)
+        if [ -f "$git_root/q" ] && [ -d "$git_root/q_modules" ]; then
+            local_repo="$git_root"
         fi
-    done
+    fi
+
+    local success=true
+
+    if [ -n "$local_repo" ]; then
+        local is_ahead=false
+        local is_dirty=false
+        [ -n "$(git status --porcelain 2>/dev/null)" ] && is_dirty=true
+        git status -sb 2>/dev/null | grep -q 'ahead' && is_ahead=true
+
+        if [ "$is_ahead" = true ] || [ "$is_dirty" = true ]; then
+            print_boxed_line "${C_BOLD}${C_CYAN}📦 [2/3] Local Active Development Detected (${local_repo})...${C_RESET}"
+            # Synchronize directly from local repository into destination directory
+            cp -rf "$local_repo/q" "$local_repo/q_modules" "$local_repo/scripts" "$dest_dir/"
+            cp -f "$local_repo/install.sh" "$local_repo/uninstall.sh" "$dest_dir/" 2>/dev/null || true
+            [ -f "$local_repo/setup.sh" ] && cp -f "$local_repo/setup.sh" "$dest_dir/" 2>/dev/null || true
+            [ -f "$local_repo/input.conf.example" ] && cp -f "$local_repo/input.conf.example" "$dest_dir/" 2>/dev/null || true
+            [ -f "$local_repo/mpv.conf.example" ] && cp -f "$local_repo/mpv.conf.example" "$dest_dir/" 2>/dev/null || true
+            print_boxed_line "  ${C_GREEN}✅ Synchronized local development changes to ~/.local/bin/mpv!${C_RESET}"
+            print_boxed_line "  ${C_GRAY}ℹ️  Unpushed/active code preserved (will not overwrite with older GitHub files)${C_RESET}"
+        else
+            print_boxed_line "${C_BOLD}${C_CYAN}📦 [2/3] Pulling Latest Queue Engine Components from Git Remote...${C_RESET}"
+            (cd "$local_repo" && (git pull --ff-only 2>/dev/null || git pull 2>/dev/null || true))
+            cp -rf "$local_repo/q" "$local_repo/q_modules" "$local_repo/scripts" "$dest_dir/"
+            cp -f "$local_repo/install.sh" "$local_repo/uninstall.sh" "$dest_dir/" 2>/dev/null || true
+            [ -f "$local_repo/setup.sh" ] && cp -f "$local_repo/setup.sh" "$dest_dir/" 2>/dev/null || true
+            [ -f "$local_repo/input.conf.example" ] && cp -f "$local_repo/input.conf.example" "$dest_dir/" 2>/dev/null || true
+            [ -f "$local_repo/mpv.conf.example" ] && cp -f "$local_repo/mpv.conf.example" "$dest_dir/" 2>/dev/null || true
+            print_boxed_line "  ${C_GREEN}✅ Synced latest repository commits to ~/.local/bin/mpv!${C_RESET}"
+        fi
+    else
+        print_boxed_line "${C_BOLD}${C_CYAN}📦 [2/3] Fetching Latest Queue Engine Components from GitHub...${C_RESET}"
+        local files=(
+            "q"
+            "q_modules/ui.sh"
+            "q_modules/utils.sh"
+            "q_modules/media.sh"
+            "q_modules/queue.sh"
+            "q_modules/search.sh"
+            "q_modules/batch.sh"
+            "q_modules/playlist.sh"
+            "q_modules/download.sh"
+            "q_modules/hybrid_bridge.py"
+            "q_modules/android_stream_bridge.py"
+            "scripts/PipeRelay.cs"
+            "scripts/PipeRelay.ps1"
+            "scripts/queue_video.lua"
+            "scripts/queue_android_bridge.lua"
+            "install.sh"
+            "uninstall.sh"
+            "setup.sh"
+            "input.conf.example"
+            "mpv.conf.example"
+        )
+        local base_url="https://raw.githubusercontent.com/ravin-ship-it/queue/main"
+        local cache_bust="?v=$(date +%s)"
+
+        for f in "${files[@]}"; do
+            mkdir -p "$dest_dir/$(dirname "$f")"
+            if curl -sSL -f -H "Cache-Control: no-cache" "${base_url}/${f}${cache_bust}" -o "${dest_dir}/${f}.tmp" 2>/dev/null; then
+                mv "${dest_dir}/${f}.tmp" "${dest_dir}/${f}"
+            else
+                rm -f "${dest_dir}/${f}.tmp"
+                # If file already exists locally, keep it without hard failure
+                if [ ! -f "${dest_dir}/${f}" ]; then
+                    success=false
+                fi
+            fi
+        done
+    fi
 
     # 3. Mode-Specific & Host Re-Synchronization
     print_boxed_line "${C_BOLD}${C_CYAN}📦 [3/3] Synchronizing Environment & Engine Profiles...${C_RESET}"
@@ -625,10 +670,10 @@ show_help() {
     print_boxed_line "${C_YELLOW}Commands:${C_RESET}"
     print_boxed_line "  -i [N|url]      Metadata & Track Inspector (Synced Resolution)"
     print_boxed_line "  -vid [sz|N]     Toggle Desktop Video Window ${C_GRAY}(small|med|large|F11)${C_RESET}"
-    print_boxed_line "  -aud [on|off]   Audio-Only Mode ${C_GRAY}(98% bandwidth reduction / pure Opus)${C_RESET}"
+    print_boxed_line "  -aud [on|off]   Audio-Only Pipeline ${C_GRAY}(98% bandwidth reduction, pure Opus)${C_RESET}"
     print_boxed_line "  -res [val]      Set/Check Video Quality ${C_GRAY}(low|mid|high|max|auto|audio)${C_RESET}"
     print_boxed_line "  -speed [val]    Set/Check Playback Speed ${C_GRAY}(0.25-4.0x, reset, +/-0.1)${C_RESET}"
-    print_boxed_line "  -lang [code]    Set/Inspect Audio Language & Dubs ${C_GRAY}(en|zh|ja|auto)${C_RESET}"
+    print_boxed_line "  -lang [code]    Audio Language & Dub Switcher ${C_GRAY}(Normal/Blind session picker)${C_RESET}"
     if [ "$IS_ANDROID" = true ]; then
         print_boxed_line "  -hybrid [o|off] Toggle Dual-Engine: Standalone (Termux Audio) vs Hybrid (MPV App)"
     else
@@ -636,7 +681,7 @@ show_help() {
     fi
     print_boxed_line "  -d / -dl [N|u]  Interactive Downloader Hub (Format & Dir Wizard)"
     print_boxed_line "  -p [N]          Play/Pause or Jump to track N ${C_GRAY}(Supports: 10+5)${C_RESET}"
-    print_boxed_line "  -pb [target]    Blind Mode: One-time isolated play ${C_GRAY}(pauses & auto-resumes queue)${C_RESET}"
+    print_boxed_line "  -pb [target]    Blind Mode: One-time isolated playback ${C_GRAY}(zero queue edit)${C_RESET}"
     print_boxed_line "  -next / -prev   Next/Prev track ${C_GRAY}(Synced Logs)${C_RESET}"
     print_boxed_line "  -stop           Stop (Quit) MPV"
     print_boxed_line "  -v [N]          Volume Control (Show or Set to N)"
@@ -656,7 +701,7 @@ show_help() {
     print_boxed_line "  -clr            Clear entire queue"
     print_boxed_line "  -auto           Toggle Auto-Discovery (24/7 Related Hits)"
     print_boxed_line "  -deps           System & Multi-Engine Dependencies Diagnostic"
-    print_boxed_line "  -up             Full Queue & Engine Auto-Updater (yt-dlp + scripts)"
+    print_boxed_line "  -up             Universal Auto-Updater ${C_GRAY}(yt-dlp, engine, local dev sync)${C_RESET}"
     print_boxed_line "  -install        Verify or reinstall Queue components"
     print_boxed_line "  -uninstall      Uninstall Queue (safely preserves instant reinstaller)"
     print_boxed_line "  -remove-setup   Permanently wipe setup file (after uninstallation)"
