@@ -680,9 +680,9 @@ if [ -z "$1" ]; then
     width=$((cols - 2)); [ "$width" -lt 0 ] && width=0
     printf -v LINE "%*s" "$width" ""; LINE=${LINE// /─}
 
-    local init_filename=""
+    init_filename=""
     [[ "$init_idx" =~ ^[0-9]+$ ]] && [ "$init_idx" -gt 0 ] && init_filename=$(echo "$init_fingerprint" | cut -d';' -f"$init_idx" 2>/dev/null)
-    local h_auto=""
+    h_auto=""
     is_auto_track "$init_filename" && h_auto="${C_PURP}Ⓐ ${C_RST}"
 
     if [ "$init_idle" == "true" ]; then
@@ -760,9 +760,9 @@ if [ -z "$1" ]; then
                 width=$((curr_cols - 2)); [ "$width" -lt 0 ] && width=0
                 printf -v LINE "%*s" "$width" ""; LINE=${LINE// /─}
                 
-                local live_fname=""
+                live_fname=""
                 [[ "$curr_idx" =~ ^[0-9]+$ ]] && [ "$curr_idx" -gt 0 ] && live_fname=$(echo "$curr_fingerprint" | cut -d';' -f"$curr_idx" 2>/dev/null)
-                local live_h_auto=""
+                live_h_auto=""
                 is_auto_track "$live_fname" && live_h_auto="${C_PURP}Ⓐ ${C_RST}"
 
                 if [ "$idle" == "true" ]; then
@@ -947,7 +947,7 @@ if [ -z "$1" ]; then
                      i=1
                      while IFS= read -r f; do
                          [ -z "$f" ] && continue
-                         local pl_cnt=$(grep -cve '^\s*$' "${PLAYLIST_DIR}/${f}.txt" 2>/dev/null || echo "0")
+                         pl_cnt=$(grep -cve '^\s*$' "${PLAYLIST_DIR}/${f}.txt" 2>/dev/null || echo "0")
                          pl_opt+="${C_ORANGE}${i}${C_RESET}. 📂 ${C_CYAN}${f}${C_RESET} ${C_GRAY}(${pl_cnt} tracks)${C_RESET}\n"
                          ((i++))
                      done < <(find "$PLAYLIST_DIR" -maxdepth 1 -name "*.txt" -exec basename {} .txt \; | sort)
@@ -1084,7 +1084,7 @@ if [ -z "$1" ]; then
                  fi
 
                  # Record removed track in recent removed buffer and trigger fresh auto-discovery
-                 local rem_v_id=""
+                 rem_v_id=""
                  [[ "$removed_playing_filename" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && rem_v_id="${BASH_REMATCH[2]}"
                  [ -n "$rem_v_id" ] && echo "$rem_v_id" >> "$HOME/.cache/mpv/auto_removed_recent"
                  ( auto_queue_related ) >/dev/null 2>&1 & disown
@@ -1112,7 +1112,7 @@ if [ -z "$1" ]; then
                          removed_playing_title="$mpv_title"
                      fi
 
-                     local rem_one_id=""
+                     rem_one_id=""
                      [[ "$filename" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && rem_one_id="${BASH_REMATCH[2]}"
                      [ -n "$rem_one_id" ] && echo "$rem_one_id" >> "$HOME/.cache/mpv/auto_removed_recent"
 
