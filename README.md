@@ -62,7 +62,11 @@ Launch the full-screen interactive queue simply by typing `q`:
 | Feature | Queue (`q`) | Spotify / Desktop Apps | Plain MPV CLI |
 | :--- | :---: | :---: | :---: |
 | **RAM Usage** | **< 15 MB** | 500 MB – 1.2 GB (Electron) | ~15 MB |
-| **24/7 Smart Auto-Discovery** | ✅ (`q -auto` Zero-Gap) | ✅ (Algorithm) | ❌ |
+| **24/7 Smart Auto-Discovery** | ✅ (`q -auto` Seed Rotation + Taste Profile) | ✅ (Algorithm) | ❌ |
+| **Auto-Added Ⓐ Track Tagging** | ✅ Distinct Ⓐ branding on auto hits | ❌ None | ❌ None |
+| **Isolated Blind Mode** | ✅ `q -pb` (Zero-touch queue snapshot) | ❌ Interrupts playback | ⚠️ Basic file open |
+| **Multi-Language Audio Dubs** | ✅ `q -lang` (Dual-session selector) | ❌ None | ⚠️ Manual CLI flags |
+| **Pure Audio-Only Stream** | ✅ `q -aud` (98% bandwidth reduction) | ❌ Downloads video/canvas | ⚠️ Requires `--no-video` |
 | **YouTube & SoundCloud Streaming** | ✅ Zero local storage | ❌ Spotify catalog only | ⚠️ Single URLs only |
 | **Spotify Track Resolver** | ✅ Auto-matches studio audio | ❌ Requires app/login | ❌ None |
 | **Desktop Video Window** | ✅ `q -vid` (120+ FPS / Resizable) | ⚠️ Fixed heavy desktop GUI | ⚠️ Blocks terminal |
@@ -154,6 +158,7 @@ Queue adapts its rendering and audio engine based on the host platform:
 | `q <query>` | Search YouTube & select track |
 | `q -p [N]` | Play/Pause or jump to track `N` |
 | `q -pb [target]` | **Blind Mode**: One-time isolated play (pauses queue, restores on exit) |
+| `q -auto [cmd]` | **Smart Auto-Discovery**: 24/7 radio (`on`, `off`, `status`, `fetch`, `reset`, tagged `Ⓐ`) |
 | `q -next` / `-prev` | Skip to next or previous track |
 | `q -stop` | Stop playback and kill MPV background daemon |
 | `q -shuf` | Toggle Smart Virtual Shuffle (Zero-repeat history stack) |
@@ -163,6 +168,8 @@ Queue adapts its rendering and audio engine based on the host platform:
 | `q -speed [val]` | Set/Check playback speed (`0.25x` - `4.0x`, `reset`) |
 | `q -lang [code]` | **Audio Language & Dub Switcher**: Multi-track dubs with Dual-Session Selector |
 | `q -hybrid [on\|off]` | Switch between Standalone and Hybrid Boost engines |
+| `q -pl-load [N]` | **Playlist Hub**: Interactive FZF playlist explorer & loader |
+| `q -pl-save <N>` | Save current queue as a custom named playlist |
 | `q -dis [N]` / `-rmd` | Dislike track and blacklist from auto-discovery |
 | `q -disl` | Interactive Dislike Hub (FZF blacklist manager) |
 | `q -fx` | Toggle Dolby Equalizer & Spatial Audio FX |
