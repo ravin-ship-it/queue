@@ -142,52 +142,56 @@ fi
 # --- Command Parsing ---
 
 PROCESSED_ANY_FLAG=false
-SMART_CMDS="^(play|pause|stop|next|prev|vol|info|list|clear|shuffle|remove|move|swap|help|save|load|auto|fx|deps|up|install|setup|uninstall|remove-setup|pb|blind|download|dl|d|dislike|dis|disl|rmd|undis|undislike|like|vid|video|watch|version|ver|res|quality|hybrid|hy|lang|audio|speed|sp|aud)$"
+SMART_CMDS="^(play|pause|stop|next|prev|vol|info|list|clear|shuffle|remove|move|swap|help|save|load|auto|fx|deps|up|install|setup|uninstall|remove-setup|pb|blind|download|dl|d|dislike|dis|disl|rmd|undis|undislike|like|vid|video|watch|version|ver|res|quality|hybrid|hy|lang|audio|speed|sp|aud|loop|loop-file|loop-playlist|lp|status|clean|pl-clean)$"
 
 while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
     PROCESSED_ANY_FLAG=true
     
-    # Normalize Smart Commands to Flags
+    # Normalize Smart Commands and Long Flags
     CMD="$1"
-    if [[ ! "$CMD" =~ ^- ]]; then
-        case "$CMD" in
-            play|pause) CMD="-p" ;;
-            stop) CMD="-stop" ;;
-            next) CMD="-next" ;;
-            prev) CMD="-prev" ;;
-            vol) CMD="-v" ;;
-            info) CMD="-i" ;;
-            list) CMD="-pl-list" ;;
-            clear) CMD="-clr" ;;
-            shuffle) CMD="-shuf" ;;
-            remove) CMD="-rm" ;;
-            move) CMD="-mv" ;;
-            swap) CMD="-sw" ;;
-            help) CMD="-h" ;;
-            save) CMD="-pl-save" ;;
-            load) CMD="-pl-load" ;;
-            auto) CMD="-auto" ;;
-            fx) CMD="-fx" ;;
-            deps) CMD="-deps" ;;
-            up) CMD="-up" ;;
-            install|setup) CMD="-install" ;;
-            remove-setup) CMD="-remove-setup" ;;
-            uninstall) CMD="-uninstall" ;;
-            pb|blind) CMD="-pb" ;;
-            download|dl|d) CMD="-d" ;;
-            dislike|dis) CMD="-dis" ;;
-            disl) CMD="-disl" ;;
-            undis|undislike|like) CMD="-undis" ;;
-            rmd) CMD="-rmd" ;;
-            vid|video|watch) CMD="-vid" ;;
-            version|ver) CMD="-version" ;;
-            res|quality) CMD="-res" ;;
-            hybrid|hy) CMD="-hybrid" ;;
-            lang|audio) CMD="-lang" ;;
-            speed|sp) CMD="-speed" ;;
-            aud) CMD="-aud" ;;
-        esac
-    fi
+    raw_cmd="${CMD#--}"
+    raw_cmd="${raw_cmd#-}"
+    case "$raw_cmd" in
+        play|pause) CMD="-p" ;;
+        stop) CMD="-stop" ;;
+        next) CMD="-next" ;;
+        prev) CMD="-prev" ;;
+        vol) CMD="-v" ;;
+        info|status) CMD="-i" ;;
+        list) CMD="-pl-list" ;;
+        clear) CMD="-clr" ;;
+        shuffle) CMD="-shuf" ;;
+        remove) CMD="-rm" ;;
+        move) CMD="-mv" ;;
+        swap) CMD="-sw" ;;
+        help) CMD="-h" ;;
+        save) CMD="-pl-save" ;;
+        load) CMD="-pl-load" ;;
+        auto) CMD="-auto" ;;
+        fx) CMD="-fx" ;;
+        deps) CMD="-deps" ;;
+        up) CMD="-up" ;;
+        install|setup) CMD="-install" ;;
+        remove-setup) CMD="-remove-setup" ;;
+        uninstall) CMD="-uninstall" ;;
+        pb|blind) CMD="-pb" ;;
+        download|dl|d) CMD="-d" ;;
+        dislike|dis) CMD="-dis" ;;
+        disl) CMD="-disl" ;;
+        undis|undislike|like) CMD="-undis" ;;
+        rmd) CMD="-rmd" ;;
+        vid|video|watch) CMD="-vid" ;;
+        version|ver) CMD="-version" ;;
+        res|quality) CMD="-res" ;;
+        hybrid|hy) CMD="-hybrid" ;;
+        lang|audio) CMD="-lang" ;;
+        speed|sp) CMD="-speed" ;;
+        aud) CMD="-aud" ;;
+        loop|loop-file) CMD="-l" ;;
+        loop-playlist|lp) CMD="-lp" ;;
+        clean) CMD="-clean" ;;
+        pl-clean) CMD="-pl-clean" ;;
+    esac
 
     case "$CMD" in
         -rm) 
@@ -223,12 +227,17 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
             ;;
         -dis|-dislike)
             shift
-            targets=()
-            while [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]] && [[ ! "$1" =~ $SMART_CMDS ]]; do
-                targets+=("$1")
+            if [[ "$1" == "list" ]]; then
+                cmd_dislike_list
                 shift
-            done
-            cmd_dislike "${targets[@]}"
+            else
+                targets=()
+                while [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]] && [[ ! "$1" =~ $SMART_CMDS ]]; do
+                    targets+=("$1")
+                    shift
+                done
+                cmd_dislike "${targets[@]}"
+            fi
             ;;
         -disl)
             cmd_dislike_list
@@ -236,12 +245,17 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
             ;;
         -undis|-undislike|-like)
             shift
-            targets=()
-            while [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]] && [[ ! "$1" =~ $SMART_CMDS ]]; do
-                targets+=("$1")
+            if [[ "$1" == "list" ]]; then
+                cmd_dislike_list
                 shift
-            done
-            cmd_undislike "${targets[@]}"
+            else
+                targets=()
+                while [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]] && [[ ! "$1" =~ $SMART_CMDS ]]; do
+                    targets+=("$1")
+                    shift
+                done
+                cmd_undislike "${targets[@]}"
+            fi
             ;;
         -rmr) cmd_remove_redundant; shift ;; 
         -pl-rmr) 
@@ -324,27 +338,71 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
             ;; 
         -clr) cmd_clear; shift ;; 
         -auto)
-            if [ -f "$HOME/.cache/mpv/auto_enabled" ]; then
-                rm "$HOME/.cache/mpv/auto_enabled"
-                echo -e "${C_ORANGE}🤖 Auto Mode: DISABLED${C_RESET}"
-            else
-                touch "$HOME/.cache/mpv/auto_enabled"
-                rm -f "$HOME/.cache/mpv/radio_enabled" # Cleanup old
-                
-                # Disable looping to allow Auto Mode to manage discovery at the end of the queue
-                if [ "$MPV_RUNNING" = true ]; then
-                    echo '{ "command": ["set_property", "loop-file", "no"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
-                    echo '{ "command": ["set_property", "loop-playlist", "no"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
-                fi
-
-                echo -e "${C_PINK}🤖 Auto Mode: ENABLED${C_RESET}"
-                echo -e "${C_GRAY}   -> 24/7 Zero-Gap Playback. Auto-queuing related hits & goldmines.${C_RESET}"
-                # Start monitor if MPV is running
-                [ "$MPV_RUNNING" = true ] && start_idle_monitor
-                # Trigger immediate check if idle
-                ( auto_queue_related ) >/dev/null 2>&1 &
-            fi
             shift
+            auto_action="${1:-}"
+            case "$auto_action" in
+                status)
+                    shift
+                    if [ -f "$HOME/.cache/mpv/auto_enabled" ]; then
+                        echo -e "${C_PINK}🤖 Auto Mode:${C_RESET} ${C_GREEN}ENABLED ✅${C_RESET} ${C_GRAY}(24/7 Zero-Gap discovery active)${C_RESET}"
+                    else
+                        echo -e "${C_PINK}🤖 Auto Mode:${C_RESET} ${C_GRAY}DISABLED ❌${C_RESET}"
+                    fi
+                    ;;
+                on|enable|start)
+                    shift
+                    touch "$HOME/.cache/mpv/auto_enabled"
+                    rm -f "$HOME/.cache/mpv/radio_enabled"
+                    if [ "$MPV_RUNNING" = true ]; then
+                        echo '{ "command": ["set_property", "loop-file", "no"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                        echo '{ "command": ["set_property", "loop-playlist", "no"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                        start_idle_monitor
+                        ( auto_queue_related ) >/dev/null 2>&1 &
+                    fi
+                    echo -e "${C_PINK}🤖 Auto Mode: ENABLED${C_RESET}"
+                    echo -e "${C_GRAY}   -> 24/7 Zero-Gap Playback. Auto-queuing related hits & goldmines.${C_RESET}"
+                    ;;
+                off|disable|stop)
+                    shift
+                    rm -f "$HOME/.cache/mpv/auto_enabled"
+                    echo -e "${C_ORANGE}🤖 Auto Mode: DISABLED${C_RESET}"
+                    ;;
+                toggle)
+                    shift
+                    if [ -f "$HOME/.cache/mpv/auto_enabled" ]; then
+                        rm -f "$HOME/.cache/mpv/auto_enabled"
+                        echo -e "${C_ORANGE}🤖 Auto Mode: DISABLED${C_RESET}"
+                    else
+                        touch "$HOME/.cache/mpv/auto_enabled"
+                        rm -f "$HOME/.cache/mpv/radio_enabled"
+                        if [ "$MPV_RUNNING" = true ]; then
+                            echo '{ "command": ["set_property", "loop-file", "no"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                            echo '{ "command": ["set_property", "loop-playlist", "no"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                            start_idle_monitor
+                            ( auto_queue_related ) >/dev/null 2>&1 &
+                        fi
+                        echo -e "${C_PINK}🤖 Auto Mode: ENABLED${C_RESET}"
+                        echo -e "${C_GRAY}   -> 24/7 Zero-Gap Playback. Auto-queuing related hits & goldmines.${C_RESET}"
+                    fi
+                    ;;
+                *)
+                    if [ -f "$HOME/.cache/mpv/auto_enabled" ]; then
+                        rm -f "$HOME/.cache/mpv/auto_enabled"
+                        echo -e "${C_ORANGE}🤖 Auto Mode: DISABLED${C_RESET}"
+                    else
+                        touch "$HOME/.cache/mpv/auto_enabled"
+                        rm -f "$HOME/.cache/mpv/radio_enabled"
+                        if [ "$MPV_RUNNING" = true ]; then
+                            echo '{ "command": ["set_property", "loop-file", "no"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                            echo '{ "command": ["set_property", "loop-playlist", "no"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                            start_idle_monitor
+                            ( auto_queue_related ) >/dev/null 2>&1 &
+                        fi
+                        echo -e "${C_PINK}🤖 Auto Mode: ENABLED${C_RESET}"
+                        echo -e "${C_GRAY}   -> 24/7 Zero-Gap Playback. Auto-queuing related hits & goldmines.${C_RESET}"
+                    fi
+                    ;;
+            esac
             ;;
         -shuf) 
             shift
@@ -409,7 +467,10 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
             ;; 
         -aud|--aud)
             shift
-            if [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]] && [[ ! "$1" =~ $SMART_CMDS ]]; then
+            if [[ -n "$1" ]] && [[ "$1" =~ ^(status|on|off|toggle)$ ]]; then
+                cmd_audio_mode "$1"
+                shift
+            elif [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]] && [[ ! "$1" =~ $SMART_CMDS ]]; then
                 cmd_audio_mode "$1"
                 shift
             else
@@ -515,7 +576,10 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
             if [[ "$1" =~ ^(ceiling|hw|hardware) ]] && [[ -n "$2" ]] && [[ ! "$2" =~ ^- ]]; then
                 cmd_resolution "$1" "$2"
                 shift 2
-            elif [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]]; then
+            elif [[ -n "$1" ]] && [[ "$1" =~ ^(status|default|best|worst|auto|[0-9]+p?)$ ]]; then
+                cmd_resolution "$1"
+                shift
+            elif [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]] && [[ ! "$1" =~ $SMART_CMDS ]]; then
                 cmd_resolution "$1"
                 shift
             else
@@ -531,9 +595,12 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
             done
             cmd_language "${lang_args[@]}"
             ;;
-        -hybrid|--hybrid)
+        -hybrid|--hybrid|-hy|--hy)
             shift
-            if [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]] && [[ ! "$1" =~ $SMART_CMDS ]]; then
+            if [[ -n "$1" ]] && [[ "$1" =~ ^(status|on|off|toggle)$ ]]; then
+                cmd_hybrid_toggle "$1"
+                shift
+            elif [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]] && [[ ! "$1" =~ $SMART_CMDS ]]; then
                 cmd_hybrid_toggle "$1"
                 shift
             else
@@ -543,8 +610,8 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
         -speed|--speed|-sp|--sp)
             shift
             sp_arg=""
-            if [[ -n "$1" ]] && { [[ "$1" =~ ^[+-]?[0-9] ]] || [[ "$1" =~ ^(reset|normal|half|double|default)$ ]] || [[ ! "$1" =~ ^- ]]; }; then
-                if [[ ! "$1" =~ $SMART_CMDS ]] || [[ "$1" =~ ^(half|double)$ ]]; then
+            if [[ -n "$1" ]] && { [[ "$1" =~ ^[+-]?[0-9] ]] || [[ "$1" =~ ^(reset|normal|half|double|default|status)$ ]] || [[ ! "$1" =~ ^- ]]; }; then
+                if [[ ! "$1" =~ $SMART_CMDS ]] || [[ "$1" =~ ^(half|double|status)$ ]]; then
                     sp_arg="$1"
                     shift
                 fi

@@ -873,8 +873,8 @@ cmd_speed() {
         fi
     fi
 
-    # 1. Query mode (empty input)
-    if [ -z "$input" ]; then
+    # 1. Query mode (empty input or status)
+    if [ -z "$input" ] || [ "$input" == "status" ]; then
         local status_desc="Normal"
         if [ "$cur_speed" == "1.00" ]; then
             status_desc="Normal"

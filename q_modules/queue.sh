@@ -916,6 +916,23 @@ cmd_dislike_list() {
     local bl_file="$HOME/.cache/mpv/auto_blacklist"
     touch "$bl_file" 2>/dev/null
 
+    if [ ! -t 0 ]; then
+        if [ -s "$bl_file" ]; then
+            echo -e "${C_PURPLE}🪷 Disliked Tracks Blacklist:${C_RESET}"
+            local i=1
+            while IFS=$'\t' read -r bid btitle; do
+                [ -z "$bid" ] && continue
+                [ -z "$btitle" ] && btitle=$(get_cached_title "$bid")
+                [ -z "$btitle" ] && btitle="Track ($bid)"
+                echo -e "  ${C_ORANGE}${i}.${C_RESET} ${C_CYAN}${btitle}${C_RESET} ${C_GRAY}[${bid}]${C_RESET}"
+                ((i++))
+            done < "$bl_file"
+        else
+            echo -e "${C_GRAY}ℹ️ Dislike blacklist is empty.${C_RESET}"
+        fi
+        return 0
+    fi
+
     while true; do
         local items=""
         local count=0

@@ -214,6 +214,12 @@ cmd_playlist_list() {
         return
     fi
 
+    # Non-interactive stream fallback
+    if [ ! -t 0 ]; then
+        cmd_playlist_opts_fzf
+        return 0
+    fi
+
     # 1. Select Playlist
     local pl_opts=$(cmd_playlist_opts_fzf)
     local LINE=$(get_fzf_divider)
