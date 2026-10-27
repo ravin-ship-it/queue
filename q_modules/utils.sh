@@ -946,6 +946,8 @@ load_auto_tracks_to_memory() {
 is_auto_track() {
     local fname="$1"
     local opt_id="$2"
+    [ -z "$fname" ] && [ -z "$opt_id" ] && return 1
+
     if [ ${#AUTO_TRACKS_MEM[@]} -eq 0 ] && [ -f "$AUTO_TRACKS_FILE" ]; then
         load_auto_tracks_to_memory
     fi
@@ -958,7 +960,7 @@ is_auto_track() {
     if [[ "$fname" =~ ^http ]]; then
         clean=$(echo "$fname" | sed -e 's/^[[:space:]]*//; s/[[:space:]]*$//; s/\\t.*//; s/\t.*//')
     fi
-    [ -n "${AUTO_TRACKS_MEM[$clean]}" ] && return 0
+    [ -n "$clean" ] && [ -n "${AUTO_TRACKS_MEM[$clean]}" ] && return 0
 
     local vid=""
     [[ "$clean" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && vid="${BASH_REMATCH[2]}"
@@ -1046,6 +1048,8 @@ load_liked_tracks_to_memory() {
 is_liked_track() {
     local fname="$1"
     local opt_id="$2"
+    [ -z "$fname" ] && [ -z "$opt_id" ] && return 1
+
     if [ ${#LIKED_TRACKS_MEM[@]} -eq 0 ] && { [ -f "$LIKED_TRACKS_FILE" ] || [ -f "$LIKED_PLAYLIST_FILE" ]; }; then
         load_liked_tracks_to_memory
     fi
@@ -1058,7 +1062,7 @@ is_liked_track() {
     if [[ "$fname" =~ ^http ]]; then
         clean=$(echo "$fname" | sed -e 's/^[[:space:]]*//; s/[[:space:]]*$//; s/\\t.*//; s/\t.*//')
     fi
-    [ -n "${LIKED_TRACKS_MEM[$clean]}" ] && return 0
+    [ -n "$clean" ] && [ -n "${LIKED_TRACKS_MEM[$clean]}" ] && return 0
 
     local vid=""
     [[ "$clean" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && vid="${BASH_REMATCH[2]}"
@@ -1078,6 +1082,8 @@ load_disliked_tracks_to_memory() {
 is_disliked_track() {
     local fname="$1"
     local opt_id="$2"
+    [ -z "$fname" ] && [ -z "$opt_id" ] && return 1
+
     if [ ${#DISLIKED_TRACKS_MEM[@]} -eq 0 ] && [ -f "$AUTO_BLACKLIST_FILE" ]; then
         load_disliked_tracks_to_memory
     fi
@@ -1090,7 +1096,7 @@ is_disliked_track() {
     if [[ "$fname" =~ ^http ]]; then
         clean=$(echo "$fname" | sed -e 's/^[[:space:]]*//; s/[[:space:]]*$//; s/\\t.*//; s/\t.*//')
     fi
-    [ -n "${DISLIKED_TRACKS_MEM[$clean]}" ] && return 0
+    [ -n "$clean" ] && [ -n "${DISLIKED_TRACKS_MEM[$clean]}" ] && return 0
 
     local vid=""
     [[ "$clean" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && vid="${BASH_REMATCH[2]}"
@@ -1227,6 +1233,7 @@ unmark_track_disliked() {
 get_track_badges() {
     local fname="$1"
     local vid="$2"
+    [ -z "$fname" ] && [ -z "$vid" ] && return 0
     local tags=""
 
     if is_liked_track "$fname" "$vid"; then
@@ -1522,11 +1529,13 @@ load_cache_to_memory() {
 
 get_cached_row() {
     local url="$1"
+    [ -z "$url" ] && return 0
     echo -e "${CACHE_MEM[$url]}"
 }
 
 get_cached_title() {
     local url="$1"
+    [ -z "$url" ] && return 0
     [ ${#CACHE_MEM[@]} -eq 0 ] && load_cache_to_memory
     local row="${CACHE_MEM[$url]}"
     
@@ -1559,6 +1568,20 @@ get_cached_title() {
     fi
     
     [ -n "$row" ] && echo "$row" | cut -f1 || echo ""
+}
+
+get_cached_artist() {
+    local url="$1"
+    [ -z "$url" ] && return 0
+    local row=$(get_cached_row "$url")
+    [ -n "$row" ] && echo -e "$row" | cut -f2 || echo ""
+}
+
+get_cached_duration() {
+    local url="$1"
+    [ -z "$url" ] && return 0
+    local row=$(get_cached_row "$url")
+    [ -n "$row" ] && echo -e "$row" | cut -f3 || echo ""
 }
 
 fetch_title_bg() {
