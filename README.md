@@ -73,7 +73,7 @@ Launch the full-screen interactive queue simply by typing `q`:
 | **Headless Background Daemon** | ✅ Continuous (`setsid`) | ❌ Window required | ❌ Terminal bound |
 | **Interactive Fuzzy Search (FZF)** | ✅ Instant (0ms) | ⚠️ Slower GUI search | ❌ None |
 | **Zero-Repeat Virtual Shuffle** | ✅ Smart history stack | ⚠️ Repeat prone | ❌ Primitive shuffle |
-| **Taste Blacklisting & Dislike Hub**| ✅ `q -disl` / `q -rmd` / `CTRL-D` | ⚠️ Cloud thumbs down only | ❌ None |
+| **Liked Songs & Dislike Hub** | ✅ `q -liked` / `q -like` / `q -disl` / `CTRL-L` / `CTRL-D` | ⚠️ Cloud playlist only | ❌ None |
 
 ---
 
@@ -168,10 +168,12 @@ Queue adapts its rendering and audio engine based on the host platform:
 | `q -speed [val]` | Set/Check playback speed (`0.25x` - `4.0x`, `reset`) |
 | `q -lang [code]` | **Audio Language & Dub Switcher**: Multi-track dubs with Dual-Session Selector |
 | `q -hybrid [on\|off]` | Switch between Standalone and Hybrid Boost engines |
+| `q -like [N]` / `-unlike` | Like/Unlike track & save to Liked Songs (tagged `❤️ `) |
+| `q -liked` | **Liked Songs Hub**: Interactive FZF player & manager |
 | `q -pl-load [N]` | **Playlist Hub**: Interactive FZF playlist explorer & loader |
 | `q -pl-save <N>` | Save current queue as a custom named playlist |
-| `q -dis [N]` / `-rmd` | Dislike track and blacklist from auto-discovery |
-| `q -disl` | Interactive Dislike Hub (FZF blacklist manager) |
+| `q -dis [N]` / `-rmd` | Dislike track & blacklist from auto-discovery (tagged `💔 `) |
+| `q -disl` | **Dislike Hub**: Interactive FZF blacklist manager |
 | `q -fx` | Toggle Dolby Equalizer & Spatial Audio FX |
 | `q -d [N]` | Interactive Downloader Hub (MP3, FLAC, OPUS, MP4) |
 | `q -deps` | Multi-Engine System & Dependencies Diagnostic |

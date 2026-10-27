@@ -16,8 +16,10 @@ Running `q` without arguments opens the full interactive terminal queue.
 | `ALT-A` | **Invert All** | Inverts current track selections |
 | `INSERT` | **Select All** | Marks all tracks in the current view |
 | `DELETE` | **Deselect All** | Clears all marked selections |
+| `CTRL-L` | **Quick Like** | Likes and saves the highlighted track to Liked Songs directly from search mode |
 | `CTRL-D` | **Quick Dislike** | Blacklists and dislikes the highlighted track directly from search mode |
-| `x` | **Dislike in Inspector** | Dislikes and removes track while viewing metadata (`q -i`) |
+| `l` | **Like / Unlike in Inspector** | Toggles like status for track while viewing metadata (`q -i`) |
+| `x` | **Dislike in Inspector** | Dislikes track while viewing metadata (`q -i`) |
 | `v` | **Watch Video Window** | Launches the desktop video window directly from Inspector (`q -i`) |
 
 ---
@@ -271,6 +273,34 @@ q -pb -aud "https://www.youtube.com/watch?v=..."
 2. **Pristine State Guarantee**: The target track/video is **never** added to your playlist files (`last_playlist.txt`) and **never** recorded in your shuffle history stack.
 3. **Dedicated Video Window**: Automatically opens a resizable video window (supporting `F11` fullscreen, `w`/`W` sizing presets, `+/-` scaling, `0-4` quality switches, and `'a'` audio dub cycling).
 4. **Instant Queue Restoration**: When the video finishes (EOF) or when you close the window (`q` or `ESC`), Queue automatically unpauses your previous session, resuming playback at the exact second where you left off.
+
+---
+
+## ❤️ Liked Songs & Preference System
+
+Queue lets you save your favorite music, curate Liked Songs, and tag tracks with visual preference badges across all interfaces:
+
+```bash
+# Like currently playing track
+q -like
+
+# Like specific track by queue index, URL, or title
+q -like 2
+q -like "https://youtu.be/..."
+
+# Remove track from Liked Songs
+q -unlike [N|url]
+
+# Interactive Liked Songs Hub (FZF Hub to Play All, Shuffle Play, Batch Unlike, Download)
+q -liked                # or: q -likel, q -like list
+```
+
+### 🏷️ Status Badges & Indicators
+| Indicator | Meaning | Where It Appears |
+| :---: | :--- | :--- |
+| `❤️ ` | **Liked Track** | Queue list, FZF queue, now playing logs, FZF search results, Inspector |
+| `💔 ` | **Disliked Track** | Queue list, FZF search results, Inspector |
+| `Ⓐ ` | **Auto-Discovered Track** | Queue list and now playing logs when fetched by smart auto-discovery |
 
 ---
 

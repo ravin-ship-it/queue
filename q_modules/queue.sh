@@ -27,6 +27,8 @@ show_queue() {
     # Load cache into memory ONCE at the start
     load_cache_to_memory
     load_auto_tracks_to_memory
+    load_liked_tracks_to_memory
+    load_disliked_tracks_to_memory
 
     local mpv_raw=$(echo -e '{"command":["get_property","playlist"]}\n{"command":["get_property","pause"]}\n{"command":["get_property","idle-active"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
     local is_paused=$(echo "$mpv_raw" | jq -s -r 'map(select(.event == null)) | .[1].data // false')
@@ -156,11 +158,8 @@ show_queue() {
         [ -n "$meta_artist" ] && [ "$meta_artist" != "null" ] && [ "$meta_artist" != "$CLEAN_FILENAME" ] && artist_part=" ${C_GRAY}by${C_RESET} ${C_LIGHT_PINK}$meta_artist${C_RESET}"
         [ -n "$meta_duration" ] && [ "$meta_duration" != "null" ] && [ "$meta_duration" != "0:00" ] && dur_part=" ${C_ORANGE}[$meta_duration]${C_RESET}"
         
-        # Auto-Discovery Indicator (Ⓐ)
-        local auto_tag=""
-        if is_auto_track "$CLEAN_FILENAME" "$vid_id"; then
-            auto_tag="${C_PURPLE}Ⓐ${C_RESET} "
-        fi
+        # Track Status Badges (❤️ Liked, 💔 Disliked, Ⓐ Auto-Discovered)
+        local badges=$(get_track_badges "$CLEAN_FILENAME" "$vid_id")
 
         # Player Indicator (|>/||) and Active Track Highlighting
         local ind="   "
@@ -179,19 +178,19 @@ show_queue() {
         fi
 
         if [ -t 1 ] && [ "$IN_FZF" != "true" ]; then
-            # Truncate title to fit terminal while keeping artist/duration and auto tag
+            # Truncate title to fit terminal while keeping artist/duration and badges
             local index_w=${#i}
-            local meta_w=$(get_visual_width "$(strip_colors "$artist_part$dur_part$auto_tag")")
+            local meta_w=$(get_visual_width "$(strip_colors "$artist_part$dur_part$badges")")
             # INNER_WIDTH is (TERM_WIDTH - 6) for borders and padding
             local title_max_w=$((TERM_WIDTH - index_w - meta_w - 13))
             [ "$title_max_w" -lt 15 ] && title_max_w=15
             
             local final_title=$(truncate_text "$DISPLAY_TITLE" "$title_max_w")
-            printf -v LINE_CONTENT "%s%s. %s%s%s%s%s%s" "$ind" "${C_ORANGE}$i${C_RESET}" "$auto_tag" "$title_color" "$final_title" "${C_RESET}" "$artist_part" "$dur_part"
+            printf -v LINE_CONTENT "%s%s. %s%s%s%s%s%s" "$ind" "${C_ORANGE}$i${C_RESET}" "$badges" "$title_color" "$final_title" "${C_RESET}" "$artist_part" "$dur_part"
             print_boxed_line "$LINE_CONTENT"
         else
             # Simple format for FZF or Raw output
-            printf "%s%s. %s%s%s%s%s%s\n" "$ind" "${C_ORANGE}$i${C_RESET}" "$auto_tag" "$fzf_title_prefix" "$DISPLAY_TITLE" "$fzf_title_suffix" "$artist_part" "$dur_part"
+            printf "%s%s. %s%s%s%s%s%s\n" "$ind" "${C_ORANGE}$i${C_RESET}" "$badges" "$fzf_title_prefix" "$DISPLAY_TITLE" "$fzf_title_suffix" "$artist_part" "$dur_part"
         fi
         
         # Pass NEEDS_FETCH status out of the loop via a temp file or similar if needed, 
@@ -212,7 +211,7 @@ show_queue() {
     fi
 }
 
-cmd_dislike() {
+cmd_like() {
     local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
 
     if [ "$#" -eq 0 ] || [ -z "$1" ]; then
@@ -221,11 +220,11 @@ cmd_dislike() {
         local filename=$(echo "$item_json" | jq -r '.filename // ""')
         local title=$(echo "$item_json" | jq -r '.title // ""')
         if [ -z "$filename" ]; then
-            echo -e "${C_PINK}🔇 No track currently playing to dislike.${C_RESET}"
+            echo -e "${C_PINK}🔇 No track currently playing to like.${C_RESET}"
             return 1
         fi
-        add_to_auto_blacklist "$filename" "$title"
-        echo -e "${C_PINK}👎 Disliked & Blacklisted from Auto Mode:${C_RESET} ${C_CYAN}${title:-$filename}${C_RESET}"
+        mark_track_liked "$filename" "$title"
+        echo -e "${C_PINK}❤️  Liked & Saved to Liked Songs:${C_RESET} ${C_CYAN}${title:-$filename}${C_RESET}"
         return 0
     fi
 
@@ -253,10 +252,386 @@ cmd_dislike() {
         fi
 
         if [ -n "$filename" ]; then
-            add_to_auto_blacklist "$filename" "$title"
-            echo -e "${C_PINK}👎 Disliked & Blacklisted from Auto Mode:${C_RESET} ${C_CYAN}${title:-$filename}${C_RESET}"
+            mark_track_liked "$filename" "$title"
+            echo -e "${C_PINK}❤️  Liked & Saved to Liked Songs:${C_RESET} ${C_CYAN}${title:-$filename}${C_RESET}"
         else
-            echo -e "${C_PINK}🔍🤷 No track matching [${C_ORANGE}${target}${C_PINK}] found to dislike.${C_RESET}"
+            local cached_title=$(get_cached_title "$target")
+            if [ -n "$cached_title" ]; then
+                mark_track_liked "$target" "$cached_title"
+                echo -e "${C_PINK}❤️  Liked & Saved to Liked Songs:${C_RESET} ${C_CYAN}${cached_title}${C_RESET}"
+            else
+                echo -e "${C_PINK}🔍🤷 No track matching [${C_ORANGE}${target}${C_PINK}] found to like.${C_RESET}"
+            fi
+        fi
+    done
+}
+
+cmd_unlike() {
+    local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
+
+    if [ "$#" -eq 0 ] || [ -z "$1" ]; then
+        local item_json=$(echo "$track_info" | jq -s -c 'map(select(.event == null)) | .[0].data[] | select(.current) // empty' 2>/dev/null)
+        local filename=$(echo "$item_json" | jq -r '.filename // ""')
+        local title=$(echo "$item_json" | jq -r '.title // ""')
+        if [ -n "$filename" ] && is_liked_track "$filename"; then
+            unmark_track_liked "$filename"
+            echo -e "${C_GRAY}🤍 Removed from Liked Songs:${C_RESET} ${C_CYAN}${title:-$filename}${C_RESET}"
+            return 0
+        else
+            cmd_liked_list
+            return $?
+        fi
+    fi
+
+    for target in "$@"; do
+        [ -z "$target" ] && continue
+        local filename=""
+        local title=""
+        if [[ "$target" =~ ^[0-9]+$ ]]; then
+            local idx=$((target - 1))
+            local item_json=$(echo "$track_info" | jq -s -c "map(select(.event == null)) | .[0].data[$idx] // empty" 2>/dev/null)
+            filename=$(echo "$item_json" | jq -r '.filename // ""')
+            title=$(echo "$item_json" | jq -r '.title // ""')
+        elif [[ "$target" =~ ^http ]]; then
+            filename="$target"
+            title="$target"
+        else
+            filename="$target"
+            title="$target"
+        fi
+
+        if [ -n "$filename" ]; then
+            unmark_track_liked "$filename"
+            echo -e "${C_GRAY}🤍 Removed from Liked Songs:${C_RESET} ${C_CYAN}${title:-$filename}${C_RESET}"
+        fi
+    done
+}
+
+cmd_liked_list() {
+    mkdir -p "$(dirname "$LIKED_PLAYLIST_FILE")" 2>/dev/null
+    touch "$LIKED_PLAYLIST_FILE" "$LIKED_TRACKS_FILE" 2>/dev/null
+    load_liked_tracks_to_memory
+
+    if [ ! -t 0 ]; then
+        if [ -s "$LIKED_PLAYLIST_FILE" ]; then
+            echo -e "${C_PURPLE}🪷 Liked Songs Playlist:${C_RESET}"
+            local i=1
+            while IFS= read -r url; do
+                [ -z "$url" ] && continue
+                local clean="$url"
+                [[ "$url" =~ ^http ]] && clean=$(echo "$url" | sed -e 's/^[[:space:]]*//; s/[[:space:]]*$//; s/\\t.*//; s/\t.*//')
+                local tit=$(get_cached_title "$clean")
+                [ -z "$tit" ] && tit=$(basename "$clean")
+                echo -e "  ${C_ORANGE}${i}.${C_RESET} ❤️  ${C_CYAN}${tit}${C_RESET}"
+                ((i++))
+            done < "$LIKED_PLAYLIST_FILE"
+        else
+            echo -e "${C_GRAY}ℹ️ Liked songs playlist is currently empty.${C_RESET}"
+        fi
+        return 0
+    fi
+
+    while true; do
+        local items=""
+        local count=0
+        if [ -f "$LIKED_PLAYLIST_FILE" ] && [ -s "$LIKED_PLAYLIST_FILE" ]; then
+            local i=1
+            while IFS= read -r url; do
+                [ -z "$url" ] && continue
+                local clean="$url"
+                [[ "$url" =~ ^http ]] && clean=$(echo "$url" | sed -e 's/^[[:space:]]*//; s/[[:space:]]*$//; s/\\t.*//; s/\t.*//')
+                local tit=$(get_cached_title "$clean")
+                [ -z "$tit" ] && tit=$(basename "$clean")
+                local art=$(get_cached_artist "$clean")
+                local dur=$(get_cached_duration "$clean")
+                local art_part=""
+                local dur_part=""
+                [ -n "$art" ] && [ "$art" != "null" ] && art_part=" ${C_GRAY}by${C_RESET} ${C_LIGHT_PINK}${art}${C_RESET}"
+                [ -n "$dur" ] && [ "$dur" != "null" ] && [ "$dur" != "0:00" ] && dur_part=" ${C_ORANGE}[${dur}]${C_RESET}"
+                items+="${C_ORANGE}${i}${C_RESET}. ❤️  ${C_CYAN}${tit}${C_RESET}${art_part}${dur_part}"$'\t'"${clean}"$'\t'"${tit}"$'\n'
+                ((i++))
+                ((count++))
+            done < "$LIKED_PLAYLIST_FILE"
+        fi
+
+        local fzf_input=""
+        [ "$count" -gt 0 ] && fzf_input+="  ▶️   Play All Liked Songs (New Queue)\n"
+        [ "$count" -gt 0 ] && fzf_input+="  🔀  Shuffle Play All Liked Songs\n"
+        [ "$count" -gt 0 ] && fzf_input+="  ➕  Append All Liked Songs to Active Queue\n"
+        fzf_input+="  ✚  Add Track to Liked Songs...\n"
+        [ "$count" -gt 0 ] && fzf_input+="  🗑️   Clear Entire Liked Songs Playlist ($count tracks)\n"
+        fzf_input+="$items"
+
+        local LINE=$(get_fzf_divider)
+        local status_icons=$(get_player_status_icons)
+        local header="${C_PURPLE}🪷 Liked Songs Hub${C_RESET} ${C_GRAY}(${count} tracks • ENTER: Action, TAB: Multi)${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
+        local l_prompt="🎵 ${C_TEAL}Liked Songs${status_icons}${C_RESET} > "
+
+        local sel=$(echo -ne "$fzf_input" | fzf --multi --ansi --height=100% --layout=reverse --border \
+            --header="$header" \
+            --delimiter=$'\t' --with-nth=1 \
+            --bind "tab:toggle,alt-a:toggle-all,insert:select-all,delete:deselect-all" \
+            --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \
+            $FZF_COLOR_OPTS \
+            --info=inline-right --prompt="$l_prompt")
+
+        [ -z "$sel" ] && break
+
+        # Case: Play All Liked Songs
+        if echo "$sel" | grep -q "Play All Liked Songs"; then
+            cmd_playlist_load "Liked" "Replace (New Queue)"
+            break
+        fi
+
+        # Case: Shuffle Play All
+        if echo "$sel" | grep -q "Shuffle Play All"; then
+            cmd_playlist_load "Liked" "Shuffle & Replace"
+            break
+        fi
+
+        # Case: Append All Liked Songs
+        if echo "$sel" | grep -q "Append All Liked"; then
+            cmd_playlist_load "Liked" "Append to Current Queue"
+            break
+        fi
+
+        # Case: Clear Entire Liked Songs Playlist
+        if echo "$sel" | grep -q "Clear Entire Liked"; then
+            > "$LIKED_PLAYLIST_FILE"
+            > "$LIKED_TRACKS_FILE"
+            LIKED_TRACKS_MEM=()
+            echo -e "${C_GREEN}🧹 Liked Songs playlist cleared.${C_RESET}"
+            continue
+        fi
+
+        # Case: Add Track to Liked Songs
+        if echo "$sel" | grep -q "Add Track to Liked Songs"; then
+            local LINE=$(get_fzf_divider)
+            local add_header="${C_PURPLE}🪷 How would you like to add track(s) to Liked Songs?${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
+            local add_prompt="🎵 ${C_TEAL}Add Liked${C_RESET} > "
+            local add_action=$(echo -e "  🎵  Currently Playing Track\n  📋  Pick from Current Queue\n  🕒  Pick from Recent History\n  🔍  Search YouTube to Like\n  🔗  Enter URL or Video ID manually" | \
+                fzf --height=100% --layout=reverse --border --info=inline-right \
+                $FZF_COLOR_OPTS \
+                --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \
+                --header="$add_header" \
+                --prompt="$add_prompt")
+
+            [ -z "$add_action" ] && continue
+
+            if echo "$add_action" | grep -q "Currently Playing"; then
+                cmd_like
+            elif echo "$add_action" | grep -q "Current Queue"; then
+                local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
+                local q_count=$(echo "$track_info" | jq -s -r 'map(select(.event == null)) | .[0].data | length // 0' 2>/dev/null)
+                if [ "$q_count" -eq 0 ]; then
+                    echo -e "${C_PINK}ℹ️ Current queue is empty.${C_RESET}"
+                else
+                    local q_items=""
+                    for ((k=0; k<q_count; k++)); do
+                        local item_json=$(echo "$track_info" | jq -s -c "map(select(.event == null)) | .[0].data[$k] // empty")
+                        local fn=$(echo "$item_json" | jq -r '.filename // ""')
+                        local tt=$(echo "$item_json" | jq -r '.title // ""')
+                        [ -z "$tt" ] && tt="$fn"
+                        local b_tag=$(get_track_badges "$fn")
+                        q_items+="${C_ORANGE}$((k+1))${C_RESET}. ${b_tag}${C_CYAN}${tt}${C_RESET}"$'\t'"${fn}"$'\t'"${tt}"$'\n'
+                    done
+                    local LINE=$(get_fzf_divider)
+                    local q_header="${C_PURPLE}🪷 Select Track(s) from Current Queue to Like${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
+                    local q_prompt="🎵 ${C_TEAL}Queue Like${C_RESET} > "
+                    local q_sel=$(echo -ne "$q_items" | fzf --multi --ansi --height=100% --layout=reverse --border \
+                        --delimiter=$'\t' --with-nth=1 \
+                        --bind "tab:toggle,alt-a:toggle-all,insert:select-all,delete:deselect-all" \
+                        $FZF_COLOR_OPTS \
+                        --header="$q_header" \
+                        --prompt="$q_prompt")
+                    if [ -n "$q_sel" ]; then
+                        while IFS= read -r q_line; do
+                            [ -z "$q_line" ] && continue
+                            local q_url=$(echo "$q_line" | awk -F'\t' '{print $2}')
+                            cmd_like "$q_url"
+                        done <<< "$q_sel"
+                    fi
+                fi
+            elif echo "$add_action" | grep -q "Recent History"; then
+                local hist_file="$HOME/.cache/mpv/auto_history"
+                if [ ! -s "$hist_file" ]; then
+                    echo -e "${C_PINK}ℹ️ Recent history is currently empty.${C_RESET}"
+                else
+                    local h_items=""
+                    local h_idx=1
+                    while IFS= read -r h_id; do
+                        [ -z "$h_id" ] && continue
+                        local h_tit=$(get_cached_title "$h_id")
+                        [ -z "$h_tit" ] && h_tit=$(get_cached_title "https://www.youtube.com/watch?v=$h_id")
+                        [ -z "$h_tit" ] && h_tit="Track ($h_id)"
+                        h_items+="${C_ORANGE}${h_idx}${C_RESET}. ${C_CYAN}${h_tit}${C_RESET} ${C_GRAY}[${h_id}]${C_RESET}"$'\t'"https://www.youtube.com/watch?v=${h_id}"$'\t'"${h_tit}"$'\n'
+                        ((h_idx++))
+                    done < <(tail -n 30 "$hist_file" | tac)
+                    local LINE=$(get_fzf_divider)
+                    local h_header="${C_PURPLE}🪷 Select Track(s) from Recent History to Like${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
+                    local h_prompt="🎵 ${C_TEAL}History Like${C_RESET} > "
+                    local h_sel=$(echo -ne "$h_items" | fzf --multi --ansi --height=100% --layout=reverse --border \
+                        --delimiter=$'\t' --with-nth=1 \
+                        --bind "tab:toggle,alt-a:toggle-all,insert:select-all,delete:deselect-all" \
+                        $FZF_COLOR_OPTS \
+                        --header="$h_header" \
+                        --prompt="$h_prompt")
+                    if [ -n "$h_sel" ]; then
+                        while IFS= read -r h_line; do
+                            [ -z "$h_line" ] && continue
+                            local h_url=$(echo "$h_line" | awk -F'\t' '{print $2}')
+                            cmd_like "$h_url"
+                        done <<< "$h_sel"
+                    fi
+                fi
+            elif echo "$add_action" | grep -q "Search YouTube"; then
+                local s_query=$(prompt_input "Enter search query to like: " "Search")
+                if [ -n "$s_query" ]; then
+                    local s_tmp=$(mktemp 2>/dev/null || echo "${TMPDIR:-/tmp}/q_like_$$.tmp")
+                    ytdl_search_opts=("--extractor-args" "youtube:player_client=visionos,android,web" "--flat-playlist" "--print" "%(title)s\t%(webpage_url)s\t%(duration_string)s\t%(uploader)s" "--no-warnings" "--skip-download")
+                    command -v node >/dev/null 2>&1 && ytdl_search_opts+=("--js-runtimes" "node")
+                    run_with_timeout 25 yt-dlp "${ytdl_search_opts[@]}" "ytsearch15:${s_query}" > "$s_tmp" 2>/dev/null
+                    if [ -s "$s_tmp" ]; then
+                        local s_items=""
+                        local s_idx=1
+                        while IFS=$'\t' read -r stitle surl sdur sart; do
+                            [ -z "$surl" ] && continue
+                            s_items+="${C_ORANGE}${s_idx}${C_RESET}. ${C_CYAN}${stitle}${C_RESET} ${C_GRAY}by${C_RESET} ${C_LIGHT_PINK}${sart}${C_RESET}"$'\t'"${surl}"$'\t'"${stitle}"$'\n'
+                            ((s_idx++))
+                        done < "$s_tmp"
+                        rm -f "$s_tmp"
+                        local LINE=$(get_fzf_divider)
+                        local s_header="${C_PURPLE}🪷 Select Track(s) to Like${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
+                        local s_prompt="🎵 ${C_TEAL}Search Like${C_RESET} > "
+                        local s_sel=$(echo -ne "$s_items" | fzf --multi --ansi --height=100% --layout=reverse --border \
+                            --delimiter=$'\t' --with-nth=1 \
+                            --bind "tab:toggle,alt-a:toggle-all,insert:select-all,delete:deselect-all" \
+                            $FZF_COLOR_OPTS \
+                            --header="$s_header" \
+                            --prompt="$s_prompt")
+                        if [ -n "$s_sel" ]; then
+                            while IFS= read -r s_line; do
+                                [ -z "$s_line" ] && continue
+                                local chosen_url=$(echo "$s_line" | awk -F'\t' '{print $2}')
+                                cmd_like "$chosen_url"
+                            done <<< "$s_sel"
+                        fi
+                    else
+                        echo -e "${C_PINK}⚠️ No results found for \"$s_query\".${C_RESET}"
+                        rm -f "$s_tmp"
+                    fi
+                fi
+            elif echo "$add_action" | grep -q "Enter URL"; then
+                local u_target=$(prompt_input "Enter Video URL or ID: " "URL/ID")
+                [ -n "$u_target" ] && cmd_like "$u_target"
+            fi
+            continue
+        fi
+
+        # Case: User selected one or more tracks from the list
+        local sel_count=$(echo "$sel" | wc -l)
+        local LINE=$(get_fzf_divider)
+        local act_header="${C_PURPLE}🪷 Action for ${C_CYAN}${sel_count}${C_PURPLE} Liked Track(s)${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
+        local act_prompt="🎵 ${C_TEAL}Action${status_icons}${C_RESET} > "
+        local track_action=$(echo -e "  |>  Play Selected\n  ➕  Append to Active Queue\n  🤍  Unlike / Remove from Liked Songs\n  📥  Download Track(s)" | \
+            fzf --height=100% --layout=reverse --border --info=inline-right \
+            $FZF_COLOR_OPTS \
+            --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \
+            --header="$act_header" \
+            --prompt="$act_prompt")
+
+        [ -z "$track_action" ] && continue
+
+        if echo "$track_action" | grep -q "Play Selected"; then
+            declare -a t_urls
+            while IFS= read -r row; do
+                local u=$(echo "$row" | awk -F'\t' '{print $2}')
+                [ -n "$u" ] && t_urls+=("$u")
+            done <<< "$sel"
+            if [ ${#t_urls[@]} -gt 0 ]; then
+                PLAYLIST_URLS=("${t_urls[@]}")
+                DO_NEW_QUEUE=true
+                execute_batch
+                break
+            fi
+        elif echo "$track_action" | grep -q "Append to Active Queue"; then
+            while IFS= read -r row; do
+                local u=$(echo "$row" | awk -F'\t' '{print $2}')
+                local t=$(echo "$row" | awk -F'\t' '{print $3}')
+                if [ -n "$u" ]; then
+                    queue_item_ipc "$u" "$t" "" ""
+                fi
+            done <<< "$sel"
+            echo -e "${C_GREEN}✅ Appended ${sel_count} liked track(s) to queue.${C_RESET}"
+            break
+        elif echo "$track_action" | grep -q "Unlike"; then
+            while IFS= read -r row; do
+                local u=$(echo "$row" | awk -F'\t' '{print $2}')
+                [ -n "$u" ] && unmark_track_liked "$u"
+            done <<< "$sel"
+            echo -e "${C_GREEN}🤍 Removed ${sel_count} track(s) from Liked Songs.${C_RESET}"
+            continue
+        elif echo "$track_action" | grep -q "Download"; then
+            while IFS= read -r row; do
+                local u=$(echo "$row" | awk -F'\t' '{print $2}')
+                [ -n "$u" ] && cmd_download "$u"
+            done <<< "$sel"
+            break
+        fi
+    done
+}
+
+cmd_dislike() {
+    local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
+
+    if [ "$#" -eq 0 ] || [ -z "$1" ]; then
+        # Default: current playing track
+        local item_json=$(echo "$track_info" | jq -s -c 'map(select(.event == null)) | .[0].data[] | select(.current) // empty' 2>/dev/null)
+        local filename=$(echo "$item_json" | jq -r '.filename // ""')
+        local title=$(echo "$item_json" | jq -r '.title // ""')
+        if [ -z "$filename" ]; then
+            echo -e "${C_PINK}🔇 No track currently playing to dislike.${C_RESET}"
+            return 1
+        fi
+        mark_track_disliked "$filename" "$title"
+        echo -e "${C_PINK}💔 Disliked & Blacklisted from Auto Mode:${C_RESET} ${C_CYAN}${title:-$filename}${C_RESET}"
+        return 0
+    fi
+
+    for target in "$@"; do
+        [ -z "$target" ] && continue
+        local filename=""
+        local title=""
+        if [[ "$target" =~ ^[0-9]+$ ]]; then
+            local idx=$((target - 1))
+            local item_json=$(echo "$track_info" | jq -s -c "map(select(.event == null)) | .[0].data[$idx] // empty" 2>/dev/null)
+            filename=$(echo "$item_json" | jq -r '.filename // ""')
+            title=$(echo "$item_json" | jq -r '.title // ""')
+        elif [[ "$target" =~ ^http ]]; then
+            filename="$target"
+            title="$target"
+        else
+            # Search by text in playlist
+            local item_json=$(echo "$track_info" | jq -s -c --arg query "$target" '
+                map(select(.event == null)) |
+                .[0].data[] | 
+                select(((.title? // "") | test($query; "i")) or ((.filename? // "") | test($query; "i")))
+            ' 2>/dev/null | head -n 1)
+            filename=$(echo "$item_json" | jq -r '.filename // ""')
+            title=$(echo "$item_json" | jq -r '.title // ""')
+        fi
+
+        if [ -n "$filename" ]; then
+            mark_track_disliked "$filename" "$title"
+            echo -e "${C_PINK}💔 Disliked & Blacklisted from Auto Mode:${C_RESET} ${C_CYAN}${title:-$filename}${C_RESET}"
+        else
+            local cached_title=$(get_cached_title "$target")
+            if [ -n "$cached_title" ]; then
+                mark_track_disliked "$target" "$cached_title"
+                echo -e "${C_PINK}💔 Disliked & Blacklisted from Auto Mode:${C_RESET} ${C_CYAN}${cached_title}${C_RESET}"
+            else
+                echo -e "${C_PINK}🔍🤷 No track matching [${C_ORANGE}${target}${C_PINK}] found to dislike.${C_RESET}"
+            fi
         fi
     done
 }
@@ -344,8 +719,8 @@ cmd_remove() {
 
             echo "{ \"command\": [\"playlist-remove\", $((idx - 1))] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
             if [ "$also_dislike" = true ]; then
-                add_to_auto_blacklist "$filename" "$mpv_title"
-                echo -e "${C_PINK}👎✖ Removed & Blacklisted ${formatted_track}${C_RESET}"
+                mark_track_disliked "$filename" "$mpv_title"
+                echo -e "${C_PINK}💔✖ Removed & Blacklisted ${formatted_track}${C_RESET}"
             else
                 echo -e "${C_PINK}✖  Removed ${formatted_track}${C_RESET}"
             fi

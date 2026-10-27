@@ -1015,6 +1015,233 @@ clear_auto_tracks() {
     AUTO_TRACKS_MEM=()
 }
 
+# --- Liked & Disliked Tracks Subsystem ---
+LIKED_TRACKS_FILE="$HOME/.cache/mpv/liked_tracks"
+LIKED_PLAYLIST_FILE="$HOME/.local/share/mpv/playlists/Liked.txt"
+AUTO_BLACKLIST_FILE="$HOME/.cache/mpv/auto_blacklist"
+
+declare -gA LIKED_TRACKS_MEM=()
+declare -gA DISLIKED_TRACKS_MEM=()
+
+load_liked_tracks_to_memory() {
+    LIKED_TRACKS_MEM=()
+    if [ -f "$LIKED_TRACKS_FILE" ]; then
+        while IFS=$'\t' read -r lid ltitle; do
+            [ -n "$lid" ] && LIKED_TRACKS_MEM["$lid"]=1
+        done < "$LIKED_TRACKS_FILE"
+    fi
+    if [ -f "$LIKED_PLAYLIST_FILE" ]; then
+        while IFS= read -r lurl; do
+            [ -z "$lurl" ] && continue
+            local clean="$lurl"
+            [[ "$lurl" =~ ^http ]] && clean=$(echo "$lurl" | sed -e 's/^[[:space:]]*//; s/[[:space:]]*$//; s/\\t.*//; s/\t.*//')
+            [ -n "$clean" ] && LIKED_TRACKS_MEM["$clean"]=1
+            local lvid=""
+            [[ "$clean" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && lvid="${BASH_REMATCH[2]}"
+            [ -n "$lvid" ] && LIKED_TRACKS_MEM["$lvid"]=1
+        done < "$LIKED_PLAYLIST_FILE"
+    fi
+}
+
+is_liked_track() {
+    local fname="$1"
+    local opt_id="$2"
+    if [ ${#LIKED_TRACKS_MEM[@]} -eq 0 ] && { [ -f "$LIKED_TRACKS_FILE" ] || [ -f "$LIKED_PLAYLIST_FILE" ]; }; then
+        load_liked_tracks_to_memory
+    fi
+    [ ${#LIKED_TRACKS_MEM[@]} -eq 0 ] && return 1
+
+    [ -n "$opt_id" ] && [ -n "${LIKED_TRACKS_MEM[$opt_id]}" ] && return 0
+    [ -n "$fname" ] && [ -n "${LIKED_TRACKS_MEM[$fname]}" ] && return 0
+
+    local clean="$fname"
+    if [[ "$fname" =~ ^http ]]; then
+        clean=$(echo "$fname" | sed -e 's/^[[:space:]]*//; s/[[:space:]]*$//; s/\\t.*//; s/\t.*//')
+    fi
+    [ -n "${LIKED_TRACKS_MEM[$clean]}" ] && return 0
+
+    local vid=""
+    [[ "$clean" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && vid="${BASH_REMATCH[2]}"
+    [ -n "$vid" ] && [ -n "${LIKED_TRACKS_MEM[$vid]}" ] && return 0
+
+    return 1
+}
+
+load_disliked_tracks_to_memory() {
+    DISLIKED_TRACKS_MEM=()
+    [ -f "$AUTO_BLACKLIST_FILE" ] || return 0
+    while IFS=$'\t' read -r bid btitle; do
+        [ -n "$bid" ] && DISLIKED_TRACKS_MEM["$bid"]=1
+    done < "$AUTO_BLACKLIST_FILE"
+}
+
+is_disliked_track() {
+    local fname="$1"
+    local opt_id="$2"
+    if [ ${#DISLIKED_TRACKS_MEM[@]} -eq 0 ] && [ -f "$AUTO_BLACKLIST_FILE" ]; then
+        load_disliked_tracks_to_memory
+    fi
+    [ ${#DISLIKED_TRACKS_MEM[@]} -eq 0 ] && return 1
+
+    [ -n "$opt_id" ] && [ -n "${DISLIKED_TRACKS_MEM[$opt_id]}" ] && return 0
+    [ -n "$fname" ] && [ -n "${DISLIKED_TRACKS_MEM[$fname]}" ] && return 0
+
+    local clean="$fname"
+    if [[ "$fname" =~ ^http ]]; then
+        clean=$(echo "$fname" | sed -e 's/^[[:space:]]*//; s/[[:space:]]*$//; s/\\t.*//; s/\t.*//')
+    fi
+    [ -n "${DISLIKED_TRACKS_MEM[$clean]}" ] && return 0
+
+    local vid=""
+    [[ "$clean" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && vid="${BASH_REMATCH[2]}"
+    [ -n "$vid" ] && [ -n "${DISLIKED_TRACKS_MEM[$vid]}" ] && return 0
+
+    return 1
+}
+
+mark_track_liked() {
+    local target="$1"
+    local opt_title="$2"
+    local opt_artist="$3"
+    local opt_dur="$4"
+    [ -z "$target" ] && return 0
+
+    local clean="$target"
+    if [[ "$target" =~ ^http ]]; then
+        clean=$(echo "$target" | sed -e 's/^[[:space:]]*//; s/[[:space:]]*$//; s/\\t.*//; s/\t.*//')
+    fi
+    local vid=""
+    [[ "$clean" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && vid="${BASH_REMATCH[2]}"
+
+    mkdir -p "$(dirname "$LIKED_TRACKS_FILE")" "$(dirname "$LIKED_PLAYLIST_FILE")" 2>/dev/null
+    touch "$LIKED_TRACKS_FILE" "$LIKED_PLAYLIST_FILE" 2>/dev/null
+
+    if [ -z "$opt_title" ] || [ "$opt_title" == "$target" ]; then
+        opt_title=$(get_cached_title "$clean")
+        [ -z "$opt_title" ] && [ -n "$vid" ] && opt_title=$(get_cached_title "$vid")
+        [ -z "$opt_title" ] && opt_title=$(basename "$clean")
+    fi
+
+    # 1. Add to Liked Playlist file if not already present
+    if ! grep -Fqx "$clean" "$LIKED_PLAYLIST_FILE" 2>/dev/null; then
+        echo "$clean" >> "$LIKED_PLAYLIST_FILE"
+    fi
+
+    # 2. Add to liked_tracks cache file
+    if [ -n "$clean" ] && ! grep -E -q "^${clean}([[:blank:]]|$)" "$LIKED_TRACKS_FILE" 2>/dev/null; then
+        printf "%s\t%s\n" "$clean" "$opt_title" >> "$LIKED_TRACKS_FILE"
+    fi
+    if [ -n "$vid" ] && ! grep -E -q "^${vid}([[:blank:]]|$)" "$LIKED_TRACKS_FILE" 2>/dev/null; then
+        printf "%s\t%s\n" "$vid" "$opt_title" >> "$LIKED_TRACKS_FILE"
+    fi
+
+    [ -n "$clean" ] && LIKED_TRACKS_MEM["$clean"]=1
+    [ -n "$vid" ] && LIKED_TRACKS_MEM["$vid"]=1
+
+    # 3. Mutual exclusivity: Remove from Dislike blacklist if previously disliked
+    if [ -n "$vid" ]; then
+        unmark_track_disliked "$vid"
+    fi
+    unmark_track_disliked "$clean"
+}
+
+unmark_track_liked() {
+    local target="$1"
+    [ -z "$target" ] && return 0
+    local clean="$target"
+    if [[ "$target" =~ ^http ]]; then
+        clean=$(echo "$target" | sed -e 's/^[[:space:]]*//; s/[[:space:]]*$//; s/\\t.*//; s/\t.*//')
+    fi
+    local vid=""
+    [[ "$clean" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && vid="${BASH_REMATCH[2]}"
+
+    if [ -f "$LIKED_PLAYLIST_FILE" ] && [ -n "$clean" ]; then
+        sed -i "\#^${clean}\$#d" "$LIKED_PLAYLIST_FILE" 2>/dev/null || true
+    fi
+    if [ -f "$LIKED_TRACKS_FILE" ]; then
+        [ -n "$clean" ] && sed -i "\#^${clean}\t#d" "$LIKED_TRACKS_FILE" 2>/dev/null || true
+        [ -n "$vid" ] && sed -i "\#^${vid}\t#d" "$LIKED_TRACKS_FILE" 2>/dev/null || true
+    fi
+
+    [ -n "$clean" ] && unset 'LIKED_TRACKS_MEM["$clean"]' 2>/dev/null || true
+    [ -n "$vid" ] && unset 'LIKED_TRACKS_MEM["$vid"]' 2>/dev/null || true
+}
+
+mark_track_disliked() {
+    local target="$1"
+    local opt_title="$2"
+    [ -z "$target" ] && return 0
+
+    local clean="$target"
+    if [[ "$target" =~ ^http ]]; then
+        clean=$(echo "$target" | sed -e 's/^[[:space:]]*//; s/[[:space:]]*$//; s/\\t.*//; s/\t.*//')
+    fi
+    local vid=""
+    [[ "$clean" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && vid="${BASH_REMATCH[2]}"
+
+    local b_id="${vid:-$clean}"
+
+    mkdir -p "$(dirname "$AUTO_BLACKLIST_FILE")" 2>/dev/null
+    touch "$AUTO_BLACKLIST_FILE" 2>/dev/null
+
+    if [ -z "$opt_title" ] || [ "$opt_title" == "$target" ] || [ "$opt_title" == "$b_id" ]; then
+        opt_title=$(get_cached_title "$target")
+        [ -z "$opt_title" ] && [ -n "$vid" ] && opt_title=$(get_cached_title "$vid")
+        [ -z "$opt_title" ] && opt_title="Disliked Track"
+    fi
+
+    if ! grep -E -q "^${b_id}([[:blank:]]|$)" "$AUTO_BLACKLIST_FILE" 2>/dev/null; then
+        printf "%s\t%s\n" "$b_id" "$opt_title" >> "$AUTO_BLACKLIST_FILE"
+    fi
+    [ -n "$b_id" ] && DISLIKED_TRACKS_MEM["$b_id"]=1
+    [ -n "$clean" ] && DISLIKED_TRACKS_MEM["$clean"]=1
+    [ -n "$vid" ] && DISLIKED_TRACKS_MEM["$vid"]=1
+
+    # Mutual exclusivity: remove from Liked Songs
+    unmark_track_liked "$target"
+}
+
+unmark_track_disliked() {
+    local target="$1"
+    [ -z "$target" ] && return 0
+    local clean="$target"
+    if [[ "$target" =~ ^http ]]; then
+        clean=$(echo "$target" | sed -e 's/^[[:space:]]*//; s/[[:space:]]*$//; s/\\t.*//; s/\t.*//')
+    fi
+    local vid=""
+    [[ "$clean" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && vid="${BASH_REMATCH[2]}"
+
+    local b_id="${vid:-$clean}"
+
+    if [ -f "$AUTO_BLACKLIST_FILE" ] && [ -n "$b_id" ]; then
+        local tmp=$(mktemp 2>/dev/null || echo "/tmp/q_bl_$$.tmp")
+        grep -E -v "^(${b_id}|${clean})([[:blank:]]|$)" "$AUTO_BLACKLIST_FILE" > "$tmp" 2>/dev/null || true
+        mv "$tmp" "$AUTO_BLACKLIST_FILE"
+    fi
+
+    [ -n "$b_id" ] && unset 'DISLIKED_TRACKS_MEM["$b_id"]' 2>/dev/null || true
+    [ -n "$clean" ] && unset 'DISLIKED_TRACKS_MEM["$clean"]' 2>/dev/null || true
+    [ -n "$vid" ] && unset 'DISLIKED_TRACKS_MEM["$vid"]' 2>/dev/null || true
+}
+
+get_track_badges() {
+    local fname="$1"
+    local vid="$2"
+    local badges=""
+
+    if is_liked_track "$fname" "$vid"; then
+        badges+="❤️  "
+    elif is_disliked_track "$fname" "$vid"; then
+        badges+="💔 "
+    fi
+
+    if is_auto_track "$fname" "$vid"; then
+        badges+="${C_PURPLE}Ⓐ${C_RESET} "
+    fi
+
+    echo -n "$badges"
+}
+
 send_ipc() {
     echo "$1" | nc $NC_OPTS -w 1 "$SOCKET"
 }
@@ -1087,6 +1314,38 @@ sync_session_cache() {
                 cp -fp "$lnx_cache/auto_tracks" "$win_cache/auto_tracks" 2>/dev/null
             fi
 
+            # Sync liked_tracks between WSL and Windows
+            if [ -f "$win_cache/liked_tracks" ] && [ -f "$lnx_cache/liked_tracks" ]; then
+                local win_mtime lnx_mtime
+                win_mtime=$(get_file_mtime "$win_cache/liked_tracks")
+                lnx_mtime=$(get_file_mtime "$lnx_cache/liked_tracks")
+                if [ "$win_mtime" -ge "$lnx_mtime" ]; then
+                    cp -fp "$win_cache/liked_tracks" "$lnx_cache/liked_tracks" 2>/dev/null
+                else
+                    cp -fp "$lnx_cache/liked_tracks" "$win_cache/liked_tracks" 2>/dev/null
+                fi
+            elif [ -f "$win_cache/liked_tracks" ]; then
+                cp -fp "$win_cache/liked_tracks" "$lnx_cache/liked_tracks" 2>/dev/null
+            elif [ -f "$lnx_cache/liked_tracks" ]; then
+                cp -fp "$lnx_cache/liked_tracks" "$win_cache/liked_tracks" 2>/dev/null
+            fi
+
+            # Sync auto_blacklist between WSL and Windows
+            if [ -f "$win_cache/auto_blacklist" ] && [ -f "$lnx_cache/auto_blacklist" ]; then
+                local win_mtime lnx_mtime
+                win_mtime=$(get_file_mtime "$win_cache/auto_blacklist")
+                lnx_mtime=$(get_file_mtime "$lnx_cache/auto_blacklist")
+                if [ "$win_mtime" -ge "$lnx_mtime" ]; then
+                    cp -fp "$win_cache/auto_blacklist" "$lnx_cache/auto_blacklist" 2>/dev/null
+                else
+                    cp -fp "$lnx_cache/auto_blacklist" "$win_cache/auto_blacklist" 2>/dev/null
+                fi
+            elif [ -f "$win_cache/auto_blacklist" ]; then
+                cp -fp "$win_cache/auto_blacklist" "$lnx_cache/auto_blacklist" 2>/dev/null
+            elif [ -f "$lnx_cache/auto_blacklist" ]; then
+                cp -fp "$lnx_cache/auto_blacklist" "$win_cache/auto_blacklist" 2>/dev/null
+            fi
+
             # Sync queue_audio_mode between WSL and Windows
             if [ -f "$win_dir/AppData/Roaming/mpv/queue_audio_mode" ] && [ ! -f "$HOME/.config/mpv/queue_audio_mode" ]; then
                 cp -fp "$win_dir/AppData/Roaming/mpv/queue_audio_mode" "$HOME/.config/mpv/queue_audio_mode" 2>/dev/null
@@ -1146,6 +1405,8 @@ save_current_playlist() {
                     [ -f "$LAST_PLAYLIST_FILE" ] && cp -fp "$LAST_PLAYLIST_FILE" "$win_u_dir/.cache/mpv/last_playlist.txt" 2>/dev/null
                     [ -f "$HOME/.cache/mpv/state.json" ] && cp -fp "$HOME/.cache/mpv/state.json" "$win_u_dir/.cache/mpv/state.json" 2>/dev/null
                     [ -f "$AUTO_TRACKS_FILE" ] && cp -fp "$AUTO_TRACKS_FILE" "$win_u_dir/.cache/mpv/auto_tracks" 2>/dev/null
+                    [ -f "$LIKED_TRACKS_FILE" ] && cp -fp "$LIKED_TRACKS_FILE" "$win_u_dir/.cache/mpv/liked_tracks" 2>/dev/null
+                    [ -f "$AUTO_BLACKLIST_FILE" ] && cp -fp "$AUTO_BLACKLIST_FILE" "$win_u_dir/.cache/mpv/auto_blacklist" 2>/dev/null
                 fi
             fi
 

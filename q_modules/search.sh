@@ -78,40 +78,35 @@ perform_search() {
 
     # FZF Selection
     if command -v fzf >/dev/null; then
+        load_liked_tracks_to_memory
+        load_disliked_tracks_to_memory
+        load_auto_tracks_to_memory
+
         # FZF Mode: Format for humans, hide URL/Title/Artist/Duration after ::
         # We pack ::URL::Title::Artist::Duration for retrieval
         local LINE=$(get_fzf_divider)
         local status_icons=$(get_player_status_icons)
-        local s_header="${C_PURPLE}🪷 Results for: ${C_CYAN}${QUERY}${C_RESET} ${C_GRAY}(ENTER select, TAB multi, CTRL-D dislike)${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
+        local s_header="${C_PURPLE}🪷 Results for: ${C_CYAN}${QUERY}${C_RESET} ${C_GRAY}(ENTER select, TAB multi, CTRL-L like, CTRL-D dislike)${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
         local s_prompt="🎵 ${C_TEAL}Search Results${status_icons}${C_RESET} > "
-        local raw_sel=$(awk -F'\t' \
-            -v o="$C_ORANGE" \
-            -v g="$C_GRAY" \
-            -v lp="$C_LIGHT_PINK" \
-            -v r="$C_RESET" '
-            {
-                gsub("::", ":", $1);
-                gsub("::", ":", $3);
-                gsub("::", ":", $4);
-                
-                title = $1;
-                url = $2;
-                dur = $3;
-                artist = $4;
-                
-                artist_part = "";
-                if (artist != "" && artist != "null") {
-                    artist_part = " " g "by" r " " lp artist r;
-                }
-                
-                dur_part = "";
-                if (dur != "" && dur != "null" && dur != "0:00") {
-                    dur_part = " " o "[" dur "]" r;
-                }
-                
-                printf "%s%d%s. %s%s%s::%s::%s::%s::%s\n", o, NR, r, title, artist_part, dur_part, url, title, artist, dur;
-            }' "$TMP_RESULTS" | \
-            fzf --multi --exact --cycle --tiebreak=index --expect=ctrl-d,ctrl-x \
+        local fzf_input=""
+        local line_nr=1
+        while IFS=$'\t' read -r title url dur artist; do
+            [ -z "$url" ] && continue
+            title="${title//::/:}"
+            dur="${dur//::/:}"
+            artist="${artist//::/:}"
+            local b_tag=$(get_track_badges "$url")
+            local artist_part=""
+            [ -n "$artist" ] && [ "$artist" != "null" ] && artist_part=" ${C_GRAY}by${C_RESET} ${C_LIGHT_PINK}${artist}${C_RESET}"
+            local dur_part=""
+            [ -n "$dur" ] && [ "$dur" != "null" ] && [ "$dur" != "0:00" ] && dur_part=" ${C_ORANGE}[${dur}]${C_RESET}"
+            
+            fzf_input+="${C_ORANGE}${line_nr}${C_RESET}. ${b_tag}${title}${artist_part}${dur_part}::${url}::${title}::${artist}::${dur}"$'\n'
+            ((line_nr++))
+        done < "$TMP_RESULTS"
+
+        local raw_sel=$(echo -n "$fzf_input" | \
+            fzf --multi --exact --cycle --tiebreak=index --expect=ctrl-l,ctrl-d,ctrl-x \
                 --bind "tab:toggle,alt-a:toggle-all,insert:select-all,delete:deselect-all" --delimiter="::" --with-nth=1 --height=100% --layout=reverse --border --ansi \
                 --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \
                 --header="$s_header" \
@@ -129,6 +124,23 @@ perform_search() {
             return 1 # Skip to next query
         fi
 
+        if [ "$key" == "ctrl-l" ]; then
+            while IFS= read -r line; do
+                [ -z "$line" ] && continue
+                local duration="${line##*::}"
+                local tmp1="${line%::*}"
+                local artist="${tmp1##*::}"
+                local tmp2="${tmp1%::*}"
+                local title="${tmp2##*::}"
+                local tmp3="${tmp2%::*}"
+                local url="${tmp3##*::}"
+                mark_track_liked "$url" "$title"
+                echo -e "${C_PINK}❤️  Liked & Saved to Liked Songs:${C_RESET} ${C_CYAN}${title:-$url}${C_RESET}"
+            done <<< "$selection"
+            rm -f "$TMP_RESULTS"
+            return 1
+        fi
+
         if [ "$key" == "ctrl-d" ] || [ "$key" == "ctrl-x" ]; then
             while IFS= read -r line; do
                 [ -z "$line" ] && continue
@@ -139,8 +151,8 @@ perform_search() {
                 local title="${tmp2##*::}"
                 local tmp3="${tmp2%::*}"
                 local url="${tmp3##*::}"
-                add_to_auto_blacklist "$url" "$title"
-                echo -e "${C_PINK}👎 Disliked & Blacklisted from Auto Mode:${C_RESET} ${C_CYAN}${title:-$url}${C_RESET}"
+                mark_track_disliked "$url" "$title"
+                echo -e "${C_PINK}💔 Disliked & Blacklisted from Auto Mode:${C_RESET} ${C_CYAN}${title:-$url}${C_RESET}"
             done <<< "$selection"
             rm -f "$TMP_RESULTS"
             return 1
@@ -171,6 +183,8 @@ perform_search() {
         done <<< "$selection"
     else
         # Manual Mode Fallback
+        load_liked_tracks_to_memory
+        load_disliked_tracks_to_memory
         local i=1
         declare -A URL_MAP
         declare -A TITLE_MAP
@@ -179,8 +193,9 @@ perform_search() {
         while IFS=$'\t' read -r title url duration uploader; do
              [ -z "$duration" ] && duration="N/A"
              [ -z "$uploader" ] && uploader="Unknown"
+             local b_tag=$(get_track_badges "$url")
              local SHORT_TITLE=$(truncate_text "$title" "$((TERM_WIDTH - 35))")
-             printf " %2d. ${C_CYAN}%s${C_RESET} [${C_ORANGE}%s${C_RESET}] ${C_GRAY}by${C_RESET} ${C_LIGHT_PINK}%s${C_RESET}\n" "$i" "$SHORT_TITLE" "$duration" "$uploader"
+             printf " %2d. %s${C_CYAN}%s${C_RESET} [${C_ORANGE}%s${C_RESET}] ${C_GRAY}by${C_RESET} ${C_LIGHT_PINK}%s${C_RESET}\n" "$i" "$b_tag" "$SHORT_TITLE" "$duration" "$uploader"
              URL_MAP[$i]="$url"
              TITLE_MAP[$i]="$title"
              ARTIST_MAP[$i]="$uploader"

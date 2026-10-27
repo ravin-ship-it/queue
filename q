@@ -142,7 +142,7 @@ fi
 # --- Command Parsing ---
 
 PROCESSED_ANY_FLAG=false
-SMART_CMDS="^(play|pause|stop|next|prev|vol|info|list|clear|shuffle|remove|move|swap|help|save|load|auto|fx|deps|up|install|setup|uninstall|remove-setup|pb|blind|download|dl|d|dislike|dis|disl|rmd|undis|undislike|like|vid|video|watch|version|ver|res|quality|hybrid|hy|lang|audio|speed|sp|aud|loop|loop-file|loop-playlist|lp|status|clean|pl-clean)$"
+SMART_CMDS="^(play|pause|stop|next|prev|vol|info|list|clear|shuffle|remove|move|swap|help|save|load|auto|fx|deps|up|install|setup|uninstall|remove-setup|pb|blind|download|dl|d|dislike|dis|disl|rmd|undis|undislike|like|liked|likel|unlike|vid|video|watch|version|ver|res|quality|hybrid|hy|lang|audio|speed|sp|aud|loop|loop-file|loop-playlist|lp|status|clean|pl-clean)$"
 
 while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
     PROCESSED_ANY_FLAG=true
@@ -178,7 +178,10 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
         download|dl|d) CMD="-d" ;;
         dislike|dis) CMD="-dis" ;;
         disl) CMD="-disl" ;;
-        undis|undislike|like) CMD="-undis" ;;
+        like) CMD="-like" ;;
+        liked|likel) CMD="-liked" ;;
+        unlike) CMD="-unlike" ;;
+        undis|undislike) CMD="-undis" ;;
         rmd) CMD="-rmd" ;;
         vid|video|watch) CMD="-vid" ;;
         version|ver) CMD="-version" ;;
@@ -243,7 +246,34 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
             cmd_dislike_list
             shift
             ;;
-        -undis|-undislike|-like)
+        -like)
+            shift
+            if [[ "$1" == "list" ]]; then
+                cmd_liked_list
+                shift
+            else
+                targets=()
+                while [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]] && [[ ! "$1" =~ $SMART_CMDS ]]; do
+                    targets+=("$1")
+                    shift
+                done
+                cmd_like "${targets[@]}"
+            fi
+            ;;
+        -unlike)
+            shift
+            targets=()
+            while [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]] && [[ ! "$1" =~ $SMART_CMDS ]]; do
+                targets+=("$1")
+                shift
+            done
+            cmd_unlike "${targets[@]}"
+            ;;
+        -liked|-likel)
+            cmd_liked_list
+            shift
+            ;;
+        -undis|-undislike)
             shift
             if [[ "$1" == "list" ]]; then
                 cmd_dislike_list
@@ -682,18 +712,17 @@ if [ -z "$1" ]; then
 
     init_filename=""
     [[ "$init_idx" =~ ^[0-9]+$ ]] && [ "$init_idx" -gt 0 ] && init_filename=$(echo "$init_fingerprint" | cut -d';' -f"$init_idx" 2>/dev/null)
-    h_auto=""
-    is_auto_track "$init_filename" && h_auto="${C_PURP}Ⓐ ${C_RST}"
+    h_badges=$(get_track_badges "$init_filename")
 
     if [ "$init_idle" == "true" ]; then
         [ "$init_title" == "😴💤" ] && init_msg="$init_title" || init_msg="(Idle - Queue Finished)"
         INITIAL_HEADER="${C_PURP}🪷 Idle: ${C_RST}${C_PINK}${C_BLD}${init_msg}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
     elif [ "$init_paused" == "true" ]; then
         init_clean_title=$(echo "$init_title" | sed 's/"/\"/g')
-        INITIAL_HEADER="${C_PURP}🪷 Paused ${C_WHT}[${C_ORNG}${init_idx}${C_WHT}] ${h_auto}${C_RST}${C_PINK}${C_BLD}${init_clean_title}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
+        INITIAL_HEADER="${C_PURP}🪷 Paused ${C_WHT}[${C_ORNG}${init_idx}${C_WHT}] ${h_badges}${C_PINK}${C_BLD}${init_clean_title}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
     else
         init_clean_title=$(echo "$init_title" | sed 's/"/\"/g')
-        INITIAL_HEADER="${C_PURP}🪷 Playing ${C_WHT}[${C_ORNG}${init_idx}${C_WHT}] ${h_auto}${C_RST}${C_PINK}${C_BLD}${init_clean_title}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
+        INITIAL_HEADER="${C_PURP}🪷 Playing ${C_WHT}[${C_ORNG}${init_idx}${C_WHT}] ${h_badges}${C_PINK}${C_BLD}${init_clean_title}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
     fi
 
     FZF_SOCK="$HOME/.cache/mpv/fzf_$$.sock"
@@ -762,16 +791,15 @@ if [ -z "$1" ]; then
                 
                 live_fname=""
                 [[ "$curr_idx" =~ ^[0-9]+$ ]] && [ "$curr_idx" -gt 0 ] && live_fname=$(echo "$curr_fingerprint" | cut -d';' -f"$curr_idx" 2>/dev/null)
-                live_h_auto=""
-                is_auto_track "$live_fname" && live_h_auto="${C_PURP}Ⓐ ${C_RST}"
+                live_badges=$(get_track_badges "$live_fname")
 
                 if [ "$idle" == "true" ]; then
                     [ "$curr_title" == "😴💤" ] && msg="$curr_title" || msg="(Idle - Queue Finished)"
                     header_text="${C_PURP}🪷 Idle: ${C_RST}${C_PINK}${C_BLD}${msg}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
                 elif [ "$curr_paused" == "true" ]; then
-                    header_text="${C_PURP}🪷 Paused ${C_WHT}[${C_ORNG}${curr_idx}${C_WHT}] ${live_h_auto}${C_RST}${C_PINK}${C_BLD}${clean_title}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
+                    header_text="${C_PURP}🪷 Paused ${C_WHT}[${C_ORNG}${curr_idx}${C_WHT}] ${live_badges}${C_PINK}${C_BLD}${clean_title}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
                 else
-                    header_text="${C_PURP}🪷 Playing ${C_WHT}[${C_ORNG}${curr_idx}${C_WHT}] ${live_h_auto}${C_RST}${C_PINK}${C_BLD}${clean_title}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
+                    header_text="${C_PURP}🪷 Playing ${C_WHT}[${C_ORNG}${curr_idx}${C_WHT}] ${live_badges}${C_PINK}${C_BLD}${clean_title}${C_RST}${NL}${C_GRY}${LINE}${C_RST}"
                 fi
                 curl -s -X POST --unix-socket "$FZF_SOCK" -d "change-header~${header_text}~" http://localhost/ >/dev/null 2>&1
             fi
@@ -858,7 +886,7 @@ if [ -z "$1" ]; then
              LINE=$(get_fzf_divider)
              act_header="${C_PURPLE}🪷 Action for ${C_CYAN}${count}${C_PURPLE} item(s)${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
              act_prompt="🎵 ${P_TEAL}Choose Action${STATUS_ICONS}${P_RESET} > "
-             action=$(echo -e "  |>  Play Selected\n  📺  Watch Video Window\n  🎧  Audio-Only Mode (Bandwidth Saver)\n  ℹ️  Inspect Track Info (Metadata & Stream)\n  🕶️  Blind Play (One-Off Isolated)\n  🎬  Set Video Quality / Resolution\n  ✨  New Queue from Selected & Play\n  📥  Download Selected\n  👎  Dislike Track\n  👎✖ Dislike & Remove\n  ✖  Remove from Queue\n  ✚  Save to Playlist" | \
+             action=$(echo -e "  |>  Play Selected\n  📺  Watch Video Window\n  🎧  Audio-Only Mode (Bandwidth Saver)\n  ℹ️  Inspect Track Info (Metadata & Stream)\n  🕶️  Blind Play (One-Off Isolated)\n  🎬  Set Video Quality / Resolution\n  ✨  New Queue from Selected & Play\n  📥  Download Selected\n  ❤️  Like Track(s)\n  🤍  Unlike Track(s)\n  💔  Dislike Track\n  💔✖ Dislike & Remove\n  ✖  Remove from Queue\n  ✚  Save to Playlist" | \
                  fzf --height=100% --layout=reverse --border --info=inline-right \
                  $FZF_COLOR_OPTS \
                  --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \
@@ -1030,20 +1058,45 @@ if [ -z "$1" ]; then
                  cmd_play "$first"
              fi
 
-             # 5. Dislike Track (Keep in Queue)
-             if echo "$action" | grep -q "Dislike Track"; then
+             # 5. Like Track(s)
+             if echo "$action" | grep -q "Like Track"; then
                  track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
                  while IFS= read -r idx; do
                      item_json=$(echo "$track_info" | jq -s -c "map(select(.event == null)) | .[0].data[$((idx - 1))] // empty")
                      [ -z "$item_json" ] && continue
                      filename=$(echo "$item_json" | jq -r '.filename // ""')
                      mpv_title=$(echo "$item_json" | jq -r '.title // ""')
-                     add_to_auto_blacklist "$filename" "$mpv_title"
+                     mark_track_liked "$filename" "$mpv_title"
                  done <<< "$selection"
-                 echo -e "${C_PINK}👎 Disliked & Blacklisted ${C_ORANGE}$count${C_PINK} track(s) from Auto Mode.${C_RESET}"
+                 echo -e "${C_PINK}❤️  Liked & Saved ${C_ORANGE}$count${C_PINK} track(s) to Liked Songs.${C_RESET}"
                  exit 0
 
-             # 6. Dislike & Remove
+             # 6. Unlike Track(s)
+             elif echo "$action" | grep -q "Unlike Track"; then
+                 track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
+                 while IFS= read -r idx; do
+                     item_json=$(echo "$track_info" | jq -s -c "map(select(.event == null)) | .[0].data[$((idx - 1))] // empty")
+                     [ -z "$item_json" ] && continue
+                     filename=$(echo "$item_json" | jq -r '.filename // ""')
+                     unmark_track_liked "$filename"
+                 done <<< "$selection"
+                 echo -e "${C_PINK}🤍 Unliked ${C_ORANGE}$count${C_PINK} track(s) from Liked Songs.${C_RESET}"
+                 exit 0
+
+             # 7. Dislike Track (Keep in Queue)
+             elif echo "$action" | grep -q "Dislike Track"; then
+                 track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
+                 while IFS= read -r idx; do
+                     item_json=$(echo "$track_info" | jq -s -c "map(select(.event == null)) | .[0].data[$((idx - 1))] // empty")
+                     [ -z "$item_json" ] && continue
+                     filename=$(echo "$item_json" | jq -r '.filename // ""')
+                     mpv_title=$(echo "$item_json" | jq -r '.title // ""')
+                     mark_track_disliked "$filename" "$mpv_title"
+                 done <<< "$selection"
+                 echo -e "${C_PINK}💔 Disliked & Blacklisted ${C_ORANGE}$count${C_PINK} track(s) from Auto Mode.${C_RESET}"
+                 exit 0
+
+             # 8. Dislike & Remove
              elif echo "$action" | grep -q "Dislike & Remove"; then
                  track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
                  current_idx=$(echo "$track_info" | jq -s -r 'map(select(.event == null)) | .[0].data | to_entries[] | select(.value.current) | .key + 1' 2>/dev/null)
@@ -1067,10 +1120,10 @@ if [ -z "$1" ]; then
                      fi
 
                      echo "{ \"command\": [\"playlist-remove\", $((idx - 1))] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
-                     add_to_auto_blacklist "$filename" "$mpv_title"
+                     mark_track_disliked "$filename" "$mpv_title"
                  done < <(echo "$selection" | sort -nr)
                  
-                 echo -e "${C_PINK}👎✖ Removed & Blacklisted ${C_ORANGE}$count${C_PINK} tracks.${C_RESET}"
+                 echo -e "${C_PINK}💔✖ Removed & Blacklisted ${C_ORANGE}$count${C_PINK} tracks.${C_RESET}"
                  ( sleep 0.3; save_current_playlist true ) >/dev/null 2>&1 & disown
                  
                  if [ "$was_playing" = true ]; then

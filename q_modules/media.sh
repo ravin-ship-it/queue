@@ -198,14 +198,25 @@ fetch_and_display_url_info() {
         print_boxed_line "${C_TEAL}Likes:    ${C_WHITE}${likes}${C_RESET}"
         print_boxed_line "${C_TEAL}Uploaded: ${C_WHITE}${date}${C_RESET}"
         
+        # Status Badge (Liked ❤️ / Disliked 💔)
+        local pref_badge=""
+        if is_liked_track "$clean_url" "$video_id"; then
+            pref_badge=" ${C_PINK}❤️ Liked${C_RESET}"
+        elif is_disliked_track "$clean_url" "$video_id"; then
+            pref_badge=" ${C_PINK}💔 Disliked${C_RESET}"
+        fi
+
         if [ "$is_current" == "true" ]; then
             local is_paused=$(echo '{ "command": ["get_property", "pause"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // false')
             if [ "$is_paused" == "true" ]; then
-                print_boxed_line "${C_TEAL}Status:   ${C_YELLOW}⏸ Paused${C_RESET} (${queue_display})"
+                print_boxed_line "${C_TEAL}Status:   ${C_YELLOW}⏸ Paused${C_RESET} (${queue_display})${pref_badge}"
             else
-                print_boxed_line "${C_TEAL}Status:   ${C_PURPLE}▶ Playing${C_RESET} (${queue_display})"
+                print_boxed_line "${C_TEAL}Status:   ${C_PURPLE}▶ Playing${C_RESET} (${queue_display})${pref_badge}"
             fi
         else
+            if [ -n "$pref_badge" ]; then
+                print_boxed_line "${C_TEAL}Preference:${pref_badge}"
+            fi
             print_boxed_line "${C_TEAL}Queue:    ${queue_display}"
         fi
         
@@ -231,10 +242,16 @@ fetch_and_display_url_info() {
         echo -e "${C_PURPLE}${B_LINE}${C_RESET}"
 
         if [ -t 0 ] && [ -t 1 ]; then
-            echo -ne "${C_PINK}>>> Press 'd' to download, 'x' to dislike, 'v' for video, 'a' for audio, or ENTER to return: ${C_RESET}"
+            echo -ne "${C_PINK}>>> Press 'l' to like/unlike, 'x' to dislike, 'd' to download, 'v' for video, 'a' for audio, or ENTER to return: ${C_RESET}"
             read -r -n 1 user_key < /dev/tty 2>/dev/null || read -r -n 1 user_key
             echo ""
-            if [[ "$user_key" =~ ^[dD]$ ]]; then
+            if [[ "$user_key" =~ ^[lL]$ ]]; then
+                if is_liked_track "$clean_url" "$video_id"; then
+                    cmd_unlike "$clean_url"
+                else
+                    cmd_like "$clean_url"
+                fi
+            elif [[ "$user_key" =~ ^[dD]$ ]]; then
                 cmd_download "$clean_url"
             elif [[ "$user_key" =~ ^[xX]$ ]]; then
                 cmd_dislike "$clean_url"
@@ -358,12 +375,9 @@ format_track_log() {
     fi
     [ -n "$cached_duration" ] && [ "$cached_duration" != "null" ] && [ "$cached_duration" != "0:00" ] && dur_part=" ${C_ORANGE}[$cached_duration]${C_RESET}"
     
-    local auto_tag=""
-    if is_auto_track "$clean_fname" "$vid_id"; then
-        auto_tag="${C_PURPLE}Ⓐ ${C_RESET}"
-    fi
+    local badges=$(get_track_badges "$clean_fname" "$vid_id")
 
-    echo -e "${C_WHITE}[${C_ORANGE}${idx}${C_WHITE}] ${auto_tag}${C_CYAN}${display_title}${C_RESET}${artist_part}${dur_part}"
+    echo -e "${C_WHITE}[${C_ORANGE}${idx}${C_WHITE}] ${badges}${C_CYAN}${display_title}${C_RESET}${artist_part}${dur_part}"
 }
 
 format_track_fzf() {
@@ -440,12 +454,9 @@ format_track_fzf() {
     
     [ -n "$cached_duration" ] && [ "$cached_duration" != "null" ] && [ "$cached_duration" != "0:00" ] && dur_part=" ${C_ORANGE}[$cached_duration]${C_RESET}"
     
-    local auto_tag=""
-    if is_auto_track "$clean_fname" "$vid_id"; then
-        auto_tag="${C_PURPLE}Ⓐ ${C_RESET}"
-    fi
+    local badges=$(get_track_badges "$clean_fname" "$vid_id")
 
-    printf "%s. %s%s%s%s" "${C_ORANGE}${idx}${C_RESET}" "$auto_tag" "$display_title" "$artist_part" "$dur_part"
+    printf "%s. %s%s%s%s" "${C_ORANGE}${idx}${C_RESET}" "$badges" "$display_title" "$artist_part" "$dur_part"
 }
 
 log_now_playing() {
@@ -621,15 +632,22 @@ cmd_info() {
     print_boxed_line "${C_TEAL}Title:       ${C_CYAN}${title:0:$((INNER_WIDTH-15))}${C_RESET}"
     print_boxed_line "${C_TEAL}Source Link: ${C_VIOLET}${filename:0:$((INNER_WIDTH-15))}${C_RESET}"
     
+    local pref_badge=""
+    if is_liked_track "$filename"; then
+        pref_badge=" ${C_PINK}❤️ Liked${C_RESET}"
+    elif is_disliked_track "$filename"; then
+        pref_badge=" ${C_PINK}💔 Disliked${C_RESET}"
+    fi
+
     if [ "$playing" == "true" ]; then
         local is_paused=$(echo '{ "command": ["get_property", "pause"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // false')
         if [ "$is_paused" == "true" ]; then
-            print_boxed_line "${C_TEAL}Status:      ${C_YELLOW}⏸ Paused${C_RESET}"
+            print_boxed_line "${C_TEAL}Status:      ${C_YELLOW}⏸ Paused${C_RESET}${pref_badge}"
         else
-            print_boxed_line "${C_TEAL}Status:      ${C_PURPLE}▶ Playing${C_RESET}"
+            print_boxed_line "${C_TEAL}Status:      ${C_PURPLE}▶ Playing${C_RESET}${pref_badge}"
         fi
     else
-        print_boxed_line "${C_TEAL}Status:      ${C_GRAY}Queued${C_RESET}"
+        print_boxed_line "${C_TEAL}Status:      ${C_GRAY}Queued${C_RESET}${pref_badge}"
     fi
 
     # Extended Info (Only available if track is currently playing AND local)
@@ -675,6 +693,21 @@ cmd_info() {
     printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
     B_LINE=${B_LINE// /─}
     echo -e "${C_GRAY}${B_LINE}${C_RESET}"
+
+    if [ -t 0 ] && [ -t 1 ]; then
+        echo -ne "${C_PINK}>>> Press 'l' to like/unlike, 'x' to dislike, or ENTER to return: ${C_RESET}"
+        read -r -n 1 user_key < /dev/tty 2>/dev/null || read -r -n 1 user_key
+        echo ""
+        if [[ "$user_key" =~ ^[lL]$ ]]; then
+            if is_liked_track "$filename"; then
+                cmd_unlike "$filename"
+            else
+                cmd_like "$filename"
+            fi
+        elif [[ "$user_key" =~ ^[xX]$ ]]; then
+            cmd_dislike "$filename"
+        fi
+    fi
 }
 
 cmd_next() {
