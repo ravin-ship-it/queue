@@ -158,7 +158,7 @@ show_queue() {
         [ -n "$meta_artist" ] && [ "$meta_artist" != "null" ] && [ "$meta_artist" != "$CLEAN_FILENAME" ] && artist_part=" ${C_GRAY}by${C_RESET} ${C_LIGHT_PINK}$meta_artist${C_RESET}"
         [ -n "$meta_duration" ] && [ "$meta_duration" != "null" ] && [ "$meta_duration" != "0:00" ] && dur_part=" ${C_ORANGE}[$meta_duration]${C_RESET}"
         
-        # Track Status Badges ([🩷] Liked, [💔] Disliked, [Ⓐ] Auto-Discovered)
+        # Track Status Badges (🩷 | Liked, 💔 | Disliked, Ⓐ | Auto-Discovered)
         local badges=$(get_track_badges "$CLEAN_FILENAME" "$vid_id")
 
         # Player Indicator (|>/||) and Active Track Highlighting
@@ -322,7 +322,7 @@ cmd_liked_list() {
                 [[ "$url" =~ ^http ]] && clean=$(echo "$url" | sed -e 's/^[[:space:]]*//; s/[[:space:]]*$//; s/\\t.*//; s/\t.*//')
                 local tit=$(get_cached_title "$clean")
                 [ -z "$tit" ] && tit=$(basename "$clean")
-                echo -e "  ${C_ORANGE}${i}.${C_RESET} [🩷] ${C_CYAN}${tit}${C_RESET}"
+                echo -e "  ${C_ORANGE}${i}.${C_RESET} 🩷 | ${C_CYAN}${tit}${C_RESET}"
                 ((i++))
             done < "$LIKED_PLAYLIST_FILE"
         else
@@ -348,7 +348,7 @@ cmd_liked_list() {
                 local dur_part=""
                 [ -n "$art" ] && [ "$art" != "null" ] && art_part=" ${C_GRAY}by${C_RESET} ${C_LIGHT_PINK}${art}${C_RESET}"
                 [ -n "$dur" ] && [ "$dur" != "null" ] && [ "$dur" != "0:00" ] && dur_part=" ${C_ORANGE}[${dur}]${C_RESET}"
-                items+="${C_ORANGE}${i}${C_RESET}. [🩷] ${C_CYAN}${tit}${C_RESET}${art_part}${dur_part}"$'\t'"${clean}"$'\t'"${tit}"$'\n'
+                items+="${C_ORANGE}${i}${C_RESET}. 🩷 | ${C_CYAN}${tit}${C_RESET}${art_part}${dur_part}"$'\t'"${clean}"$'\t'"${tit}"$'\n'
                 ((i++))
                 ((count++))
             done < "$LIKED_PLAYLIST_FILE"

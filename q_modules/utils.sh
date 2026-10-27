@@ -1227,21 +1227,21 @@ unmark_track_disliked() {
 get_track_badges() {
     local fname="$1"
     local vid="$2"
-    local badges=""
+    local tags=""
 
     if is_liked_track "$fname" "$vid"; then
-        badges+="[🩷]"
+        tags+="🩷"
     elif is_disliked_track "$fname" "$vid"; then
-        badges+="[💔]"
+        tags+="💔"
     fi
 
     if is_auto_track "$fname" "$vid"; then
-        badges+="[${C_PURPLE}Ⓐ${C_RESET}]"
+        tags+="${C_PURPLE}Ⓐ${C_RESET}"
     fi
 
-    [ -n "$badges" ] && badges+=" "
-
-    echo -n "$badges"
+    if [ -n "$tags" ]; then
+        echo -n "${tags} ${C_GRAY}|${C_RESET} "
+    fi
 }
 
 send_ipc() {
