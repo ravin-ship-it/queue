@@ -198,12 +198,12 @@ fetch_and_display_url_info() {
         print_boxed_line "${C_TEAL}Likes:    ${C_WHITE}${likes}${C_RESET}"
         print_boxed_line "${C_TEAL}Uploaded: ${C_WHITE}${date}${C_RESET}"
         
-        # Status Badge (Liked ❤️ / Disliked 💔)
+        # Status Badge (Liked [🩷] / Disliked [💔])
         local pref_badge=""
         if is_liked_track "$clean_url" "$video_id"; then
-            pref_badge=" ${C_PINK}❤️ Liked${C_RESET}"
+            pref_badge=" ${C_PINK}[🩷] Liked${C_RESET}"
         elif is_disliked_track "$clean_url" "$video_id"; then
-            pref_badge=" ${C_PINK}💔 Disliked${C_RESET}"
+            pref_badge=" ${C_PINK}[💔] Disliked${C_RESET}"
         fi
 
         if [ "$is_current" == "true" ]; then
@@ -634,9 +634,9 @@ cmd_info() {
     
     local pref_badge=""
     if is_liked_track "$filename"; then
-        pref_badge=" ${C_PINK}❤️ Liked${C_RESET}"
+        pref_badge=" ${C_PINK}[🩷] Liked${C_RESET}"
     elif is_disliked_track "$filename"; then
-        pref_badge=" ${C_PINK}💔 Disliked${C_RESET}"
+        pref_badge=" ${C_PINK}[💔] Disliked${C_RESET}"
     fi
 
     if [ "$playing" == "true" ]; then

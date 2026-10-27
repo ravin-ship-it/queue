@@ -886,7 +886,7 @@ if [ -z "$1" ]; then
              LINE=$(get_fzf_divider)
              act_header="${C_PURPLE}🪷 Action for ${C_CYAN}${count}${C_PURPLE} item(s)${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
              act_prompt="🎵 ${P_TEAL}Choose Action${STATUS_ICONS}${P_RESET} > "
-             action=$(echo -e "  |>  Play Selected\n  📺  Watch Video Window\n  🎧  Audio-Only Mode (Bandwidth Saver)\n  ℹ️  Inspect Track Info (Metadata & Stream)\n  🕶️  Blind Play (One-Off Isolated)\n  🎬  Set Video Quality / Resolution\n  ✨  New Queue from Selected & Play\n  📥  Download Selected\n  ❤️  Like Track(s)\n  🤍  Unlike Track(s)\n  💔  Dislike Track\n  💔✖ Dislike & Remove\n  ✖  Remove from Queue\n  ✚  Save to Playlist" | \
+             action=$(echo -e "  |>  Play Selected\n  📺  Watch Video Window\n  🎧  Audio-Only Mode (Bandwidth Saver)\n  ℹ️  Inspect Track Info (Metadata & Stream)\n  🕶️  Blind Play (One-Off Isolated)\n  🎬  Set Video Quality / Resolution\n  ✨  New Queue from Selected & Play\n  📥  Download Selected\n  🩷  Like Track(s)\n  🤍  Unlike Track(s)\n  💔  Dislike Track\n  💔✖ Dislike & Remove\n  ✖  Remove from Queue\n  ✚  Save to Playlist" | \
                  fzf --height=100% --layout=reverse --border --info=inline-right \
                  $FZF_COLOR_OPTS \
                  --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \
@@ -1068,7 +1068,7 @@ if [ -z "$1" ]; then
                      mpv_title=$(echo "$item_json" | jq -r '.title // ""')
                      mark_track_liked "$filename" "$mpv_title"
                  done <<< "$selection"
-                 echo -e "${C_PINK}❤️  Liked & Saved ${C_ORANGE}$count${C_PINK} track(s) to Liked Songs.${C_RESET}"
+                 echo -e "${C_PINK}🩷 Liked & Saved ${C_ORANGE}$count${C_PINK} track(s) to Liked Songs.${C_RESET}"
                  exit 0
 
              # 6. Unlike Track(s)

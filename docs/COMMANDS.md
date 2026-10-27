@@ -276,7 +276,7 @@ q -pb -aud "https://www.youtube.com/watch?v=..."
 
 ---
 
-## ❤️ Liked Songs & Preference System
+## 🩷 Liked Songs & Preference System
 
 Queue lets you save your favorite music, curate Liked Songs, and tag tracks with visual preference badges across all interfaces:
 
@@ -298,9 +298,9 @@ q -liked                # or: q -likel, q -like list
 ### 🏷️ Status Badges & Indicators
 | Indicator | Meaning | Where It Appears |
 | :---: | :--- | :--- |
-| `❤️ ` | **Liked Track** | Queue list, FZF queue, now playing logs, FZF search results, Inspector |
-| `💔 ` | **Disliked Track** | Queue list, FZF search results, Inspector |
-| `Ⓐ ` | **Auto-Discovered Track** | Queue list and now playing logs when fetched by smart auto-discovery |
+| `[🩷]` | **Liked Track** | Queue list, FZF queue, now playing logs, FZF search results, Inspector |
+| `[💔]` | **Disliked Track** | Queue list, FZF search results, Inspector |
+| `[Ⓐ]` | **Auto-Discovered Track** | Queue list and now playing logs when fetched by smart auto-discovery |
 
 ---
 

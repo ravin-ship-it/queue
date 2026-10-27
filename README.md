@@ -168,11 +168,11 @@ Queue adapts its rendering and audio engine based on the host platform:
 | `q -speed [val]` | Set/Check playback speed (`0.25x` - `4.0x`, `reset`) |
 | `q -lang [code]` | **Audio Language & Dub Switcher**: Multi-track dubs with Dual-Session Selector |
 | `q -hybrid [on\|off]` | Switch between Standalone and Hybrid Boost engines |
-| `q -like [N]` / `-unlike` | Like/Unlike track & save to Liked Songs (tagged `❤️ `) |
+| `q -like [N]` / `-unlike` | Like/Unlike track & save to Liked Songs (tagged `[🩷]`) |
 | `q -liked` | **Liked Songs Hub**: Interactive FZF player & manager |
 | `q -pl-load [N]` | **Playlist Hub**: Interactive FZF playlist explorer & loader |
 | `q -pl-save <N>` | Save current queue as a custom named playlist |
-| `q -dis [N]` / `-rmd` | Dislike track & blacklist from auto-discovery (tagged `💔 `) |
+| `q -dis [N]` / `-rmd` | Dislike track & blacklist from auto-discovery (tagged `[💔]`) |
 | `q -disl` | **Dislike Hub**: Interactive FZF blacklist manager |
 | `q -fx` | Toggle Dolby Equalizer & Spatial Audio FX |
 | `q -d [N]` | Interactive Downloader Hub (MP3, FLAC, OPUS, MP4) |

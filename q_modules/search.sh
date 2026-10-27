@@ -135,7 +135,7 @@ perform_search() {
                 local tmp3="${tmp2%::*}"
                 local url="${tmp3##*::}"
                 mark_track_liked "$url" "$title"
-                echo -e "${C_PINK}❤️  Liked & Saved to Liked Songs:${C_RESET} ${C_CYAN}${title:-$url}${C_RESET}"
+                echo -e "${C_PINK}🩷 Liked & Saved to Liked Songs:${C_RESET} ${C_CYAN}${title:-$url}${C_RESET}"
             done <<< "$selection"
             rm -f "$TMP_RESULTS"
             return 1

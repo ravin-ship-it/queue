@@ -1230,14 +1230,16 @@ get_track_badges() {
     local badges=""
 
     if is_liked_track "$fname" "$vid"; then
-        badges+="❤️  "
+        badges+="[🩷]"
     elif is_disliked_track "$fname" "$vid"; then
-        badges+="💔 "
+        badges+="[💔]"
     fi
 
     if is_auto_track "$fname" "$vid"; then
-        badges+="${C_PURPLE}Ⓐ${C_RESET} "
+        badges+="[${C_PURPLE}Ⓐ${C_RESET}]"
     fi
+
+    [ -n "$badges" ] && badges+=" "
 
     echo -n "$badges"
 }
