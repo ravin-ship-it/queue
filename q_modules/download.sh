@@ -226,6 +226,10 @@ interactive_download_wizard() {
             echo -ne "${C_PINK}Enter custom directory path > ${C_RESET}"
             read -r target_dir
         fi
+        if [ -z "$target_dir" ] || [[ "$target_dir" =~ ^[cCqQ]$ ]]; then
+            echo -e "${C_PINK}👋 Download cancelled.${C_RESET}"
+            return 0
+        fi
     fi
 
     # Expand tilde and create directory if needed
@@ -247,12 +251,6 @@ execute_download() {
     local choice="$2"
     local dest_dir="$3"
 
-    echo -e "${C_PURPLE}${T_LINE}${C_RESET}"
-    echo -e "${C_CYAN}🚀 Starting Download...${C_RESET}"
-    echo -e "${C_TEAL}📂 Target Directory:${C_RESET} ${C_WHITE}${dest_dir}${C_RESET}"
-    echo -e "${C_TEAL}🎯 Preset:${C_RESET} ${C_YELLOW}${choice}${C_RESET}"
-    echo -e "${C_PURPLE}${B_LINE}${C_RESET}"
-
     local YTDL_CMD=("yt-dlp")
     if ! yt-dlp --version >/dev/null 2>&1; then
         if python3 -m yt_dlp --version >/dev/null 2>&1; then
@@ -264,49 +262,94 @@ execute_download() {
     local COOKIES_FILE="$HOME/.config/mpv/cookies.txt"
     [ -f "$COOKIES_FILE" ] && dl_args+=("--cookies" "$COOKIES_FILE")
 
+    local exit_code=0
+    local did_download=false
+
     if [[ "$choice" =~ "Inspect Raw Streams" ]]; then
         # Advanced interactive stream inspection
         echo -e "${C_CYAN}📊 Available Raw Streams for this video:${C_RESET}\n"
         "${YTDL_CMD[@]}" -F -- "$url"
         echo ""
-        echo -ne "${C_PINK}Enter custom format code (e.g. '137+140' or '251') > ${C_RESET}"
+        echo -ne "${C_PINK}Enter custom format code (e.g. '137+140' or '251', or press ENTER to cancel) > ${C_RESET}"
         read -r custom_f
-        if [ -n "$custom_f" ]; then
-            "${YTDL_CMD[@]}" "${dl_args[@]}" -f "$custom_f" -- "$url"
+        if [ -z "$custom_f" ] || [[ "$custom_f" =~ ^[cCqQ]$ ]] || [[ "$custom_f" =~ ^(cancel|quit|exit)$ ]]; then
+            echo -e "\n${C_PINK}👋 Download cancelled (no format code entered).${C_RESET}"
+            return 0
         fi
-    elif [[ "$choice" =~ "FLAC" ]]; then
-        "${YTDL_CMD[@]}" "${dl_args[@]}" -x --audio-format flac -- "$url"
-    elif [[ "$choice" =~ "MP3" ]]; then
-        "${YTDL_CMD[@]}" "${dl_args[@]}" -x --audio-format mp3 --audio-quality 0 -- "$url"
-    elif [[ "$choice" =~ "OPUS" ]]; then
-        "${YTDL_CMD[@]}" "${dl_args[@]}" -x --audio-format opus -- "$url"
-    elif [[ "$choice" =~ "M4A" ]]; then
-        "${YTDL_CMD[@]}" "${dl_args[@]}" -x --audio-format m4a -- "$url"
-    elif [[ "$choice" =~ "WAV" ]]; then
-        # WAV doesn't support embedded thumbnails
-        local wav_args=("--embed-metadata" "-P" "$dest_dir" "-o" "%(title)s [%(id)s].%(ext)s" -x --audio-format wav)
-        [ -f "$COOKIES_FILE" ] && wav_args+=("--cookies" "$COOKIES_FILE")
-        "${YTDL_CMD[@]}" "${wav_args[@]}" -- "$url"
-    elif [[ "$choice" =~ "4K Ultra" ]]; then
-        "${YTDL_CMD[@]}" "${dl_args[@]}" -f "bv*[height<=2160]+ba/b" --merge-output-format mp4 -- "$url"
-    elif [[ "$choice" =~ "2K Quad" ]]; then
-        "${YTDL_CMD[@]}" "${dl_args[@]}" -f "bv*[height<=1440]+ba/b" --merge-output-format mp4 -- "$url"
-    elif [[ "$choice" =~ "Full HD" ]]; then
-        "${YTDL_CMD[@]}" "${dl_args[@]}" -f "bv*[height<=1080]+ba/b" --merge-output-format mp4 -- "$url"
-    elif [[ "$choice" =~ "HD Ready" ]]; then
-        "${YTDL_CMD[@]}" "${dl_args[@]}" -f "bv*[height<=720]+ba/b" --merge-output-format mp4 -- "$url"
-    elif [[ "$choice" =~ "Data Saver" ]]; then
-        "${YTDL_CMD[@]}" "${dl_args[@]}" -f "bv*[height<=480]+ba/b" --merge-output-format mp4 -- "$url"
+
+        echo -e "${C_PURPLE}${T_LINE}${C_RESET}"
+        echo -e "${C_CYAN}🚀 Starting Download...${C_RESET}"
+        echo -e "${C_TEAL}📂 Target Directory:${C_RESET} ${C_WHITE}${dest_dir}${C_RESET}"
+        echo -e "${C_TEAL}🎯 Format Code:${C_RESET} ${C_YELLOW}${custom_f}${C_RESET}"
+        echo -e "${C_PURPLE}${B_LINE}${C_RESET}"
+
+        "${YTDL_CMD[@]}" "${dl_args[@]}" -f "$custom_f" -- "$url"
+        exit_code=$?
+        did_download=true
     else
-        # Default Best Quality
-        "${YTDL_CMD[@]}" "${dl_args[@]}" -f "bv*+ba/b" --merge-output-format mp4 -- "$url"
+        echo -e "${C_PURPLE}${T_LINE}${C_RESET}"
+        echo -e "${C_CYAN}🚀 Starting Download...${C_RESET}"
+        echo -e "${C_TEAL}📂 Target Directory:${C_RESET} ${C_WHITE}${dest_dir}${C_RESET}"
+        echo -e "${C_TEAL}🎯 Preset:${C_RESET} ${C_YELLOW}${choice}${C_RESET}"
+        echo -e "${C_PURPLE}${B_LINE}${C_RESET}"
+
+        if [[ "$choice" =~ "FLAC" ]]; then
+            "${YTDL_CMD[@]}" "${dl_args[@]}" -x --audio-format flac -- "$url"
+            exit_code=$?
+            did_download=true
+        elif [[ "$choice" =~ "MP3" ]]; then
+            "${YTDL_CMD[@]}" "${dl_args[@]}" -x --audio-format mp3 --audio-quality 0 -- "$url"
+            exit_code=$?
+            did_download=true
+        elif [[ "$choice" =~ "OPUS" ]]; then
+            "${YTDL_CMD[@]}" "${dl_args[@]}" -x --audio-format opus -- "$url"
+            exit_code=$?
+            did_download=true
+        elif [[ "$choice" =~ "M4A" ]]; then
+            "${YTDL_CMD[@]}" "${dl_args[@]}" -x --audio-format m4a -- "$url"
+            exit_code=$?
+            did_download=true
+        elif [[ "$choice" =~ "WAV" ]]; then
+            # WAV doesn't support embedded thumbnails
+            local wav_args=("--embed-metadata" "-P" "$dest_dir" "-o" "%(title)s [%(id)s].%(ext)s" -x --audio-format wav)
+            [ -f "$COOKIES_FILE" ] && wav_args+=("--cookies" "$COOKIES_FILE")
+            "${YTDL_CMD[@]}" "${wav_args[@]}" -- "$url"
+            exit_code=$?
+            did_download=true
+        elif [[ "$choice" =~ "4K Ultra" ]]; then
+            "${YTDL_CMD[@]}" "${dl_args[@]}" -f "bv*[height<=2160]+ba/b" --merge-output-format mp4 -- "$url"
+            exit_code=$?
+            did_download=true
+        elif [[ "$choice" =~ "2K Quad" ]]; then
+            "${YTDL_CMD[@]}" "${dl_args[@]}" -f "bv*[height<=1440]+ba/b" --merge-output-format mp4 -- "$url"
+            exit_code=$?
+            did_download=true
+        elif [[ "$choice" =~ "Full HD" ]]; then
+            "${YTDL_CMD[@]}" "${dl_args[@]}" -f "bv*[height<=1080]+ba/b" --merge-output-format mp4 -- "$url"
+            exit_code=$?
+            did_download=true
+        elif [[ "$choice" =~ "HD Ready" ]]; then
+            "${YTDL_CMD[@]}" "${dl_args[@]}" -f "bv*[height<=720]+ba/b" --merge-output-format mp4 -- "$url"
+            exit_code=$?
+            did_download=true
+        elif [[ "$choice" =~ "Data Saver" ]]; then
+            "${YTDL_CMD[@]}" "${dl_args[@]}" -f "bv*[height<=480]+ba/b" --merge-output-format mp4 -- "$url"
+            exit_code=$?
+            did_download=true
+        else
+            # Default Best Quality
+            "${YTDL_CMD[@]}" "${dl_args[@]}" -f "bv*+ba/b" --merge-output-format mp4 -- "$url"
+            exit_code=$?
+            did_download=true
+        fi
     fi
 
-    local exit_code=$?
-    if [ $exit_code -eq 0 ]; then
-        echo -e "\n${C_GREEN}✨ Download Finished Successfully!${C_RESET}"
-        echo -e "${C_TEAL}📂 Saved into:${C_RESET} ${C_WHITE}${dest_dir}${C_RESET}"
-    else
-        echo -e "\n${C_PINK}⚠️ Download ended with code ${exit_code}.${C_RESET}"
+    if [ "$did_download" = true ]; then
+        if [ $exit_code -eq 0 ]; then
+            echo -e "\n${C_GREEN}✨ Download Finished Successfully!${C_RESET}"
+            echo -e "${C_TEAL}📂 Saved into:${C_RESET} ${C_WHITE}${dest_dir}${C_RESET}"
+        else
+            echo -e "\n${C_PINK}⚠️ Download ended with code ${exit_code}.${C_RESET}"
+        fi
     fi
 }
