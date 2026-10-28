@@ -277,6 +277,10 @@ cmd_unlike() {
             unmark_track_liked "$filename"
             echo -e "${C_GRAY}🤍 Removed from Liked Songs:${C_RESET} ${C_CYAN}${title:-$filename}${C_RESET}"
             return 0
+        elif [ -n "$filename" ] && is_disliked_track "$filename"; then
+            unmark_track_disliked "$filename"
+            echo -e "${C_GREEN}🤍 Removed from Dislike List & Whitelisted:${C_RESET} ${C_CYAN}${title:-$filename}${C_RESET}"
+            return 0
         else
             cmd_liked_list
             return $?
@@ -301,8 +305,21 @@ cmd_unlike() {
         fi
 
         if [ -n "$filename" ]; then
+            local was_liked=false
+            local was_disliked=false
+            is_liked_track "$filename" && was_liked=true
+            is_disliked_track "$filename" && was_disliked=true
+
             unmark_track_liked "$filename"
-            echo -e "${C_GRAY}🤍 Removed from Liked Songs:${C_RESET} ${C_CYAN}${title:-$filename}${C_RESET}"
+            unmark_track_disliked "$filename"
+
+            if [ "$was_liked" = true ]; then
+                echo -e "${C_GRAY}🤍 Removed from Liked Songs:${C_RESET} ${C_CYAN}${title:-$filename}${C_RESET}"
+            elif [ "$was_disliked" = true ]; then
+                echo -e "${C_GREEN}🤍 Removed from Dislike List & Whitelisted:${C_RESET} ${C_CYAN}${title:-$filename}${C_RESET}"
+            else
+                echo -e "${C_GRAY}🤍 Cleared reaction for:${C_RESET} ${C_CYAN}${title:-$filename}${C_RESET}"
+            fi
         fi
     done
 }
@@ -1196,50 +1213,12 @@ queue_item_ipc() {
 add_to_auto_blacklist() {
     local target="$1"
     local opt_title="$2"
-    local b_id=""
-    if [[ "$target" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]]; then
-        b_id="${BASH_REMATCH[2]}"
-    elif [[ "$target" =~ ^[a-zA-Z0-9_-]{11}$ ]]; then
-        b_id="$target"
-    fi
-    if [ -n "$b_id" ]; then
-        local bl_file="$HOME/.cache/mpv/auto_blacklist"
-        mkdir -p "$(dirname "$bl_file")" 2>/dev/null
-        touch "$bl_file" 2>/dev/null
-
-        # If opt_title is missing, try looking up in titles cache
-        if [ -z "$opt_title" ] || [ "$opt_title" == "$target" ] || [ "$opt_title" == "$b_id" ]; then
-            opt_title=$(get_cached_title "$target")
-            [ -z "$opt_title" ] && opt_title=$(get_cached_title "$b_id")
-        fi
-        [ -z "$opt_title" ] && opt_title="Disliked Track"
-
-        # Check if already in blacklist
-        if ! grep -E -q "^${b_id}([[:blank:]]|$)" "$bl_file" 2>/dev/null; then
-            printf "%s\t%s\n" "$b_id" "$opt_title" >> "$bl_file"
-        fi
-        if [ $((RANDOM % 15)) -eq 0 ] && [ -f "$bl_file" ]; then
-            sort -u -k1,1 "$bl_file" | tail -n 500 > "$bl_file.tmp" 2>/dev/null && mv "$bl_file.tmp" "$bl_file"
-        fi
-    fi
+    mark_track_disliked "$target" "$opt_title"
 }
 
 remove_from_auto_blacklist() {
     local target="$1"
-    local b_id=""
-    if [[ "$target" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]]; then
-        b_id="${BASH_REMATCH[2]}"
-    elif [[ "$target" =~ ^[a-zA-Z0-9_-]{11}$ ]]; then
-        b_id="$target"
-    else
-        b_id="$target"
-    fi
-    local bl_file="$HOME/.cache/mpv/auto_blacklist"
-    if [ -f "$bl_file" ] && [ -n "$b_id" ]; then
-        local tmp=$(mktemp)
-        grep -E -v "^${b_id}([[:blank:]]|$)" "$bl_file" > "$tmp" 2>/dev/null || true
-        mv "$tmp" "$bl_file"
-    fi
+    unmark_track_disliked "$target"
 }
 
 cmd_undislike() {
@@ -1258,9 +1237,11 @@ cmd_undislike() {
 
         local cur_id=""
         [[ "$filename" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && cur_id="${BASH_REMATCH[2]}"
+        [ -z "$cur_id" ] && cur_id="$filename"
 
         if [ -n "$cur_id" ] && grep -E -q "^${cur_id}([[:blank:]]|$)" "$bl_file" 2>/dev/null; then
             remove_from_auto_blacklist "$cur_id"
+            [ -n "$filename" ] && remove_from_auto_blacklist "$filename"
             echo -e "${C_GREEN}✨ Removed from Dislike List & Whitelisted:${C_RESET} ${C_CYAN}${title:-$cur_id}${C_RESET}"
             return 0
         else
@@ -1273,14 +1254,16 @@ cmd_undislike() {
         [ -z "$target" ] && continue
         local b_id=""
         local b_title=""
+        local filename=""
 
         if [[ "$target" =~ ^[0-9]+$ ]]; then
             local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
             local idx=$((target - 1))
             local item_json=$(echo "$track_info" | jq -s -c "map(select(.event == null)) | .[0].data[$idx] // empty" 2>/dev/null)
-            local filename=$(echo "$item_json" | jq -r '.filename // ""')
+            filename=$(echo "$item_json" | jq -r '.filename // ""')
             b_title=$(echo "$item_json" | jq -r '.title // ""')
             [[ "$filename" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && b_id="${BASH_REMATCH[2]}"
+            [ -z "$b_id" ] && b_id="$filename"
         elif [[ "$target" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]]; then
             b_id="${BASH_REMATCH[2]}"
         elif [[ "$target" =~ ^[a-zA-Z0-9_-]{11}$ ]]; then
@@ -1298,6 +1281,7 @@ cmd_undislike() {
                 b_title=$(grep -E "^${b_id}([[:blank:]]|$)" "$bl_file" 2>/dev/null | head -n 1 | awk -F'\t' '{print $2}')
             fi
             remove_from_auto_blacklist "$b_id"
+            [ -n "$filename" ] && remove_from_auto_blacklist "$filename"
             echo -e "${C_GREEN}✨ Removed from Dislike List & Whitelisted:${C_RESET} ${C_CYAN}${b_title:-$b_id}${C_RESET}"
         else
             echo -e "${C_PINK}🔍🤷 Track [${C_ORANGE}${target}${C_PINK}] not found in dislike blacklist.${C_RESET}"
@@ -1503,6 +1487,8 @@ cmd_dislike_list() {
                 --prompt="$clr_prompt")
             if echo "$confirm" | grep -q "Yes, Clear"; then
                 > "$bl_file"
+                DISLIKED_TRACKS_MEM=()
+                mirror_to_windows_cache "$bl_file" "auto_blacklist"
                 echo -e "${C_GREEN}✅ Dislike list cleared completely.${C_RESET}"
             fi
             sleep 0.8

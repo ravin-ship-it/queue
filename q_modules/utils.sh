@@ -1022,6 +1022,20 @@ LIKED_TRACKS_FILE="$HOME/.cache/mpv/liked_tracks"
 LIKED_PLAYLIST_FILE="$HOME/.local/share/mpv/playlists/Liked.txt"
 AUTO_BLACKLIST_FILE="$HOME/.cache/mpv/auto_blacklist"
 
+mirror_to_windows_cache() {
+    local src="$1"
+    local rel_name="${2:-$(basename "$src")}"
+    if [ "$IS_WSL" = true ]; then
+        local win_dir
+        win_dir=$(get_windows_user_dir)
+        if [ -n "$win_dir" ] && [ -d "$win_dir/.cache/mpv" ]; then
+            if [ -f "$src" ]; then
+                cp -fp "$src" "$win_dir/.cache/mpv/$rel_name" 2>/dev/null
+            fi
+        fi
+    fi
+}
+
 declare -gA LIKED_TRACKS_MEM=()
 declare -gA DISLIKED_TRACKS_MEM=()
 
@@ -1143,6 +1157,7 @@ mark_track_liked() {
 
     [ -n "$clean" ] && LIKED_TRACKS_MEM["$clean"]=1
     [ -n "$vid" ] && LIKED_TRACKS_MEM["$vid"]=1
+    mirror_to_windows_cache "$LIKED_TRACKS_FILE" "liked_tracks"
 
     # 3. Mutual exclusivity: Remove from Dislike blacklist if previously disliked
     if [ -n "$vid" ]; then
@@ -1165,8 +1180,10 @@ unmark_track_liked() {
         sed -i "\#^${clean}\$#d" "$LIKED_PLAYLIST_FILE" 2>/dev/null || true
     fi
     if [ -f "$LIKED_TRACKS_FILE" ]; then
-        [ -n "$clean" ] && sed -i "\#^${clean}\t#d" "$LIKED_TRACKS_FILE" 2>/dev/null || true
-        [ -n "$vid" ] && sed -i "\#^${vid}\t#d" "$LIKED_TRACKS_FILE" 2>/dev/null || true
+        local tmp=$(mktemp 2>/dev/null || echo "/tmp/q_lk_$$.tmp")
+        awk -F'\t' -v cl="$clean" -v vi="$vid" '($1 != cl && $1 != vi)' "$LIKED_TRACKS_FILE" > "$tmp" 2>/dev/null || true
+        mv "$tmp" "$LIKED_TRACKS_FILE"
+        mirror_to_windows_cache "$LIKED_TRACKS_FILE" "liked_tracks"
     fi
 
     [ -n "$clean" ] && unset 'LIKED_TRACKS_MEM["$clean"]' 2>/dev/null || true
@@ -1202,6 +1219,7 @@ mark_track_disliked() {
     [ -n "$b_id" ] && DISLIKED_TRACKS_MEM["$b_id"]=1
     [ -n "$clean" ] && DISLIKED_TRACKS_MEM["$clean"]=1
     [ -n "$vid" ] && DISLIKED_TRACKS_MEM["$vid"]=1
+    mirror_to_windows_cache "$AUTO_BLACKLIST_FILE" "auto_blacklist"
 
     # Mutual exclusivity: remove from Liked Songs
     unmark_track_liked "$target"
@@ -1221,8 +1239,9 @@ unmark_track_disliked() {
 
     if [ -f "$AUTO_BLACKLIST_FILE" ] && [ -n "$b_id" ]; then
         local tmp=$(mktemp 2>/dev/null || echo "/tmp/q_bl_$$.tmp")
-        grep -E -v "^(${b_id}|${clean})([[:blank:]]|$)" "$AUTO_BLACKLIST_FILE" > "$tmp" 2>/dev/null || true
+        awk -F'\t' -v id="$b_id" -v vid="$vid" -v cl="$clean" '($1 != id && $1 != vid && $1 != cl)' "$AUTO_BLACKLIST_FILE" > "$tmp" 2>/dev/null || true
         mv "$tmp" "$AUTO_BLACKLIST_FILE"
+        mirror_to_windows_cache "$AUTO_BLACKLIST_FILE" "auto_blacklist"
     fi
 
     [ -n "$b_id" ] && unset 'DISLIKED_TRACKS_MEM["$b_id"]' 2>/dev/null || true
@@ -1280,9 +1299,9 @@ sync_session_cache() {
                 local win_mtime lnx_mtime
                 win_mtime=$(get_file_mtime "$win_cache/state.json")
                 lnx_mtime=$(get_file_mtime "$lnx_cache/state.json")
-                if [ "$win_mtime" -ge "$lnx_mtime" ]; then
+                if [ "$win_mtime" -gt "$lnx_mtime" ]; then
                     cp -fp "$win_cache/state.json" "$lnx_cache/state.json" 2>/dev/null
-                else
+                elif [ "$lnx_mtime" -gt "$win_mtime" ]; then
                     cp -fp "$lnx_cache/state.json" "$win_cache/state.json" 2>/dev/null
                 fi
             elif [ -f "$win_cache/state.json" ]; then
@@ -1296,9 +1315,9 @@ sync_session_cache() {
                 local win_mtime lnx_mtime
                 win_mtime=$(get_file_mtime "$win_cache/last_playlist.txt")
                 lnx_mtime=$(get_file_mtime "$lnx_cache/last_playlist.txt")
-                if [ "$win_mtime" -ge "$lnx_mtime" ]; then
+                if [ "$win_mtime" -gt "$lnx_mtime" ]; then
                     cp -fp "$win_cache/last_playlist.txt" "$lnx_cache/last_playlist.txt" 2>/dev/null
-                else
+                elif [ "$lnx_mtime" -gt "$win_mtime" ]; then
                     cp -fp "$lnx_cache/last_playlist.txt" "$win_cache/last_playlist.txt" 2>/dev/null
                 fi
             elif [ -f "$win_cache/last_playlist.txt" ]; then
@@ -1312,9 +1331,9 @@ sync_session_cache() {
                 local win_mtime lnx_mtime
                 win_mtime=$(get_file_mtime "$win_cache/auto_tracks")
                 lnx_mtime=$(get_file_mtime "$lnx_cache/auto_tracks")
-                if [ "$win_mtime" -ge "$lnx_mtime" ]; then
+                if [ "$win_mtime" -gt "$lnx_mtime" ]; then
                     cp -fp "$win_cache/auto_tracks" "$lnx_cache/auto_tracks" 2>/dev/null
-                else
+                elif [ "$lnx_mtime" -gt "$win_mtime" ]; then
                     cp -fp "$lnx_cache/auto_tracks" "$win_cache/auto_tracks" 2>/dev/null
                 fi
             elif [ -f "$win_cache/auto_tracks" ]; then
@@ -1328,9 +1347,9 @@ sync_session_cache() {
                 local win_mtime lnx_mtime
                 win_mtime=$(get_file_mtime "$win_cache/liked_tracks")
                 lnx_mtime=$(get_file_mtime "$lnx_cache/liked_tracks")
-                if [ "$win_mtime" -ge "$lnx_mtime" ]; then
+                if [ "$win_mtime" -gt "$lnx_mtime" ]; then
                     cp -fp "$win_cache/liked_tracks" "$lnx_cache/liked_tracks" 2>/dev/null
-                else
+                elif [ "$lnx_mtime" -gt "$win_mtime" ]; then
                     cp -fp "$lnx_cache/liked_tracks" "$win_cache/liked_tracks" 2>/dev/null
                 fi
             elif [ -f "$win_cache/liked_tracks" ]; then
@@ -1344,9 +1363,9 @@ sync_session_cache() {
                 local win_mtime lnx_mtime
                 win_mtime=$(get_file_mtime "$win_cache/auto_blacklist")
                 lnx_mtime=$(get_file_mtime "$lnx_cache/auto_blacklist")
-                if [ "$win_mtime" -ge "$lnx_mtime" ]; then
+                if [ "$win_mtime" -gt "$lnx_mtime" ]; then
                     cp -fp "$win_cache/auto_blacklist" "$lnx_cache/auto_blacklist" 2>/dev/null
-                else
+                elif [ "$lnx_mtime" -gt "$win_mtime" ]; then
                     cp -fp "$lnx_cache/auto_blacklist" "$win_cache/auto_blacklist" 2>/dev/null
                 fi
             elif [ -f "$win_cache/auto_blacklist" ]; then

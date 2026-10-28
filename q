@@ -886,7 +886,7 @@ if [ -z "$1" ]; then
              LINE=$(get_fzf_divider)
              act_header="${C_PURPLE}🪷 Action for ${C_CYAN}${count}${C_PURPLE} item(s)${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
              act_prompt="🎵 ${P_TEAL}Choose Action${STATUS_ICONS}${P_RESET} > "
-             action=$(echo -e "  |>  Play Selected\n  📺  Watch Video Window\n  🎧  Audio-Only Mode (Bandwidth Saver)\n  ℹ️  Inspect Track Info (Metadata & Stream)\n  🕶️  Blind Play (One-Off Isolated)\n  🎬  Set Video Quality / Resolution\n  ✨  New Queue from Selected & Play\n  📥  Download Selected\n  🩷  Like Track(s)\n  🤍  Unlike Track(s)\n  💔  Dislike Track\n  💔✖ Dislike & Remove\n  ✖  Remove from Queue\n  ✚  Save to Playlist" | \
+             action=$(echo -e "  |>  Play Selected\n  📺  Watch Video Window\n  🎧  Audio-Only Mode (Bandwidth Saver)\n  ℹ️  Inspect Track Info (Metadata & Stream)\n  🕶️  Blind Play (One-Off Isolated)\n  🎬  Set Video Quality / Resolution\n  ✨  New Queue from Selected & Play\n  📥  Download Selected\n  🩷  Like Track(s)\n  🤍  Unlike Track(s)\n  💔  Dislike Track\n  🤍  Undislike Track(s) (Whitelist)\n  💔✖ Dislike & Remove\n  ✖  Remove from Queue\n  ✚  Save to Playlist" | \
                  fzf --height=100% --layout=reverse --border --info=inline-right \
                  $FZF_COLOR_OPTS \
                  --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \
@@ -1079,12 +1079,25 @@ if [ -z "$1" ]; then
                      [ -z "$item_json" ] && continue
                      filename=$(echo "$item_json" | jq -r '.filename // ""')
                      unmark_track_liked "$filename"
+                     unmark_track_disliked "$filename"
                  done <<< "$selection"
-                 echo -e "${C_PINK}🤍 Unliked ${C_ORANGE}$count${C_PINK} track(s) from Liked Songs.${C_RESET}"
+                 echo -e "${C_PINK}🤍 Unliked / Cleared reactions for ${C_ORANGE}$count${C_PINK} track(s).${C_RESET}"
                  exit 0
 
-             # 7. Dislike Track (Keep in Queue)
-             elif echo "$action" | grep -q "Dislike Track"; then
+             # 7. Undislike Track(s) (Whitelist)
+             elif echo "$action" | grep -q "Undislike Track"; then
+                 track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
+                 while IFS= read -r idx; do
+                     item_json=$(echo "$track_info" | jq -s -c "map(select(.event == null)) | .[0].data[$((idx - 1))] // empty")
+                     [ -z "$item_json" ] && continue
+                     filename=$(echo "$item_json" | jq -r '.filename // ""')
+                     unmark_track_disliked "$filename"
+                 done <<< "$selection"
+                 echo -e "${C_GREEN}✨ Whitelisted & Removed ${C_ORANGE}$count${C_GREEN} track(s) from Dislike list.${C_RESET}"
+                 exit 0
+
+             # 8. Dislike Track (Keep in Queue)
+             elif echo "$action" | grep -q "Dislike Track" && ! echo "$action" | grep -q "Undislike"; then
                  track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
                  while IFS= read -r idx; do
                      item_json=$(echo "$track_info" | jq -s -c "map(select(.event == null)) | .[0].data[$((idx - 1))] // empty")
