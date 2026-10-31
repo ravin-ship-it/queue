@@ -197,6 +197,31 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
     esac
 
     case "$CMD" in
+        -play-file)
+            shift
+            file="$1"
+            if [ -n "$file" ] && [ -f "$file" ]; then
+                idx=$(sed "s/\x1b\[[0-9;]*m//g" "$file" | sed -E -n 's/^[[:space:]]*([|><]{2}[[:space:]]*)?([0-9]+)\..*/\2/p' | head -n 1)
+                if [[ "$idx" =~ ^[0-9]+$ ]] && [ "$idx" -gt 0 ]; then
+                    if [ "$MPV_RUNNING" = false ]; then
+                        cmd_play "$idx" >/dev/null 2>&1
+                    elif [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+                        cmd_play "$idx" >/dev/null 2>&1 &
+                    else
+                        echo "{\"command\":[\"playlist-play-index\",$((idx - 1))]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                        echo "{\"command\":[\"seek\",0,\"absolute\"]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                        echo "{\"command\":[\"set_property\",\"pause\",false]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                    fi
+                    if [ -f "$HOME/.cache/mpv/fzf_sock" ]; then
+                        fzf_sock=$(cat "$HOME/.cache/mpv/fzf_sock" 2>/dev/null)
+                        if [ -S "$fzf_sock" ]; then
+                            curl -s -X POST --unix-socket "$fzf_sock" -d "reload-sync(bash \"$SCRIPT_PATH\" -raw)" http://localhost/ >/dev/null 2>&1
+                        fi
+                    fi
+                fi
+            fi
+            exit 0
+            ;;
         -rm) 
             shift
             targets=()
@@ -864,6 +889,9 @@ if [ -z "$1" ]; then
         --bind "insert:select-all+execute-silent(touch \"$SELECTION_MODE_FILE\")" \
         --bind "delete:deselect-all+execute-silent(rm -f \"$SELECTION_MODE_FILE\")" \
         --bind "tab:toggle+execute-silent(touch \"$SELECTION_MODE_FILE\")" \
+        --bind "enter:transform:[ \"\${FZF_SELECT_COUNT:-0}\" -gt 0 ] || [ -f \"$SELECTION_MODE_FILE\" ] && echo 'accept' || echo 'execute-silent(bash \"$SCRIPT_PATH\" -play-file {f})'" \
+        --bind "double-click:transform:[ \"\${FZF_SELECT_COUNT:-0}\" -gt 0 ] || [ -f \"$SELECTION_MODE_FILE\" ] && echo 'accept' || echo 'execute-silent(bash \"$SCRIPT_PATH\" -play-file {f})'" \
+        --bind "esc:abort" \
         --header="$INITIAL_HEADER" \
         --info=inline-right --prompt="$PROMPT" | sed "s/\x1b\[[0-9;]*m//g" | sed -E -n 's/^[[:space:]]*([|><]{2}[[:space:]]*)?([0-9]+)\..*/\2/p')
     
