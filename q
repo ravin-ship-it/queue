@@ -1062,7 +1062,7 @@ if [ -z "$1" ]; then
                      m="append-play"
                      [ "$is_first" = true ] && { m="replace"; is_first=false; }
                      json_cmd=$(jq -nc --arg path "$url" --arg m "$m" '{"command": ["loadfile", $path, $m]}')
-                     echo "$json_cmd" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+                     echo "$json_cmd" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
                  done <<< "$(echo "$selection" | sort -n)"
                  if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
                      echo '{"command": ["set_property", "pause", true]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
@@ -1159,7 +1159,7 @@ if [ -z "$1" ]; then
                          removed_playing_title="$mpv_title"
                      fi
 
-                     echo "{ \"command\": [\"playlist-remove\", $((idx - 1))] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+                     echo "{ \"command\": [\"playlist-remove\", $((idx - 1))] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
                      mark_track_disliked "$filename" "$mpv_title"
                  done < <(echo "$selection" | sort -nr)
                  
@@ -1209,7 +1209,7 @@ if [ -z "$1" ]; then
                      [[ "$filename" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && rem_one_id="${BASH_REMATCH[2]}"
                      [ -n "$rem_one_id" ] && echo "$rem_one_id" >> "$HOME/.cache/mpv/auto_removed_recent"
 
-                     echo "{ \"command\": [\"playlist-remove\", $((idx - 1))] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+                     echo "{ \"command\": [\"playlist-remove\", $((idx - 1))] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
                  done < <(echo "$selection" | sort -nr)
                  
                  echo -e "${C_PINK}✖  Removed ${C_ORANGE}$count${C_PINK} tracks.${C_RESET}"

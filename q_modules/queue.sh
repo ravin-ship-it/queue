@@ -660,7 +660,7 @@ cmd_remove() {
         shift
     fi
 
-    local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET")
+    local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
     declare -a INDICES_TO_REMOVE
 
     if [ "$#" -eq 0 ] || [ -z "$1" ]; then
@@ -734,7 +734,7 @@ cmd_remove() {
                 tail -n 30 "$HOME/.cache/mpv/auto_removed_recent" > "$HOME/.cache/mpv/auto_removed_recent.tmp" 2>/dev/null && mv "$HOME/.cache/mpv/auto_removed_recent.tmp" "$HOME/.cache/mpv/auto_removed_recent"
             fi
 
-            echo "{ \"command\": [\"playlist-remove\", $((idx - 1))] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+            echo "{ \"command\": [\"playlist-remove\", $((idx - 1))] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
             if [ "$also_dislike" = true ]; then
                 mark_track_disliked "$filename" "$mpv_title"
                 echo -e "${C_PINK}💔✖ Removed & Blacklisted ${formatted_track}${C_RESET}"
@@ -799,7 +799,7 @@ cmd_move() {
     fi
 
     # Fetch track info for pretty logging
-    local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET")
+    local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
     local count=$(echo "$track_info" | jq -s -r 'map(select(.event == null)) | .[0].data | length // 0' 2>/dev/null); : "${count:=0}"
 
     if [ "$count" -eq 0 ]; then
@@ -838,7 +838,7 @@ cmd_move() {
     # Extract only the content after the index for the move log to keep "From -> To" style clean
     local track_details=$(echo -e "$formatted_track" | sed 's/^[^]]*]//')
 
-    echo "{ \"command\": [\"playlist-move\", $((from - 1)), $target_idx] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+    echo "{ \"command\": [\"playlist-move\", $((from - 1)), $target_idx] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
     echo -e "${C_CYAN}🚚 Moved ${C_WHITE}[${C_ORANGE}$from${C_WHITE}] ${C_CYAN}-> ${C_WHITE}[${C_ORANGE}$to${C_WHITE}]${C_RESET}${track_details}"
     save_current_playlist true >/dev/null 2>&1 & disown
 }
@@ -852,7 +852,7 @@ cmd_swap() {
     fi
 
     # Validate bounds
-    local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET")
+    local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
     local count=$(echo "$track_info" | jq -s -r 'map(select(.event == null)) | .[0].data | length // 0' 2>/dev/null); : "${count:=0}"
 
     if [ "$count" -eq 0 ]; then
@@ -921,7 +921,7 @@ cmd_swap() {
 
 cmd_clear() {
     clear_auto_tracks
-    echo '{"command": ["playlist-clear"]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+    echo '{"command": ["playlist-clear"]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
     echo -e "${C_PINK}🧹 Queue cleared.${C_RESET}"
     save_current_playlist true true >/dev/null 2>&1 & disown
 }
@@ -930,7 +930,7 @@ cmd_shuffle() {
     if [ "$MPV_RUNNING" = false ]; then echo -e "${C_PINK}😴💤 MPV isn't running... it must be taking a nap${C_RESET}"; return; fi
     local mode="$1"
     if [ "$mode" == "list" ] || [ "$mode" == "all" ]; then
-        echo '{"command": ["playlist-shuffle"]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+        echo '{"command": ["playlist-shuffle"]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
         echo -e "${C_PINK}🔀 Playlist entries shuffled.${C_RESET}"
         save_current_playlist true >/dev/null 2>&1 & disown
     else
@@ -939,14 +939,14 @@ cmd_shuffle() {
         local hist_file
         hist_file=$(get_shuffle_history_file)
         if [ "$current" == "true" ]; then
-            echo '{ "command": ["set_property", "shuffle", false] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+            echo '{ "command": ["set_property", "shuffle", false] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
             rm -f "$hist_file" "$HOME/.cache/mpv/shuffle_history" 2>/dev/null
             if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
                 send_android_mpv_cmd "shuffle false"
             fi
             echo -e "${C_ORANGE}🔀 Shuffle Mode: ${C_WHITE}OFF${C_RESET}"
         else
-            echo '{ "command": ["set_property", "shuffle", true] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+            echo '{ "command": ["set_property", "shuffle", true] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
             mkdir -p "$(dirname "$hist_file")" 2>/dev/null
             : > "$hist_file"
             : > "$HOME/.cache/mpv/shuffle_history" 2>/dev/null
@@ -987,7 +987,7 @@ cmd_remove_redundant() {
         fi
     else
         # --- Socket Mode ---
-        local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET")
+        local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
         local indices_to_remove=$(echo "$track_info" | jq -r \
             'select(.data != null and (.data | type == "array")) | [ .data | to_entries[] | {idx: .key, file: .value.filename} ] 
             | group_by(.file) 
@@ -1009,7 +1009,7 @@ cmd_remove_redundant() {
 
         for idx in $indices_to_remove;
          do
-            echo "{ \"command\": [\"playlist-remove\", $idx] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+            echo "{ \"command\": [\"playlist-remove\", $idx] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
         done
         
         echo -e "${C_GREEN}✨ Cleaned up $count duplicates.${C_RESET}"
@@ -1071,7 +1071,7 @@ cmd_clean() {
         echo -e "${C_TEAL}📊 Status: ${C_CYAN}${alive_count}${C_RESET} Alive | ${C_PINK}${removed_count}${C_RESET} Removed"
     else
         # --- Socket Mode ---
-        local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET")
+        local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
         local total_count=$(echo "$track_info" | jq -r '.data | length // 0' 2>/dev/null); : "${total_count:=0}"
         
         if [ "$total_count" -eq 0 ]; then
@@ -1138,7 +1138,7 @@ cmd_clean() {
         
         for idx in $sorted_dead;
          do
-            echo "{ \"command\": [\"playlist-remove\", $idx] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+            echo "{ \"command\": [\"playlist-remove\", $idx] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
             ((removed_count++))
         done
         

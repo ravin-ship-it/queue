@@ -104,20 +104,26 @@ cmd_playlist_load() {
     fi
     
     # Action Selection for loading multiple
-    local LINE=$(get_fzf_divider)
-    local status_icons=$(get_player_status_icons)
-    local act_header="${C_PURPLE}🪷 How would you like to load these tracks?${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
-    local act_prompt="🎵 ${C_TEAL}Choose Action${status_icons}${C_RESET} > "
-    local load_mode="Append"
-    load_mode=$(echo -e "  🎧  Append to Active Queue\n  ✨  Replace with New Queue & Play\n  🔀  Shuffle & Append to Active Queue" | \
-        fzf --height=100% --layout=reverse --border --info=inline-right \
-        $FZF_COLOR_OPTS \
-        --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \
-        --header="$act_header" \
-        --prompt="$act_prompt")
-    [ -z "$load_mode" ] && return
+    local load_mode="${2:-}"
+    if [ -z "$load_mode" ]; then
+        local LINE=$(get_fzf_divider)
+        local status_icons=$(get_player_status_icons)
+        local act_header="${C_PURPLE}🪷 How would you like to load these tracks?${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
+        local act_prompt="🎵 ${C_TEAL}Choose Action${status_icons}${C_RESET} > "
+        load_mode=$(echo -e "  🎧  Append to Active Queue\n  ✨  Replace with New Queue & Play\n  🔀  Shuffle & Append to Active Queue" | \
+            fzf --height=100% --layout=reverse --border --info=inline-right \
+            $FZF_COLOR_OPTS \
+            --bind 'ctrl-v:transform-query(echo -n {q}; get_clipboard)' \
+            --header="$act_header" \
+            --prompt="$act_prompt")
+        [ -z "$load_mode" ] && return
+    fi
 
     ensure_mpv_running
+    if [ "$MPV_RUNNING" = false ] || [ ! -S "$SOCKET" ]; then
+        echo -e "${C_PINK}❌ Player engine is not running.${C_RESET}"
+        return 1
+    fi
 
     local is_first_replace=true
     local total_loaded=0
@@ -139,7 +145,6 @@ cmd_playlist_load() {
         
         local name=$(basename "$file" .txt)
         local count=$(wc -l < "$file")
-        ((total_loaded += count))
 
         local temp_list="$file"
         if [[ "$load_mode" == *"Shuffle"* ]]; then
@@ -171,9 +176,14 @@ cmd_playlist_load() {
         done < "$temp_list"
 
         if [ -n "$batch_cmds" ]; then
-            echo -e "$batch_cmds" | nc $NC_OPTS -w 2 "$SOCKET" > /dev/null
+            if ! echo -e "$batch_cmds" | nc $NC_OPTS -w 2 "$SOCKET" > /dev/null 2>&1; then
+                echo -e "${C_PINK}❌ Failed to send tracks to player engine.${C_RESET}"
+                [ "$temp_list" != "$file" ] && rm -f "$temp_list"
+                continue
+            fi
         fi
         
+        ((total_loaded += count))
         [ "$temp_list" != "$file" ] && rm "$temp_list"
         echo -e "${C_GREEN}✅ Loaded ${C_ORANGE}${count}${C_GREEN} tracks from ${C_CYAN}${name}${C_RESET}"
     done <<< "$input"

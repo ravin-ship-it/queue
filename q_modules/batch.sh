@@ -157,7 +157,7 @@ execute_batch() {
                 batch_cmds+="${q_json_cmd}\n"
             done
 
-            echo -e "$batch_cmds" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+            echo -e "$batch_cmds" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
 
             for i in {1..15}; do
                 local cur_cnt=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
@@ -229,7 +229,7 @@ execute_batch() {
                 batch_cmds+="${q_json_cmd}\n"
             done
 
-            echo -e "$batch_cmds" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+            echo -e "$batch_cmds" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
 
             # Stabilization: wait for playlist count to increase
             for i in {1..15}; do

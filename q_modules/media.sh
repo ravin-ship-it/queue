@@ -746,8 +746,8 @@ cmd_next() {
         done
 
         if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
-            echo "{\"command\":[\"playlist-play-index\",$rand_idx]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
-            echo '{"command":["set_property","pause",true]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+            echo "{\"command\":[\"playlist-play-index\",$rand_idx]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+            echo '{"command":["set_property","pause",true]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
             send_android_mpv_cmd "playlist-play-index $rand_idx"
             command -v input >/dev/null 2>&1 && input keyevent 87 2>/dev/null || true
             ( auto_queue_related ) >/dev/null 2>&1 & disown
@@ -755,7 +755,7 @@ cmd_next() {
             return
         fi
 
-        echo "{\"command\":[\"playlist-play-index\",$rand_idx]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+        echo "{\"command\":[\"playlist-play-index\",$rand_idx]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
         ( auto_queue_related ) >/dev/null 2>&1 & disown
         wait_for_playback_start
         log_now_playing
@@ -763,8 +763,8 @@ cmd_next() {
     fi
 
     if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
-        echo '{ "command": ["playlist-next"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
-        echo '{ "command": ["set_property", "pause", true] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+        echo '{ "command": ["playlist-next"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+        echo '{ "command": ["set_property", "pause", true] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
         send_android_mpv_cmd "playlist-next"
         command -v input >/dev/null 2>&1 && input keyevent 87 2>/dev/null || true
         ( auto_queue_related ) >/dev/null 2>&1 & disown
@@ -772,7 +772,7 @@ cmd_next() {
         return
     fi
 
-    echo '{ "command": ["playlist-next"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+    echo '{ "command": ["playlist-next"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
 
     # Proactive auto-queue check after moving next
     ( auto_queue_related ) >/dev/null 2>&1 & disown
@@ -796,8 +796,8 @@ cmd_prev() {
 
         if [[ "$prev_idx" =~ ^[0-9]+$ ]]; then
             if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
-                echo "{\"command\":[\"playlist-play-index\",$prev_idx]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
-                echo '{"command":["set_property","pause",true]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+                echo "{\"command\":[\"playlist-play-index\",$prev_idx]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                echo '{"command":["set_property","pause",true]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
                 send_android_mpv_cmd "playlist-play-index $prev_idx"
                 command -v input >/dev/null 2>&1 && input keyevent 88 2>/dev/null || true
                 ( auto_queue_related ) >/dev/null 2>&1 & disown
@@ -805,7 +805,7 @@ cmd_prev() {
                 return
             fi
 
-            echo "{\"command\":[\"playlist-play-index\",$prev_idx]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+            echo "{\"command\":[\"playlist-play-index\",$prev_idx]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
             ( auto_queue_related ) >/dev/null 2>&1 & disown
             wait_for_playback_start
             log_now_playing
@@ -814,8 +814,8 @@ cmd_prev() {
     fi
 
     if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
-        echo '{ "command": ["playlist-prev"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
-        echo '{ "command": ["set_property", "pause", true] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+        echo '{ "command": ["playlist-prev"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+        echo '{ "command": ["set_property", "pause", true] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
         send_android_mpv_cmd "playlist-prev"
         command -v input >/dev/null 2>&1 && input keyevent 88 2>/dev/null || true
         ( auto_queue_related ) >/dev/null 2>&1 & disown
@@ -823,7 +823,7 @@ cmd_prev() {
         return
     fi
 
-    echo '{ "command": ["playlist-prev"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+    echo '{ "command": ["playlist-prev"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
 
     # Proactive auto-queue check after moving back (maybe we are now at the end?)
     ( auto_queue_related ) >/dev/null 2>&1 & disown
@@ -889,7 +889,7 @@ cmd_volume() {
     
     # Set absolute volume if a plain number is provided
     if [[ "$input" =~ ^[0-9]+$ ]]; then
-        echo "{ \"command\": [\"set_property\", \"volume\", ${input}] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+        echo "{ \"command\": [\"set_property\", \"volume\", ${input}] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
     fi
 
     local vol=$(echo '{ "command": ["get_property", "volume"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // "0"')
@@ -1024,11 +1024,11 @@ cmd_audio_fx() {
 
     case "$mode" in
         on)
-            echo "{\"command\": [\"set_property_string\", \"af\", \"$dolby_filter\"]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+            echo "{\"command\": [\"set_property_string\", \"af\", \"$dolby_filter\"]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
             echo -e "🎛️ ${C_PINK}Audio FX:${C_RESET} ${C_GREEN}ON${C_RESET} ${C_GRAY}(dolby-like)${C_RESET}"
             ;;
         off)
-            echo '{"command": ["set_property_string", "af", ""]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+            echo '{"command": ["set_property_string", "af", ""]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
             echo -e "🎛️ ${C_PINK}Audio FX:${C_RESET} ${C_ORANGE}OFF${C_RESET} ${C_GRAY}(flat-audio)${C_RESET}"
             ;;
         status)
@@ -1040,10 +1040,10 @@ cmd_audio_fx() {
             ;;
         toggle|*)
             if [ "$is_on" = "true" ]; then
-                echo '{"command": ["set_property_string", "af", ""]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+                echo '{"command": ["set_property_string", "af", ""]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
                 echo -e "🎛️ ${C_PINK}Audio FX:${C_RESET} ${C_ORANGE}OFF${C_RESET} ${C_GRAY}(flat-audio)${C_RESET}"
             else
-                echo "{\"command\": [\"set_property_string\", \"af\", \"$dolby_filter\"]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+                echo "{\"command\": [\"set_property_string\", \"af\", \"$dolby_filter\"]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
                 echo -e "🎛️ ${C_PINK}Audio FX:${C_RESET} ${C_GREEN}ON${C_RESET} ${C_GRAY}(dolby-like)${C_RESET}"
             fi
             ;;
@@ -2897,10 +2897,10 @@ cmd_loop() {
     local count=$(echo "$track_json" | jq -r '.data | length // 0')
     
     if [ "$current" == "inf" ] || [ "$current" == "yes" ]; then
-        echo "{ \"command\": [\"set_property\", \"$prop\", \"no\"] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+        echo "{ \"command\": [\"set_property\", \"$prop\", \"no\"] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
         echo -e "${C_ORANGE}${emoji} ${label}: OFF${C_RESET}"
     else
-        echo "{ \"command\": [\"set_property\", \"$prop\", \"inf\"] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+        echo "{ \"command\": [\"set_property\", \"$prop\", \"inf\"] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
         if [ "$mode" == "single" ]; then
             local current_item=$(echo "$track_json" | jq -c '.data[] | select(.current)')
             local f=$(echo "$current_item" | jq -r '.filename')
@@ -3082,7 +3082,10 @@ cmd_play() {
         fi
         
         echo -e "${C_PINK}🚀 Restoring last session...${C_RESET}"
-        ensure_mpv_running "$LAST_PLAYLIST_FILE"
+        if ! ensure_mpv_running "$LAST_PLAYLIST_FILE" || [ ! -S "$SOCKET" ]; then
+            echo -e "${C_PINK}❌ Could not start player engine.${C_RESET}"
+            return 1
+        fi
         
         local cnt=$(echo '{"command":["get_property","playlist-count"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0' 2>/dev/null)
         if [[ ! "$cnt" =~ ^[0-9]+$ ]] || [ "$cnt" -le 0 ]; then
@@ -3248,17 +3251,17 @@ cmd_play() {
     fi
 
     if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
-        echo "{\"command\":[\"playlist-play-index\",$((index - 1))]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
-        echo "{\"command\":[\"set_property\",\"pause\",true]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
-        echo "{\"command\":[\"set_property\",\"mute\",true]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
-        echo "{\"command\":[\"set_property\",\"ao\",\"null\"]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+        echo "{\"command\":[\"playlist-play-index\",$((index - 1))]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+        echo "{\"command\":[\"set_property\",\"pause\",true]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+        echo "{\"command\":[\"set_property\",\"mute\",true]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+        echo "{\"command\":[\"set_property\",\"ao\",\"null\"]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
         log_now_playing "|> Playing: "
         cmd_android_video_handoff "$index"
     else
         # Set pos AND force unpause and reset seek to 0 (Separate commands for maximum compatibility)
-        echo "{\"command\":[\"playlist-play-index\",$((index - 1))]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
-        echo "{\"command\":[\"seek\",0,\"absolute\"]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
-        echo "{\"command\":[\"set_property\",\"pause\",false]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null
+        echo "{\"command\":[\"playlist-play-index\",$((index - 1))]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+        echo "{\"command\":[\"seek\",0,\"absolute\"]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+        echo "{\"command\":[\"set_property\",\"pause\",false]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
         
         wait_for_playback_start
         log_now_playing "|> Playing: "

@@ -752,86 +752,82 @@ ensure_mpv_running() {
             local relay_bin
             relay_bin=$(ensure_piperelay_compiled)
 
+            local hybrid_ready=false
             if [ -z "$win_mpv" ] || [ -z "$relay_bin" ]; then
-                echo -e "${C_PINK}❌ Windows Hybrid prerequisites not met (win_mpv='$win_mpv', relay='$relay_bin').${C_RESET}"
-                echo -e "${C_CYAN}👉 Run 'q -hybrid off' to switch to Standalone WSL MPV or ensure Windows MPV is installed.${C_RESET}"
-                return 1
-            fi
-
-            taskkill.exe /F /IM mpv.exe </dev/null 2>/dev/null || true
-            taskkill.exe /F /IM mpv.com </dev/null 2>/dev/null || true
-            taskkill.exe /F /IM PipeRelay.exe </dev/null 2>/dev/null || true
-            pkill -f "hybrid_bridge.py" 2>/dev/null || true
-
-            local pipe_name="mpv-q-pipe"
-            local win_ytdlp
-            win_ytdlp=$(find_windows_ytdlp)
-            local ytdl_arg=""
-            [ -n "$win_ytdlp" ] && ytdl_arg="'--script-opts=ytdl_hook-ytdl_path=$win_ytdlp',"
-
-            local script_arg=""
-            local script_path="$SCRIPT_DIR/scripts/queue_video.lua"
-            [ ! -f "$script_path" ] && script_path="$HOME/.config/mpv/scripts/queue_video.lua"
-            [ ! -f "$script_path" ] && script_path="$(dirname "$MODULE_DIR")/scripts/queue_video.lua"
-            local win_user_dir
-            win_user_dir=$(get_windows_user_dir)
-            if [ -n "$win_user_dir" ] && [ -d "$win_user_dir" ]; then
-                local win_mpv_dir="$win_user_dir/AppData/Roaming/mpv"
-                local win_mpv_scripts_dir="$win_mpv_dir/scripts"
-                mkdir -p "$win_mpv_scripts_dir" "$win_user_dir/.cache/mpv" 2>/dev/null
-                if [ -f "$script_path" ]; then
-                    cp -f "$script_path" "$win_mpv_scripts_dir/queue_video.lua" 2>/dev/null
-                    # Do not pass --script here; MPV already auto-loads all scripts in AppData/Roaming/mpv/scripts
-                    script_arg=""
-                fi
-                local in_conf="$HOME/.config/mpv/input.conf"
-                [ ! -f "$in_conf" ] && in_conf="$SCRIPT_DIR/input.conf.example"
-                [ ! -f "$in_conf" ] && in_conf="$(dirname "$MODULE_DIR")/input.conf.example"
-                local input_arg=""
-                if [ -f "$in_conf" ]; then
-                    cp -f "$in_conf" "$win_mpv_dir/input.conf" 2>/dev/null
-                    local win_native_in_conf
-                    win_native_in_conf=$(wslpath -w "$win_mpv_dir/input.conf" 2>/dev/null)
-                    [ -n "$win_native_in_conf" ] && input_arg="'--input-conf=$win_native_in_conf',"
-                fi
-            elif [ -f "$script_path" ]; then
-                local win_script
-                win_script=$(wslpath -w "$script_path" 2>/dev/null)
-                [ -n "$win_script" ] && script_arg="'--script=$win_script',"
-            fi
-
-            local win_mpv_native
-            win_mpv_native=$(wslpath -w "$win_mpv" 2>/dev/null)
-            [ -z "$win_mpv_native" ] && win_mpv_native="$win_mpv"
-
-            ensure_windows_ytdlp_configured
-
-            powershell.exe -NoProfile -Command "Start-Process -FilePath '$win_mpv_native' -ArgumentList '--idle=yes','--keep-open=yes','--vo=gpu','--video=auto','--force-window=immediate','--window-minimized=yes',${ytdl_arg}${script_arg}${input_arg}'--input-ipc-server=\\\\.\\pipe\\$pipe_name' -WindowStyle Hidden" </dev/null >/dev/null 2>&1
-
-            local bridge_script="$MODULE_DIR/hybrid_bridge.py"
-            [ ! -f "$bridge_script" ] && bridge_script="$SCRIPT_DIR/q_modules/hybrid_bridge.py"
-
-            if command -v setsid >/dev/null 2>&1; then
-                setsid python3 "$bridge_script" "$SOCKET" "$pipe_name" "$relay_bin" </dev/null >/dev/null 2>&1 &
+                echo -e "${C_PINK}⚠️ Windows Hybrid prerequisites not met. Falling back to Standalone Linux Engine...${C_RESET}"
             else
-                nohup python3 "$bridge_script" "$SOCKET" "$pipe_name" "$relay_bin" </dev/null >/dev/null 2>&1 &
-            fi
-            disown
+                taskkill.exe /F /IM mpv.exe </dev/null 2>/dev/null || true
+                taskkill.exe /F /IM mpv.com </dev/null 2>/dev/null || true
+                taskkill.exe /F /IM PipeRelay.exe </dev/null 2>/dev/null || true
+                pkill -f "hybrid_bridge.py" 2>/dev/null || true
 
-            for i in {1..40}; do
-                [ -S "$SOCKET" ] && break
-                sleep 0.1
-            done
+                local pipe_name="mpv-q-pipe"
+                local win_ytdlp
+                win_ytdlp=$(find_windows_ytdlp)
+                local ytdl_arg=""
+                [ -n "$win_ytdlp" ] && ytdl_arg="'--script-opts=ytdl_hook-ytdl_path=$win_ytdlp',"
 
-            if [ -S "$SOCKET" ]; then
-                # Verify IPC responsiveness (wait up to 5s for Windows MPV to initialize IPC)
-                for attempt in {1..50}; do
-                    if echo '{"command":["get_property","idle-active"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | grep -q "data"; then
-                        break
+                local script_arg=""
+                local script_path="$SCRIPT_DIR/scripts/queue_video.lua"
+                [ ! -f "$script_path" ] && script_path="$HOME/.config/mpv/scripts/queue_video.lua"
+                [ ! -f "$script_path" ] && script_path="$(dirname "$MODULE_DIR")/scripts/queue_video.lua"
+                local win_user_dir
+                win_user_dir=$(get_windows_user_dir)
+                if [ -n "$win_user_dir" ] && [ -d "$win_user_dir" ]; then
+                    local win_mpv_dir="$win_user_dir/AppData/Roaming/mpv"
+                    local win_mpv_scripts_dir="$win_mpv_dir/scripts"
+                    mkdir -p "$win_mpv_scripts_dir" "$win_user_dir/.cache/mpv" 2>/dev/null
+                    if [ -f "$script_path" ]; then
+                        cp -f "$script_path" "$win_mpv_scripts_dir/queue_video.lua" 2>/dev/null
+                        # Do not pass --script here; MPV already auto-loads all scripts in AppData/Roaming/mpv/scripts
+                        script_arg=""
+                    fi
+                    local in_conf="$HOME/.config/mpv/input.conf"
+                    [ ! -f "$in_conf" ] && in_conf="$SCRIPT_DIR/input.conf.example"
+                    [ ! -f "$in_conf" ] && in_conf="$(dirname "$MODULE_DIR")/input.conf.example"
+                    local input_arg=""
+                    if [ -f "$in_conf" ]; then
+                        cp -f "$in_conf" "$win_mpv_dir/input.conf" 2>/dev/null
+                        local win_native_in_conf
+                        win_native_in_conf=$(wslpath -w "$win_mpv_dir/input.conf" 2>/dev/null)
+                        [ -n "$win_native_in_conf" ] && input_arg="'--input-conf=$win_native_in_conf',"
+                    fi
+                elif [ -f "$script_path" ]; then
+                    local win_script
+                    win_script=$(wslpath -w "$script_path" 2>/dev/null)
+                    [ -n "$win_script" ] && script_arg="'--script=$win_script',"
+                fi
+
+                local win_mpv_native
+                win_mpv_native=$(wslpath -w "$win_mpv" 2>/dev/null)
+                [ -z "$win_mpv_native" ] && win_mpv_native="$win_mpv"
+
+                ensure_windows_ytdlp_configured
+
+                powershell.exe -NoProfile -Command "Start-Process -FilePath '$win_mpv_native' -ArgumentList '--idle=yes','--keep-open=yes','--vo=gpu','--video=auto','--force-window=immediate','--window-minimized=yes',${ytdl_arg}${script_arg}${input_arg}'--input-ipc-server=\\\\.\\pipe\\$pipe_name' -WindowStyle Hidden" </dev/null >/dev/null 2>&1
+
+                local bridge_script="$MODULE_DIR/hybrid_bridge.py"
+                [ ! -f "$bridge_script" ] && bridge_script="$SCRIPT_DIR/q_modules/hybrid_bridge.py"
+
+                if command -v setsid >/dev/null 2>&1; then
+                    setsid python3 "$bridge_script" "$SOCKET" "$pipe_name" "$relay_bin" </dev/null >/dev/null 2>&1 &
+                else
+                    nohup python3 "$bridge_script" "$SOCKET" "$pipe_name" "$relay_bin" </dev/null >/dev/null 2>&1 &
+                fi
+                disown
+
+                for i in {1..25}; do
+                    if [ -S "$SOCKET" ]; then
+                        if echo '{"command":["get_property","idle-active"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | grep -q "data"; then
+                            hybrid_ready=true
+                            break
+                        fi
                     fi
                     sleep 0.1
                 done
+            fi
 
+            if [ "$hybrid_ready" = true ]; then
                 MPV_RUNNING=true
                 start_idle_monitor
                 if [ -n "$pl_arg" ] && [ -f "$pl_arg" ] && [ -s "$pl_arg" ]; then
@@ -840,12 +836,15 @@ ensure_mpv_running() {
                 restore_state_properties
                 return 0
             else
-                echo -e "${C_PINK}⚠️ Timed out waiting for Windows MPV IPC socket bridge.${C_RESET}"
+                echo -e "${C_PINK}⚠️ Windows MPV unavailable or blocked by policy. Falling back to Standalone Linux Engine...${C_RESET}"
                 pkill -f "hybrid_bridge.py" 2>/dev/null || true
                 taskkill.exe /F /IM mpv.exe </dev/null 2>/dev/null || true
+                taskkill.exe /F /IM mpv.com </dev/null 2>/dev/null || true
                 taskkill.exe /F /IM PipeRelay.exe </dev/null 2>/dev/null || true
                 rm -f "$SOCKET"
-                return 1
+                mkdir -p "$HOME/.config/mpv"
+                echo "standalone" > "$HOME/.config/mpv/queue_mode" 2>/dev/null || true
+                mode="standalone"
             fi
         fi
 
@@ -917,9 +916,15 @@ ensure_mpv_running() {
             sleep 0.1
         done
 
-        MPV_RUNNING=true
-        start_idle_monitor
-        restore_state_properties
+        if [ -S "$SOCKET" ]; then
+            MPV_RUNNING=true
+            start_idle_monitor
+            restore_state_properties
+        else
+            echo -e "${C_PINK}❌ Failed to start MPV daemon.${C_RESET}"
+            MPV_RUNNING=false
+            return 1
+        fi
     fi
 
     # Enforce silent background mode on Android if Hybrid Mode is active
@@ -930,6 +935,8 @@ ensure_mpv_running() {
             echo '{"command":["set_property","pause",true]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
         fi
     fi
+
+    [ "$MPV_RUNNING" = true ] && [ -S "$SOCKET" ]
 }
 
 AUTO_TRACKS_FILE="$HOME/.cache/mpv/auto_tracks"
@@ -1271,7 +1278,8 @@ get_track_badges() {
 }
 
 send_ipc() {
-    echo "$1" | nc $NC_OPTS -w 1 "$SOCKET"
+    [ -S "$SOCKET" ] || return 1
+    echo "$1" | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null
 }
 
 notify_fzf_reload() {
