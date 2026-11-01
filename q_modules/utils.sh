@@ -1408,7 +1408,7 @@ save_current_playlist() {
     # Small delay when forced to allow MPV state to settle after IPC edits
     [ "$force" == "true" ] && sleep 0.2
 
-    local raw=$(echo -e '{"command":["get_property","playlist"]}\n{"command":["get_property","shuffle"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","playlist-pos"]}' | nc $NC_OPTS -w 2 "$SOCKET" 2>/dev/null | jq -s -c -r 'map(select(.event == null))')
+    local raw=$(echo -e '{"command":["get_property","playlist"]}\n{"command":["get_property","shuffle"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","playlist-pos"]}\n{"command":["get_property","time-pos"]}' | nc $NC_OPTS -w 2 "$SOCKET" 2>/dev/null | jq -s -c -r 'map(select(.event == null))')
     
     if [ -n "$raw" ] && [ "$raw" != "null" ]; then
         # Dynamically locate the response element containing the playlist array
@@ -1429,8 +1429,8 @@ save_current_playlist() {
                 > "$LAST_PLAYLIST_FILE"
             fi
 
-            # Save state properties to state.json
-            echo "$raw" | jq -c 'map(select(.data != null and (.data | type != "array"))) | {shuffle: .[0].data, loop_file: .[1].data, loop_playlist: .[2].data, pos: .[3].data}' 2>/dev/null > "$HOME/.cache/mpv/state.json.tmp"
+            # Save state properties to state.json (including playback timestamp)
+            echo "$raw" | jq -c 'map(select(.data != null and (.data | type != "array"))) | {shuffle: .[0].data, loop_file: .[1].data, loop_playlist: .[2].data, pos: .[3].data, time: (.[4].data // 0)}' 2>/dev/null > "$HOME/.cache/mpv/state.json.tmp"
             [ -s "$HOME/.cache/mpv/state.json.tmp" ] && mv "$HOME/.cache/mpv/state.json.tmp" "$HOME/.cache/mpv/state.json"
 
             # Mirror to Windows cache in WSL hybrid mode

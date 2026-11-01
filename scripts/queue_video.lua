@@ -503,12 +503,6 @@ local function do_resume_seek()
     end
 end
 
-local function arm_resume_seek(pos)
-    if not pos or pos <= 1.0 then return end
-    pending_resume_pos = pos
-    if resume_timer then resume_timer:kill(); resume_timer = nil end
-end
-
 local function queue_resume_seek(pos)
     if not pos or pos <= 1.0 then return end
     pending_resume_pos = pos
@@ -517,13 +511,18 @@ local function queue_resume_seek(pos)
     local attempts = 0
     resume_timer = mp.add_periodic_timer(0.12, function()
         attempts = attempts + 1
-        if not pending_resume_pos or attempts > 50 then
+        if not pending_resume_pos or attempts > 60 then
             if resume_timer then resume_timer:kill(); resume_timer = nil end
             pending_resume_pos = nil
             return
         end
         do_resume_seek()
     end)
+end
+
+local function arm_resume_seek(pos)
+    if not pos or pos <= 1.0 then return end
+    queue_resume_seek(pos)
 end
 
 local function change_quality(target, is_auto_adaptive)
@@ -1094,6 +1093,8 @@ local function trigger_network_offline_freeze(saved_pos, saved_time)
 end
 
 local function on_file_end(event)
+    if resume_timer then resume_timer:kill(); resume_timer = nil end
+    pending_resume_pos = nil
     if event.reason == "error" then
         local current_path = mp.get_property("path", "")
         if (not current_path or current_path == "") and last_valid_url ~= "" then
@@ -1178,11 +1179,16 @@ local function save_session_state()
     local loop_p = mp.get_property("loop-playlist", "no")
 
     local u = require("mp.utils")
+    local cur_time = mp.get_property_number("time-pos", 0)
+    if (not cur_time or cur_time < 1.0) and last_valid_time > 1.0 then
+        cur_time = last_valid_time
+    end
     local state_data = {
         shuffle = shuffle,
         loop_file = loop_f,
         loop_playlist = loop_p,
-        pos = pos
+        pos = pos,
+        time = cur_time
     }
     local state_json = u.format_json(state_data)
     if state_json then

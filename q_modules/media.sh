@@ -1923,6 +1923,14 @@ cmd_hybrid_toggle() {
         save_current_playlist true
     fi
 
+    # Fallback timestamp and position from state.json if query missed
+    if [ -z "$cur_time" ] || [ "$cur_time" == "null" ]; then
+        cur_time=$(jq -r '.time // 0' "$HOME/.cache/mpv/state.json" 2>/dev/null)
+    fi
+    if [ -z "$cur_pos" ] || [ "$cur_pos" == "null" ]; then
+        cur_pos=$(jq -r '.pos // 0' "$HOME/.cache/mpv/state.json" 2>/dev/null)
+    fi
+
     # Stop current engine
     cmd_stop >/dev/null 2>&1
 
@@ -1950,14 +1958,53 @@ cmd_hybrid_toggle() {
             load_playlist_file_to_mpv "$LAST_PLAYLIST_FILE" "replace"
         fi
         if [ -n "$cur_pos" ] && [ "$cur_pos" != "null" ]; then
-            echo "{\"command\":[\"playlist-play-index\",$cur_pos]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+            local valid_time=0
             if [ -n "$cur_time" ] && [ "$cur_time" != "null" ]; then
-                echo "{\"command\":[\"seek\",$cur_time,\"absolute\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+                if (( $(echo "$cur_time > 1" | bc -l 2>/dev/null || echo 0) )); then
+                    valid_time="$cur_time"
+                fi
             fi
+
+            # 1. Atomic batch command: pre-set start timestamp, arm Lua resume seeker, and trigger playlist index
+            local r_batch=""
+            if [ "$valid_time" != "0" ]; then
+                r_batch+="{\"command\":[\"set_property\",\"start\",\"$valid_time\"]}\n"
+                r_batch+="{\"command\":[\"script-message\",\"arm-resume-seek\",\"$valid_time\"]}\n"
+            fi
+            r_batch+="{\"command\":[\"playlist-play-index\",$cur_pos]}\n"
             if [ "$was_paused" == "true" ]; then
-                echo '{"command":["set_property","pause",true]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+                r_batch+="{\"command\":[\"set_property\",\"pause\",true]}\n"
             else
-                echo '{"command":["set_property","pause",false]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+                r_batch+="{\"command\":[\"set_property\",\"pause\",false]}\n"
+            fi
+            echo -e "$r_batch" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+
+            # 2. Resilient seek confirmation watcher: ensures stream demuxer reaches exact timestamp
+            if [ "$valid_time" != "0" ]; then
+                (
+                    for attempt in {1..40}; do
+                        sleep 0.15
+                        [ ! -S "$SOCKET" ] && break
+                        local probe
+                        probe=$(echo -e '{"command":["get_property","seekable"]}\n{"command":["get_property","time-pos"]}\n{"command":["get_property","playlist-pos"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r 'map(select(.event == null)) | (.[0].data // false), "\t", (.[1].data // 0), "\t", (.[2].data // -1)')
+                        [ -z "$probe" ] && continue
+                        IFS=$'\t' read -r is_seekable t_pos p_pos <<< "$probe"
+
+                        # Abort if user navigated away from the migrated track
+                        [ "$p_pos" != "$cur_pos" ] && break
+
+                        if [ "$is_seekable" == "true" ] && [ -n "$t_pos" ] && [ "$t_pos" != "null" ]; then
+                            local diff=$(echo "$t_pos - $valid_time" | bc -l 2>/dev/null || echo 0)
+                            diff=${diff#-}
+                            if (( $(echo "$diff > 2.5" | bc -l 2>/dev/null || echo 0) )); then
+                                echo "{\"command\":[\"seek\",$valid_time,\"absolute\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+                            fi
+                            # Reset start property so upcoming playlist items play from beginning
+                            echo '{"command":["set_property","start","none"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+                            break
+                        fi
+                    done
+                ) >/dev/null 2>&1 & disown
             fi
         fi
         if [ "$video_was_active" = true ]; then
@@ -3105,15 +3152,45 @@ cmd_play() {
         # Determine start index (Saved position or first)
         local start_idx="${saved_target_pos:-0}"
         [[ ! "$start_idx" =~ ^[0-9]+$ ]] && start_idx=0
+        local saved_target_time
+        saved_target_time=$(jq -r '.time // 0' "$HOME/.cache/mpv/state.json" 2>/dev/null)
+        [[ ! "$saved_target_time" =~ ^[0-9]+(\.[0-9]+)?$ ]] && saved_target_time=0
 
-        # Force Playback Start
-        echo "{ \"command\": [\"playlist-play-index\", $start_idx] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+        # Force Playback Start with timestamp restore
+        local start_cmds=""
+        if (( $(echo "$saved_target_time > 1" | bc -l 2>/dev/null || echo 0) )); then
+            start_cmds+="{\"command\":[\"set_property\",\"start\",\"$saved_target_time\"]}\n"
+            start_cmds+="{\"command\":[\"script-message\",\"arm-resume-seek\",\"$saved_target_time\"]}\n"
+        fi
+        start_cmds+="{\"command\":[\"playlist-play-index\",$start_idx]}\n"
         if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
-            echo '{ "command": ["set_property", "pause", true] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
-            echo '{ "command": ["set_property", "mute", true] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
-            echo '{ "command": ["set_property", "ao", "null"] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+            start_cmds+='{"command":["set_property","pause",true]}\n{"command":["set_property","mute",true]}\n{"command":["set_property","ao","null"]}\n'
         else
-            echo '{ "command": ["set_property", "pause", false] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+            start_cmds+='{"command":["set_property","pause",false]}\n'
+        fi
+        echo -e "$start_cmds" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+
+        if (( $(echo "$saved_target_time > 1" | bc -l 2>/dev/null || echo 0) )); then
+            (
+                for attempt in {1..40}; do
+                    sleep 0.15
+                    [ ! -S "$SOCKET" ] && break
+                    local probe
+                    probe=$(echo -e '{"command":["get_property","seekable"]}\n{"command":["get_property","time-pos"]}\n{"command":["get_property","playlist-pos"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r 'map(select(.event == null)) | (.[0].data // false), "\t", (.[1].data // 0), "\t", (.[2].data // -1)')
+                    [ -z "$probe" ] && continue
+                    IFS=$'\t' read -r is_seekable t_pos p_pos <<< "$probe"
+                    [ "$p_pos" != "$start_idx" ] && break
+                    if [ "$is_seekable" == "true" ] && [ -n "$t_pos" ] && [ "$t_pos" != "null" ]; then
+                        local diff=$(echo "$t_pos - $saved_target_time" | bc -l 2>/dev/null || echo 0)
+                        diff=${diff#-}
+                        if (( $(echo "$diff > 2.5" | bc -l 2>/dev/null || echo 0) )); then
+                            echo "{\"command\":[\"seek\",$saved_target_time,\"absolute\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+                        fi
+                        echo '{"command":["set_property","start","none"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+                        break
+                    fi
+                done
+            ) >/dev/null 2>&1 & disown
         fi
 
         MPV_RUNNING=true
