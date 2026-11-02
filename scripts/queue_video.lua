@@ -405,6 +405,11 @@ local function get_quality_format(tier, lang)
         return audio_fmt
     end
 
+    -- Blind Mode: Enforce universal hardware-accelerated 1080p AVC1 to prevent software AV1/VP9 decoding stalls
+    if check_blind_mode() then
+        return "bestvideo[height<=1080][fps<=60][vcodec^=avc1][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=1080]+" .. audio_fmt .. "/best"
+    end
+
     if tier == "auto" or tier == "max" then
         if hw_ceiling == "8k" or hw_ceiling == "4320" then
             -- Uncapped 8K for high-end rigs with dedicated 8K hardware decoder
@@ -498,6 +503,7 @@ local function do_resume_seek()
         if math.abs(cur_time - pos) > 2.0 then
             mp.commandv("seek", pos, "absolute")
         end
+        mp.set_property_bool("pause", false)
         pending_resume_pos = nil
         if resume_timer then resume_timer:kill(); resume_timer = nil end
     end
@@ -599,6 +605,7 @@ local function change_quality(target, is_auto_adaptive)
     local fmt = get_quality_format(target, current_lang)
     mp.set_property("ytdl-format", fmt)
     mp.commandv("playlist-play-index", "current")
+    mp.set_property_bool("pause", false)
 
     local banner = "Quality: " .. profile.label
     if is_auto_adaptive then
@@ -622,6 +629,7 @@ local function change_resolution(fmt, label)
 
     mp.set_property("ytdl-format", fmt)
     mp.commandv("playlist-play-index", "current")
+    mp.set_property_bool("pause", false)
     if label and label ~= "" then
         mp.commandv("show-text", "Quality: " .. label, 2500)
     end
@@ -677,6 +685,7 @@ local function change_language(lang, label)
     local fmt = get_quality_format(current_tier, current_lang)
     mp.set_property("ytdl-format", fmt)
     mp.commandv("playlist-play-index", "current")
+    mp.set_property_bool("pause", false)
 
     local display = label or string.format("[%s] %s", lang, get_lang_label(lang))
     mp.commandv("show-text", "🔊 Audio Language: " .. display, 2500)
@@ -714,10 +723,13 @@ local function get_available_langs_cached()
                             cached_audio_langs = parsed.langs
                             return cached_audio_langs
                         end
-                    -- Legacy array format: accept only if path matches cached_track_url
-                    elseif #parsed > 0 and cached_track_url == path then
-                        cached_audio_langs = parsed
-                        return cached_audio_langs
+                    -- Legacy array format: accept if blind mode or if path matches cached_track_url
+                    elseif #parsed > 0 then
+                        if check_blind_mode() or cached_track_url == path or cached_track_url == "" then
+                            cached_track_url = path
+                            cached_audio_langs = parsed
+                            return cached_audio_langs
+                        end
                     end
                 end
             end
@@ -837,7 +849,7 @@ end
 -- =========================================================================
 
 local function evaluate_adaptive_bitrate()
-    if is_audio_mode_active() then return end
+    if is_audio_mode_active() or check_blind_mode() then return end
     if not is_auto_mode then return end
 
     -- If player is idle or stream has not started demuxing frames yet, do not evaluate
@@ -1093,8 +1105,18 @@ local function trigger_network_offline_freeze(saved_pos, saved_time)
 end
 
 local function on_file_end(event)
-    if resume_timer then resume_timer:kill(); resume_timer = nil end
-    pending_resume_pos = nil
+    if event.reason == "eof" then
+        if resume_timer then resume_timer:kill(); resume_timer = nil end
+        pending_resume_pos = nil
+    end
+
+    if check_blind_mode() then
+        if event.reason == "error" then
+            mp.set_property_bool("pause", false)
+        end
+        return
+    end
+
     if event.reason == "error" then
         local current_path = mp.get_property("path", "")
         if (not current_path or current_path == "") and last_valid_url ~= "" then
@@ -1223,6 +1245,9 @@ local function on_file_loaded()
     if pending_resume_pos and pending_resume_pos > 1.0 then
         local p = pending_resume_pos
         queue_resume_seek(p)
+        mp.set_property_bool("pause", false)
+    elseif check_blind_mode() then
+        mp.set_property_bool("pause", false)
     end
     prev_dec_drops = 0
     prev_vo_drops = 0
@@ -1246,7 +1271,7 @@ local function on_file_loaded()
     else
         if path and path ~= "" then
             local is_remote = (path:match("^https?://") ~= nil) or (path:match("^ytdl://") ~= nil)
-            if is_remote and is_auto_mode then
+            if is_remote and is_auto_mode and not check_blind_mode() then
                 current_tier = "auto"
                 has_downshifted_this_track = false
                 starved_buffer_seconds = 0

@@ -667,7 +667,7 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
         -lang|--lang|-audio|--audio)
             shift
             declare -a lang_args=()
-            while [[ -n "$1" ]] && { [[ ! "$1" =~ ^- ]] || [[ "$1" =~ ^(-pb|-b|--blind|-q|--queue|-norm|--normal)$ ]]; } && { [[ ! "$1" =~ $SMART_CMDS ]] || [[ "$1" =~ ^(auto|orig|original|def|default)$ ]]; }; do
+            while [[ -n "$1" ]] && { [[ ! "$1" =~ ^- ]] || [[ "$1" =~ ^(-pb|-b|--blind|-q|--queue|-norm|--normal)$ ]]; } && { [[ ! "$1" =~ $SMART_CMDS ]] || [[ "$1" =~ ^(auto|orig|original|def|default|blind|normal)$ ]]; }; do
                 lang_args+=("$1")
                 shift
             done

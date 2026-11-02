@@ -2564,6 +2564,19 @@ cmd_language() {
         fi
     fi
 
+    # Auto-resolve session if only one is actively playing when an explicit language is provided
+    if [ -z "$session_choice" ] && [ "$blind_available" = true ] && [ "$normal_available" = true ]; then
+        if [ "$blind_status" == "[▶ Playing]" ] && [ "$normal_paused" == "true" ]; then
+            if [ -n "$target" ] && [[ ! "$target" =~ ^http.* ]]; then
+                session_choice="blind"
+            fi
+        elif [ "$normal_status" == "[▶ Playing]" ] && [ "$blind_status" != "[▶ Playing]" ]; then
+            if [ -n "$target" ] && [[ ! "$target" =~ ^http.* ]]; then
+                session_choice="normal"
+            fi
+        fi
+    fi
+
     # 3. Session Selection: If both are active and no session specified, prompt user
     if [ -z "$session_choice" ] && [ "$normal_available" = true ] && [ "$blind_available" = true ]; then
         if command -v fzf >/dev/null 2>&1 && [ -t 0 ] && [ -t 1 ]; then
@@ -2662,7 +2675,9 @@ cmd_language() {
             if [ -n "$active_socket" ] && [ -S "$active_socket" ]; then
                 is_live=true
                 echo "{\"command\":[\"set_property\",\"alang\",\"$clean_lang,auto,en,eng\"]}" | nc $nc_opts -w 1 "$active_socket" >/dev/null 2>&1
+                echo "{\"command\":[\"set_property\",\"slang\",\"$clean_lang,auto,en,eng\"]}" | nc $nc_opts -w 1 "$active_socket" >/dev/null 2>&1
                 echo "{\"command\":[\"script-message\",\"change-language\",\"$clean_lang\"]}" | nc $nc_opts -w 1 "$active_socket" >/dev/null 2>&1
+                echo "{\"command\":[\"set_property\",\"pause\",false]}" | nc $nc_opts -w 1 "$active_socket" >/dev/null 2>&1
             fi
 
             print_header_box "${C_PINK}🕶️ Blind Mode Audio Language Profile${C_RESET}"
@@ -2705,7 +2720,9 @@ cmd_language() {
             if [ "$is_idle" == "false" ]; then
                 is_live=true
                 echo "{\"command\":[\"set_property\",\"alang\",\"$clean_lang,auto,en,eng\"]}" | nc $nc_opts -w 1 "$active_socket" >/dev/null 2>&1
+                echo "{\"command\":[\"set_property\",\"slang\",\"$clean_lang,auto,en,eng\"]}" | nc $nc_opts -w 1 "$active_socket" >/dev/null 2>&1
                 echo "{\"command\":[\"script-message\",\"change-language\",\"$clean_lang\"]}" | nc $nc_opts -w 1 "$active_socket" >/dev/null 2>&1
+                echo "{\"command\":[\"set_property\",\"pause\",false]}" | nc $nc_opts -w 1 "$active_socket" >/dev/null 2>&1
             fi
         fi
 
