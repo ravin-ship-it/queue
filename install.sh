@@ -404,9 +404,54 @@ EOF
     win_mpv_dir="$win_dir/AppData/Roaming/mpv"
     mkdir -p "$win_mpv_dir/scripts" 2>/dev/null
     cp -rf "$REPO_DIR"/scripts/*.lua "$win_mpv_dir/scripts/" 2>/dev/null || true
-    if [ -f "$REPO_DIR/mpv.conf.example" ]; then
-        cp -f "$REPO_DIR/mpv.conf.example" "$win_mpv_dir/mpv.conf" 2>/dev/null
-    fi
+    cat << 'EOF' > "$win_mpv_dir/mpv.conf"
+# MPV Native Windows Configuration (Queue Engine)
+vo=gpu
+gpu-context=auto
+hwdec=auto-safe
+ao=wasapi
+audio-channels=stereo
+audio-pitch-correction=yes
+
+# Smooth Caching & Performance (Resilient against internet fluctuations)
+network-timeout=30
+stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5
+cache=yes
+cache-secs=300
+cache-pause=yes
+cache-pause-wait=2
+cache-pause-initial=yes
+demuxer-max-bytes=512MiB
+demuxer-max-back-bytes=128MiB
+demuxer-readahead-secs=300
+
+# YouTube / Streaming (Smart Adaptive default & English language prioritization)
+alang=en,eng,enUS,en-US
+slang=en,eng,enUS,en-US
+ytdl=yes
+ytdl-format=bestvideo[height<=2160][fps>30][format_note!*=Premium]+(bestaudio[language=en][acodec=opus]/bestaudio[language^=en]/bestaudio[acodec=opus]/bestaudio)/bestvideo[height<=2160][format_note!*=Premium]+(bestaudio[language=en]/bestaudio)/bestvideo[height<=2160]+(bestaudio[language=en]/bestaudio)/best
+script-opts=ytdl_hook-ytdl_path=yt-dlp
+script-opts-append=stats-key_page_0=
+script-opts-append=stats-key_page_1=
+script-opts-append=stats-key_page_2=
+script-opts-append=stats-key_page_3=
+script-opts-append=stats-key_page_4=
+ytdl-raw-options=extractor-args="youtube:player_client=visionos,android,web"
+tls-verify=no
+
+# Desktop Video & Window Behavior
+autofit=50%x50%
+geometry=50%:50%
+force-window=immediate
+keep-open=yes
+title="Queue (Direct3D 11/12 Host)"
+
+[flat-audio]
+af=
+
+[dolby-like]
+af=lavfi=[firequalizer=zero_phase=on:gain_entry='entry(40,4);entry(80,3);entry(160,1.5);entry(320,0.2);entry(1000,0);entry(2800,1.2);entry(6000,2);entry(12000,1.4)'],acompressor=threshold=-18dB:ratio=2.2:attack=20:release=250:makeup=3,alimiter=limit=0.97
+EOF
     if [ -f "$REPO_DIR/input.conf.example" ]; then
         cp -f "$REPO_DIR/input.conf.example" "$win_mpv_dir/input.conf" 2>/dev/null
     fi

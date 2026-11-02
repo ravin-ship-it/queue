@@ -6,8 +6,6 @@ resume-playback=no
 
 # Terminal / Audio (macOS, Linux, WSL, Android/Termux Resilient)
 ao=wasapi,pulse,pipewire,alsa,coreaudio,opensles,audiotrack
-pulse-latency-hacks=yes
-pulse-buffer=250
 audio-wait-open=0.2
 audio-channels=stereo
 volume=100
@@ -50,17 +48,13 @@ cursor-autohide=1000
 
 # GPU Hardware Acceleration & 60fps Smoothness Optimization
 vo=gpu
-gpu-context=wayland,auto
+gpu-context=auto
 profile=fast
 hwdec=auto-safe
 opengl-pbo=yes
 swapchain-depth=3
 video-sync=audio
 vd-lavc-threads=0
-
-# Headless Audio
-vo=null
-video=no
 
 [flat-audio]
 af=
