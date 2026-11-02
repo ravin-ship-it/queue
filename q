@@ -42,8 +42,9 @@ elif [ "$(uname -s 2>/dev/null)" = "Linux" ]; then
 fi
 export IS_WSL IS_MACOS IS_LINUX IS_ANDROID
 
-# Clean up dead sockets automatically
+# Clean up dead sockets automatically & harden socket permissions
 if [ -S "$HOME/.mpv-socket" ]; then
+    chmod 600 "$HOME/.mpv-socket" 2>/dev/null || true
     if ! (echo '{"command":["get_property","idle-active"]}' | nc $NC_OPTS -w 1 "$HOME/.mpv-socket" >/dev/null 2>&1); then
         rm -f "$HOME/.mpv-socket"
     fi
@@ -142,7 +143,7 @@ fi
 # --- Command Parsing ---
 
 PROCESSED_ANY_FLAG=false
-SMART_CMDS="^(play|pause|stop|next|prev|vol|info|list|clear|shuffle|remove|move|swap|help|save|load|auto|fx|deps|up|install|setup|uninstall|remove-setup|pb|blind|download|dl|d|dislike|dis|disl|rmd|undis|undislike|like|liked|likel|unlike|vid|video|watch|version|ver|res|quality|hybrid|hy|lang|audio|speed|sp|aud|loop|loop-file|loop-playlist|lp|status|clean|pl-clean)$"
+SMART_CMDS="^(play|pause|stop|next|prev|vol|info|list|clear|shuffle|remove|move|swap|help|save|load|auto|fx|deps|up|install|setup|uninstall|remove-setup|pb|blind|download|dl|d|dislike|dis|disl|rmd|undis|undislike|like|liked|likel|unlike|vid|video|watch|version|ver|res|quality|hybrid|hy|lang|audio|speed|sp|aud|loop|loop-file|loop-playlist|lp|status|clean|pl-clean|rmr|rename|rname)$"
 
 while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
     PROCESSED_ANY_FLAG=true
@@ -194,31 +195,47 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
         loop-playlist|lp) CMD="-lp" ;;
         clean) CMD="-clean" ;;
         pl-clean) CMD="-pl-clean" ;;
+        rmr) CMD="-rmr" ;;
+        rename|rname) CMD="-rname" ;;
     esac
 
     case "$CMD" in
         -fzf-enter)
             shift
             file="$1"
-            if [ "${FZF_SELECT_COUNT:-0}" -gt 0 ] || [ -n "$SELECTION_MODE_FILE" -a -f "$SELECTION_MODE_FILE" ]; then
+            curr_item="$2"
+
+            sel_count=0
+            if [ -n "$file" ] && [ -f "$file" ]; then
+                sel_count=$(grep -cve '^\s*$' "$file" 2>/dev/null || echo 0)
+            fi
+
+            if [ "$sel_count" -gt 1 ] || [ "${FZF_SELECT_COUNT:-0}" -gt 1 ] || [ -f "$SELECTION_MODE_FILE" ]; then
                 echo "accept"
-            else
-                if [ -n "$file" ] && [ -f "$file" ]; then
-                    idx=$(sed "s/\x1b\[[0-9;]*m//g" "$file" | sed -E -n 's/^[[:space:]]*([|><]{2}[[:space:]]*)?([0-9]+)\..*/\2/p' | head -n 1)
-                    if [[ "$idx" =~ ^[0-9]+$ ]] && [ "$idx" -gt 0 ]; then
-                        if [ "$MPV_RUNNING" = false ]; then
-                            cmd_play "$idx" >/dev/null 2>&1
-                        elif [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
-                            cmd_play "$idx" >/dev/null 2>&1 &
-                        else
-                            echo "{\"command\":[\"playlist-play-index\",$((idx - 1))]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
-                            echo "{\"command\":[\"seek\",0,\"absolute\"]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
-                            echo "{\"command\":[\"set_property\",\"pause\",false]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
-                        fi
+                exit 0
+            fi
+
+            line=""
+            if [ "$sel_count" -eq 1 ]; then
+                line=$(head -n 1 "$file")
+            elif [ -n "$curr_item" ]; then
+                line="$curr_item"
+            fi
+
+            if [ -n "$line" ]; then
+                idx=$(echo "$line" | sed "s/\x1b\[[0-9;]*m//g" | sed -E -n 's/^[[:space:]]*([|><]{2}[[:space:]]*)?([0-9]+)\..*/\2/p' | head -n 1)
+                if [[ "$idx" =~ ^[0-9]+$ ]] && [ "$idx" -gt 0 ]; then
+                    if [ "$MPV_RUNNING" = false ] || [ ! -S "$SOCKET" ]; then
+                        cmd_play "$idx" >/dev/null 2>&1
+                    elif [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+                        cmd_play "$idx" >/dev/null 2>&1 &
+                    else
+                        echo "{\"command\":[\"playlist-play-index\",$((idx - 1))]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                        echo "{\"command\":[\"set_property\",\"pause\",false]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
                     fi
                 fi
-                echo "reload-sync(bash \"$SCRIPT_PATH\" -raw)"
             fi
+            echo "reload-sync(bash \"$SCRIPT_PATH\" -raw)"
             exit 0
             ;;
         -rm) 
@@ -888,8 +905,8 @@ if [ -z "$1" ]; then
         --bind "insert:select-all+execute-silent(touch \"$SELECTION_MODE_FILE\")" \
         --bind "delete:deselect-all+execute-silent(rm -f \"$SELECTION_MODE_FILE\")" \
         --bind "tab:toggle+execute-silent(touch \"$SELECTION_MODE_FILE\")" \
-        --bind "enter:transform(bash \"$SCRIPT_PATH\" -fzf-enter {f})" \
-        --bind "double-click:transform(bash \"$SCRIPT_PATH\" -fzf-enter {f})" \
+        --bind "enter:transform(bash \"$SCRIPT_PATH\" -fzf-enter {+f} {})" \
+        --bind "double-click:transform(bash \"$SCRIPT_PATH\" -fzf-enter {+f} {})" \
         --bind "esc:abort" \
         --header="$INITIAL_HEADER" \
         --info=inline-right --prompt="$PROMPT" | sed "s/\x1b\[[0-9;]*m//g" | sed -E -n 's/^[[:space:]]*([|><]{2}[[:space:]]*)?([0-9]+)\..*/\2/p')

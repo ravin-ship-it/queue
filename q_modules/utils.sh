@@ -32,6 +32,7 @@ LAST_PLAYLIST_FILE="$HOME/.cache/mpv/last_playlist.txt"
 PLAYLIST_DIR="$HOME/.local/share/mpv/playlists"
 mkdir -p "$(dirname "$CACHE_FILE")"
 mkdir -p "$PLAYLIST_DIR"
+chmod 700 "$(dirname "$CACHE_FILE")" "$HOME/.local/share/mpv" "$PLAYLIST_DIR" 2>/dev/null || true
 [ ! -f "$CACHE_FILE" ] && touch "$CACHE_FILE"
 
 # Cleanup stale radio/monitor locks
@@ -59,6 +60,7 @@ fi
 SOCKET="$HOME/.mpv-socket"
 MPV_RUNNING=false
 if [ -S "$SOCKET" ]; then
+    chmod 600 "$SOCKET" 2>/dev/null || true
     # Verify if socket is actually responsive (1s timeout)
     if echo '{ "command": ["get_property", "idle-active"] }' | nc $NC_OPTS -w 1 "$SOCKET" &>/dev/null; then
         MPV_RUNNING=true
@@ -828,6 +830,7 @@ ensure_mpv_running() {
             fi
 
             if [ "$hybrid_ready" = true ]; then
+                chmod 600 "$SOCKET" 2>/dev/null || true
                 MPV_RUNNING=true
                 start_idle_monitor
                 if [ -n "$pl_arg" ] && [ -f "$pl_arg" ] && [ -s "$pl_arg" ]; then
@@ -917,6 +920,7 @@ ensure_mpv_running() {
         done
 
         if [ -S "$SOCKET" ]; then
+            chmod 600 "$SOCKET" 2>/dev/null || true
             MPV_RUNNING=true
             start_idle_monitor
             restore_state_properties

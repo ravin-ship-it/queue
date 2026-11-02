@@ -277,6 +277,12 @@ execute_download() {
             return 0
         fi
 
+        local safe_f_regex="^[]0-9a-zA-Z_+/*<>=,.:~@[-]+$"
+        if [[ ! "$custom_f" =~ $safe_f_regex ]] || [[ "$custom_f" =~ ^-- ]]; then
+            echo -e "\n${C_PINK}❌ Invalid format specification.${C_RESET}"
+            return 1
+        fi
+
         echo -e "${C_PURPLE}${T_LINE}${C_RESET}"
         echo -e "${C_CYAN}🚀 Starting Download...${C_RESET}"
         echo -e "${C_TEAL}📂 Target Directory:${C_RESET} ${C_WHITE}${dest_dir}${C_RESET}"

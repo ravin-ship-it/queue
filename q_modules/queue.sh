@@ -245,7 +245,7 @@ cmd_like() {
             local item_json=$(echo "$track_info" | jq -s -c --arg query "$target" '
                 map(select(.event == null)) |
                 .[0].data[] | 
-                select(((.title? // "") | test($query; "i")) or ((.filename? // "") | test($query; "i")))
+                select((((.title? // "") | ascii_downcase) | contains($query | ascii_downcase)) or (((.filename? // "") | ascii_downcase) | contains($query | ascii_downcase)))
             ' 2>/dev/null | head -n 1)
             filename=$(echo "$item_json" | jq -r '.filename // ""')
             title=$(echo "$item_json" | jq -r '.title // ""')
@@ -300,8 +300,18 @@ cmd_unlike() {
             filename="$target"
             title="$target"
         else
-            filename="$target"
-            title="$target"
+            # Search by text in playlist
+            local item_json=$(echo "$track_info" | jq -s -c --arg query "$target" '
+                map(select(.event == null)) |
+                .[0].data[] | 
+                select((((.title? // "") | ascii_downcase) | contains($query | ascii_downcase)) or (((.filename? // "") | ascii_downcase) | contains($query | ascii_downcase)))
+            ' 2>/dev/null | head -n 1)
+            filename=$(echo "$item_json" | jq -r '.filename // ""')
+            title=$(echo "$item_json" | jq -r '.title // ""')
+            if [ -z "$filename" ]; then
+                filename="$target"
+                title="$target"
+            fi
         fi
 
         if [ -n "$filename" ]; then
@@ -632,7 +642,7 @@ cmd_dislike() {
             local item_json=$(echo "$track_info" | jq -s -c --arg query "$target" '
                 map(select(.event == null)) |
                 .[0].data[] | 
-                select(((.title? // "") | test($query; "i")) or ((.filename? // "") | test($query; "i")))
+                select((((.title? // "") | ascii_downcase) | contains($query | ascii_downcase)) or (((.filename? // "") | ascii_downcase) | contains($query | ascii_downcase)))
             ' 2>/dev/null | head -n 1)
             filename=$(echo "$item_json" | jq -r '.filename // ""')
             title=$(echo "$item_json" | jq -r '.title // ""')
@@ -689,7 +699,7 @@ cmd_remove() {
                     map(select(.event == null)) |
                     .[0].data | select(type == "array") | 
                     to_entries[] | 
-                    select(((.value.title? // "") | test($query; "i")) or ((.value.filename? // "") | test($query; "i"))) | 
+                    select((((.value.title? // "") | ascii_downcase) | contains($query | ascii_downcase)) or (((.value.filename? // "") | ascii_downcase) | contains($query | ascii_downcase))) | 
                     .key + 1
                 ' 2>/dev/null | head -n 1)
                 

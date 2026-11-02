@@ -5,15 +5,17 @@ resolve_playlist_file() {
     if [[ "$target" =~ ^[0-9]+$ ]]; then
         file=$(find "$PLAYLIST_DIR" -maxdepth 1 -name "*.txt" | sort | sed -n "${target}p")
     else
-        file="${PLAYLIST_DIR}/${target}.txt"
+        local clean_target
+        clean_target=$(basename "$target")
+        file="${PLAYLIST_DIR}/${clean_target}.txt"
         if [ ! -f "$file" ]; then
             local ci_file
-            ci_file=$(find "$PLAYLIST_DIR" -maxdepth 1 -iname "${target}.txt" | head -n 1)
+            ci_file=$(find "$PLAYLIST_DIR" -maxdepth 1 -iname "${clean_target}.txt" | head -n 1)
             [ -n "$ci_file" ] && file="$ci_file"
         fi
         if [ ! -f "$file" ]; then
             local partial_file
-            partial_file=$(find "$PLAYLIST_DIR" -maxdepth 1 -iname "*${target}*.txt" | head -n 1)
+            partial_file=$(find "$PLAYLIST_DIR" -maxdepth 1 -iname "*${clean_target}*.txt" | head -n 1)
             [ -n "$partial_file" ] && file="$partial_file"
         fi
     fi
@@ -505,8 +507,10 @@ cmd_rename() {
     fi
 
     new_name=$(basename "$new_name")
+    local target_base
+    target_base=$(basename "$target")
 
-    local pl_old="${PLAYLIST_DIR}/${target}.txt"
+    local pl_old="${PLAYLIST_DIR}/${target_base}.txt"
     local pl_new="${PLAYLIST_DIR}/${new_name}.txt"
 
     if [ -f "$pl_old" ]; then
@@ -515,7 +519,7 @@ cmd_rename() {
             return
         fi
         mv "$pl_old" "$pl_new"
-        echo -e "${C_PINK}✏️ Renamed playlist: ${C_CYAN}${target}${C_RESET} -> ${C_CYAN}${new_name}${C_RESET}"
+        echo -e "${C_PINK}✏️ Renamed playlist: ${C_CYAN}${target_base}${C_RESET} -> ${C_CYAN}${new_name}${C_RESET}"
         return
     fi
 

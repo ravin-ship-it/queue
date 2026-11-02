@@ -3299,7 +3299,7 @@ cmd_play() {
     fi
 
     # Allow arithmetic (e.g. q -play 10+5)
-    if [[ "$index" =~ [0-9]+[-+*/][0-9]+ ]]; then
+    if [[ "$index" =~ ^[0-9]+[-+*/][0-9]+$ ]]; then
         index=$(($index)) 2>/dev/null
     fi
 
