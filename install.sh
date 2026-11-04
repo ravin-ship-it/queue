@@ -179,7 +179,7 @@ if [ "$REPO_DIR" != "$DEST_DIR" ]; then
     [ -f "$REPO_DIR/mpv.conf.example" ] && cp -f "$REPO_DIR/mpv.conf.example" "$DEST_DIR/" 2>/dev/null || true
 fi
 chmod +x "$DEST_DIR/q" "$DEST_DIR/install.sh" "$DEST_DIR/uninstall.sh" "$DEST_DIR/setup.sh" 2>/dev/null || true
-chmod +x "$DEST_DIR/q_modules/hybrid_bridge.py" "$DEST_DIR/q_modules/android_stream_bridge.py" 2>/dev/null || true
+chmod +x "$DEST_DIR/q_modules/hybrid_bridge.py" "$DEST_DIR/q_modules/android_stream_bridge.py" "$DEST_DIR/q_modules/search_engine.py" 2>/dev/null || true
 
 # Link to user and system bin paths for instant zero-restart availability
 ln -sf "$DEST_DIR/q" "$HOME/.local/bin/q"

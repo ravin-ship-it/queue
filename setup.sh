@@ -88,6 +88,7 @@ CORE_FILES=(
     "q_modules/queue.sh"
     "q_modules/media.sh"
     "q_modules/search.sh"
+    "q_modules/search_engine.py"
     "q_modules/playlist.sh"
     "q_modules/download.sh"
     "q_modules/batch.sh"

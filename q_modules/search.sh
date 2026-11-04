@@ -516,3 +516,96 @@ if best_cand and best_score > 0:
     fi
     return 0
 }
+
+# --- UNIVERSAL DYNAMIC LIVE SEARCH SUBSYSTEM (q -s) ---
+cmd_interactive_search() {
+    local initial_query="$*"
+    local plat_mode="all"
+
+    # Pre-parse initial query if starting with platform prefix
+    if [[ "$initial_query" =~ ^(yt|youtube)[[:space:]]+(.*) ]]; then
+        plat_mode="yt"
+        initial_query="${BASH_REMATCH[2]}"
+    elif [[ "$initial_query" =~ ^(sc|soundcloud)[[:space:]]+(.*) ]]; then
+        plat_mode="sc"
+        initial_query="${BASH_REMATCH[2]}"
+    fi
+
+    if ! command -v fzf >/dev/null 2>&1; then
+        echo -e "${C_PINK}⚠️ fzf is required for interactive dynamic search.${C_RESET}"
+        echo -e "${C_GRAY}Falling back to standard batch search...${C_RESET}"
+        [ -n "$initial_query" ] && perform_search "$initial_query" "ytsearch25"
+        return $?
+    fi
+
+    local search_engine="$MODULE_DIR/search_engine.py"
+    if [ ! -f "$search_engine" ]; then
+        search_engine="$SCRIPT_DIR/q_modules/search_engine.py"
+    fi
+    if [ ! -f "$search_engine" ]; then
+        search_engine="/home/xen/.local/bin/mpv/q_modules/search_engine.py"
+    fi
+
+    local plat_file="${TMPDIR:-/tmp}/q_search_plat_$$"
+    echo "$plat_mode" > "$plat_file"
+    local added_file="${TMPDIR:-/tmp}/q_search_added_$$"
+    rm -f "$added_file" 2>/dev/null
+    touch "$added_file"
+
+    local LINE=$(get_fzf_divider)
+    local status_icons=$(get_player_status_icons)
+    local s_header="${C_PURPLE}🪷 Queue Dynamic Universal Search${C_RESET} ${C_GRAY}(All Platforms: YouTube + SoundCloud)${C_RESET}${NL}${C_GRAY}💡 ENTER: Queue & Keep Searching • ALT-ENTER: Queue & Exit • TAB: Multi • CTRL-P: Platform • ESC: Exit${C_RESET}${NL}${C_GRAY}${LINE}${C_RESET}"
+    local s_prompt="🎵 ${C_TEAL}Search All Platforms${status_icons}${C_RESET} > "
+    if [ "$plat_mode" == "yt" ]; then
+        s_prompt="🔴 ${C_RED}Search YouTube${status_icons}${C_RESET} > "
+    elif [ "$plat_mode" == "sc" ]; then
+        s_prompt="☁️ ${C_ORANGE}Search SoundCloud${status_icons}${C_RESET} > "
+    fi
+
+    local script_cmd="bash \"$SCRIPT_PATH\""
+    [ -z "$SCRIPT_PATH" ] && script_cmd="q"
+
+    # Launch FZF with live dynamic reload on query change
+    fzf --disabled --ansi --layout=reverse --border --height=100% --info=inline-right \
+        --query="$initial_query" \
+        --header="$s_header" \
+        --header-first \
+        --prompt="$s_prompt" \
+        $FZF_COLOR_OPTS \
+        --delimiter="::" --with-nth=1 \
+        --bind "start:reload(python3 \"$search_engine\" {q} \"$plat_file\")" \
+        --bind "change:reload(python3 \"$search_engine\" {q} \"$plat_file\")" \
+        --bind "tab:toggle,alt-a:toggle-all,insert:select-all,delete:deselect-all" \
+        --bind "ctrl-p:transform($script_cmd -fzf-search-toggle-plat \"$plat_file\")+reload(python3 \"$search_engine\" {q} \"$plat_file\")" \
+        --bind "enter:transform($script_cmd -fzf-search-action queue {+f} {} \"$added_file\")" \
+        --bind "alt-enter:transform($script_cmd -fzf-search-action queue_and_exit {+f} {} \"$added_file\")" \
+        --bind "ctrl-x:transform($script_cmd -fzf-search-action play_now {+f} {} \"$added_file\")" \
+        --bind "ctrl-n:transform($script_cmd -fzf-search-action play_next {+f} {} \"$added_file\")" \
+        --bind "ctrl-l:transform($script_cmd -fzf-search-action like {+f} {} \"$added_file\")" \
+        --bind "ctrl-d:transform($script_cmd -fzf-search-action dislike {+f} {} \"$added_file\")" \
+        --bind "ctrl-v:transform-query(echo -n {q}; get_clipboard)" \
+        --bind "esc:abort" >/dev/null 2>&1
+
+    rm -f "$plat_file" 2>/dev/null
+
+    local added_count=0
+    if [ -f "$added_file" ]; then
+        added_count=$(grep -cve '^\s*$' "$added_file" 2>/dev/null || echo 0)
+    fi
+
+    if [ "$added_count" -gt 0 ]; then
+        print_header_box "${C_PINK}🎬 Search Session Finished${C_RESET}"
+        print_boxed_line "${C_TEAL}Added to Queue:${C_RESET} ${C_GREEN}${added_count} track(s)${C_RESET} ✅"
+        local last_track=$(tail -n 1 "$added_file" | cut -f2 2>/dev/null)
+        [ -n "$last_track" ] && print_boxed_line "${C_TEAL}Last Queued:${C_RESET}    ${C_CYAN}${last_track:0:$((INNER_WIDTH-16))}${C_RESET}"
+        printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
+        B_LINE=${B_LINE// /─}
+        echo -e "${C_PURPLE}${B_LINE}${C_RESET}"
+        ( sleep 0.3; save_current_playlist true ) >/dev/null 2>&1 & disown
+    else
+        echo -e "${C_PINK}👋 Dynamic search closed.${C_RESET}"
+    fi
+
+    rm -f "$added_file" 2>/dev/null
+    return 0
+}

@@ -143,7 +143,7 @@ fi
 # --- Command Parsing ---
 
 PROCESSED_ANY_FLAG=false
-SMART_CMDS="^(play|pause|stop|next|prev|vol|info|list|clear|shuffle|remove|move|swap|help|save|load|auto|fx|deps|up|install|setup|uninstall|remove-setup|pb|blind|download|dl|d|dislike|dis|disl|rmd|undis|undislike|like|liked|likel|unlike|vid|video|watch|version|ver|res|quality|hybrid|hy|lang|audio|speed|sp|aud|loop|loop-file|loop-playlist|lp|status|clean|pl-clean|rmr|rename|rname)$"
+SMART_CMDS="^(play|pause|stop|next|prev|vol|info|list|clear|shuffle|remove|move|swap|help|save|load|auto|fx|deps|up|install|setup|uninstall|remove-setup|pb|blind|download|dl|d|dislike|dis|disl|rmd|undis|undislike|like|liked|likel|unlike|vid|video|watch|version|ver|res|quality|hybrid|hy|lang|audio|speed|sp|aud|loop|loop-file|loop-playlist|lp|status|clean|pl-clean|rmr|rename|rname|s|search)$"
 
 while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
     PROCESSED_ANY_FLAG=true
@@ -153,6 +153,7 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
     raw_cmd="${CMD#--}"
     raw_cmd="${raw_cmd#-}"
     case "$raw_cmd" in
+        search|s) CMD="-s" ;;
         play|pause) CMD="-p" ;;
         stop) CMD="-stop" ;;
         next) CMD="-next" ;;
@@ -200,6 +201,152 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
     esac
 
     case "$CMD" in
+        -s|--search)
+            shift
+            declare -a s_args=()
+            while [[ -n "$1" ]] && [[ ! "$1" =~ ^- ]] && [[ ! "$1" =~ $SMART_CMDS ]]; do
+                s_args+=("$1")
+                shift
+            done
+            cmd_interactive_search "${s_args[@]}"
+            exit $?
+            ;;
+        -fzf-search-toggle-plat)
+            shift
+            p_file="$1"
+            cur="all"
+            [ -f "$p_file" ] && cur=$(cat "$p_file" 2>/dev/null | tr -d '[:space:]')
+            case "$cur" in
+                all)
+                    echo "yt" > "$p_file"
+                    echo "change-prompt(🔴 [YouTube] > )"
+                    ;;
+                yt)
+                    echo "sc" > "$p_file"
+                    echo "change-prompt(☁️ [SoundCloud] > )"
+                    ;;
+                *)
+                    echo "all" > "$p_file"
+                    echo "change-prompt(🎵 [All Platforms] > )"
+                    ;;
+            esac
+            exit 0
+            ;;
+        -fzf-search-action)
+            shift
+            action="$1"
+            sel_file="$2"
+            curr_item="$3"
+            added_file="$4"
+
+            declare -a target_lines=()
+            if [ -n "$sel_file" ] && [ -f "$sel_file" ] && [ -s "$sel_file" ]; then
+                while IFS= read -r l; do
+                    [ -n "$l" ] && target_lines+=("$l")
+                done < "$sel_file"
+            elif [ -n "$curr_item" ]; then
+                target_lines+=("$curr_item")
+            fi
+
+            if [ ${#target_lines[@]} -eq 0 ]; then
+                exit 0
+            fi
+
+            valid_count=0
+            last_title=""
+
+            for l in "${target_lines[@]}"; do
+                if [[ "$l" =~ ::tip ]] || [[ "$l" =~ ::no_results ]]; then
+                    continue
+                fi
+
+                url=$(echo "$l" | awk -F'::' '{print $2}')
+                title=$(echo "$l" | awk -F'::' '{print $3}')
+                artist=$(echo "$l" | awk -F'::' '{print $4}')
+                dur=$(echo "$l" | awk -F'::' '{print $5}')
+                plat=$(echo "$l" | awk -F'::' '{print $6}')
+
+                [ -z "$url" ] && continue
+                ((valid_count++))
+                last_title="$title"
+
+                case "$action" in
+                    like)
+                        mark_track_liked "$url" "$title"
+                        ;;
+                    dislike)
+                        mark_track_disliked "$url" "$title"
+                        ;;
+                    play_now)
+                        if [ "$MPV_RUNNING" = false ] || [ ! -S "$SOCKET" ]; then
+                            cmd_play "$url" >/dev/null 2>&1 &
+                        else
+                            echo "{\"command\":[\"loadfile\",\"$url\",\"replace\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+                            echo "{\"command\":[\"set_property\",\"pause\",false]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+                        fi
+                        [ -n "$added_file" ] && printf "%s\t%s\n" "$url" "$title" >> "$added_file"
+                        ;;
+                    play_next)
+                        if [ "$MPV_RUNNING" = false ] || [ ! -S "$SOCKET" ]; then
+                            cmd_play "$url" >/dev/null 2>&1 &
+                        else
+                            cur_pos=$(echo '{"command":["get_property","playlist-pos"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
+                            echo "{\"command\":[\"loadfile\",\"$url\",\"append\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+                            total=$(echo '{"command":["get_property","playlist-count"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
+                            if [ "$total" -gt 1 ]; then
+                                echo "{\"command\":[\"playlist-move\",$((total - 1)),$((cur_pos + 1))]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+                            fi
+                        fi
+                        [ -n "$added_file" ] && printf "%s\t%s\n" "$url" "$title" >> "$added_file"
+                        ;;
+                    queue|queue_and_exit)
+                        if [ "$MPV_RUNNING" = false ] || [ ! -S "$SOCKET" ]; then
+                            cmd_play "$url" >/dev/null 2>&1 &
+                        else
+                            queue_item_ipc "$url" "$title" "$artist" "$dur" >/dev/null 2>&1
+                        fi
+                        [ -n "$added_file" ] && printf "%s\t%s\n" "$url" "$title" >> "$added_file"
+                        ;;
+                esac
+            done
+
+            if [ "$valid_count" -eq 0 ]; then
+                exit 0
+            fi
+
+            case "$action" in
+                like)
+                    echo "change-header(🎵 Universal Search: 🩷 Liked & Saved to Liked Songs: '${last_title:0:40}')"
+                    ;;
+                dislike)
+                    echo "change-header(🎵 Universal Search: 💔 Disliked & Blacklisted: '${last_title:0:40}')"
+                    ;;
+                play_now|queue_and_exit)
+                    echo "accept"
+                    ;;
+                play_next)
+                    if [ "$valid_count" -gt 1 ]; then
+                        echo "change-header(🎵 Universal Search: ⏭️ Queued ${valid_count} tracks as Next Up! • Keep searching or press ESC to finish)"
+                    else
+                        echo "change-header(🎵 Universal Search: ⏭️ Queued '${last_title:0:40}' as Next Up! • Keep searching or press ESC to finish)"
+                    fi
+                    ;;
+                queue)
+                    total_q=0
+                    if [ -S "$SOCKET" ]; then
+                        total_q=$(echo '{"command":["get_property","playlist-count"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
+                    fi
+                    q_info=""
+                    [ "$total_q" -gt 0 ] && q_info=" (#$total_q in queue)"
+                    if [ "$valid_count" -gt 1 ]; then
+                        echo "change-header(🎵 Universal Search: ✅ Added ${valid_count} tracks to Queue!${q_info} • Keep searching or press ESC to finish)"
+                    else
+                        echo "change-header(🎵 Universal Search: ✅ Added '${last_title:0:40}' to Queue!${q_info} • Keep searching or press ESC to finish)"
+                    fi
+                    ;;
+            esac
+            exit 0
+            ;;
         -fzf-enter)
             shift
             file="$1"

@@ -480,6 +480,7 @@ cmd_update_ytdlp() {
             "q_modules/media.sh"
             "q_modules/queue.sh"
             "q_modules/search.sh"
+            "q_modules/search_engine.py"
             "q_modules/batch.sh"
             "q_modules/playlist.sh"
             "q_modules/download.sh"
@@ -745,6 +746,7 @@ show_help() {
     print_boxed_line "  🎧              Audio-Only Mode ON"
     print_boxed_line ""
     print_boxed_line "${C_YELLOW}Searching:${C_RESET}"
+    print_boxed_line "  q -s [query]    Live Dynamic Search (All Platforms, Multi-Queue)"
     print_boxed_line "  q yt <q>        Force YouTube search"
     print_boxed_line "  q sc <q>        Force Soundcloud search"
     if [ "$IS_WSL" = true ]; then
