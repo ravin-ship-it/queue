@@ -341,6 +341,39 @@ format_track_log() {
         fi
     fi
 
+    # Fast online metadata resolution for remote URLs if cache miss (<0.3s)
+    if [ -z "$cached_title" ] && [[ "$clean_fname" =~ ^http ]]; then
+        if [[ "$clean_fname" =~ (youtube\.com|youtu\.be) ]]; then
+            local oe_json
+            oe_json=$(curl -s --max-time 2 "https://www.youtube.com/oembed?url=${clean_fname}&format=json" 2>/dev/null)
+            if [ -n "$oe_json" ]; then
+                local oe_t oe_a
+                oe_t=$(echo "$oe_json" | jq -r '.title // empty' 2>/dev/null)
+                oe_a=$(echo "$oe_json" | jq -r '.author_name // empty' 2>/dev/null)
+                if [ -n "$oe_t" ]; then
+                    cached_title="$oe_t"
+                    [ -z "$cached_artist" ] && cached_artist="$oe_a"
+                    printf "%s\t%s\t%s\t%s\n" "$clean_fname" "$cached_title" "${cached_artist:-Unknown}" "${cached_duration:-0:00}" >> "$CACHE_FILE"
+                    CACHE_MEM["$clean_fname"]="${cached_title}"$'\t'"${cached_artist:-Unknown}"$'\t'"${cached_duration:-0:00}"
+                fi
+            fi
+        elif [[ "$clean_fname" =~ soundcloud\.com ]]; then
+            local sc_json
+            sc_json=$(curl -s --max-time 2 "https://soundcloud.com/oembed?format=json&url=${clean_fname}" 2>/dev/null)
+            if [ -n "$sc_json" ]; then
+                local sc_t sc_a
+                sc_t=$(echo "$sc_json" | jq -r '.title // empty' 2>/dev/null)
+                sc_a=$(echo "$sc_json" | jq -r '.author_name // empty' 2>/dev/null)
+                if [ -n "$sc_t" ]; then
+                    cached_title="$sc_t"
+                    [ -z "$cached_artist" ] && cached_artist="$sc_a"
+                    printf "%s\t%s\t%s\t%s\n" "$clean_fname" "$cached_title" "${cached_artist:-Unknown}" "${cached_duration:-0:00}" >> "$CACHE_FILE"
+                    CACHE_MEM["$clean_fname"]="${cached_title}"$'\t'"${cached_artist:-Unknown}"$'\t'"${cached_duration:-0:00}"
+                fi
+            fi
+        fi
+    fi
+
     # 4. Final Title Determination
     local display_title="$mpv_title"
     # Prioritize: 1. Cached Title, 2. Embedded Title, 3. MPV Title (if not URL), 4. Filename (Cleaned)
@@ -381,7 +414,11 @@ format_track_log() {
     
     local badges=$(get_track_badges "$clean_fname" "$vid_id")
 
-    echo -e "${C_WHITE}[${C_ORANGE}${idx}${C_WHITE}] ${badges}${C_CYAN}${display_title}${C_RESET}${artist_part}${dur_part}"
+    local idx_part=""
+    if [ -n "$idx" ] && [ "$idx" != "?" ]; then
+        idx_part="${C_WHITE}[${C_ORANGE}${idx}${C_WHITE}] "
+    fi
+    echo -e "${idx_part}${badges}${C_CYAN}${display_title}${C_RESET}${artist_part}${dur_part}"
 }
 
 format_track_fzf() {
@@ -427,6 +464,39 @@ format_track_fzf() {
             cached_title=$(echo -e "$row" | cut -f1)
             cached_artist=$(echo -e "$row" | cut -f2)
             [ -z "$cached_duration" ] && cached_duration=$(echo -e "$row" | cut -f3)
+        fi
+    fi
+
+    # Fast online metadata resolution for remote URLs if cache miss (<0.3s)
+    if [ -z "$cached_title" ] && [[ "$clean_fname" =~ ^http ]]; then
+        if [[ "$clean_fname" =~ (youtube\.com|youtu\.be) ]]; then
+            local oe_json
+            oe_json=$(curl -s --max-time 2 "https://www.youtube.com/oembed?url=${clean_fname}&format=json" 2>/dev/null)
+            if [ -n "$oe_json" ]; then
+                local oe_t oe_a
+                oe_t=$(echo "$oe_json" | jq -r '.title // empty' 2>/dev/null)
+                oe_a=$(echo "$oe_json" | jq -r '.author_name // empty' 2>/dev/null)
+                if [ -n "$oe_t" ]; then
+                    cached_title="$oe_t"
+                    [ -z "$cached_artist" ] && cached_artist="$oe_a"
+                    printf "%s\t%s\t%s\t%s\n" "$clean_fname" "$cached_title" "${cached_artist:-Unknown}" "${cached_duration:-0:00}" >> "$CACHE_FILE"
+                    CACHE_MEM["$clean_fname"]="${cached_title}"$'\t'"${cached_artist:-Unknown}"$'\t'"${cached_duration:-0:00}"
+                fi
+            fi
+        elif [[ "$clean_fname" =~ soundcloud\.com ]]; then
+            local sc_json
+            sc_json=$(curl -s --max-time 2 "https://soundcloud.com/oembed?format=json&url=${clean_fname}" 2>/dev/null)
+            if [ -n "$sc_json" ]; then
+                local sc_t sc_a
+                sc_t=$(echo "$sc_json" | jq -r '.title // empty' 2>/dev/null)
+                sc_a=$(echo "$sc_json" | jq -r '.author_name // empty' 2>/dev/null)
+                if [ -n "$sc_t" ]; then
+                    cached_title="$sc_t"
+                    [ -z "$cached_artist" ] && cached_artist="$sc_a"
+                    printf "%s\t%s\t%s\t%s\n" "$clean_fname" "$cached_title" "${cached_artist:-Unknown}" "${cached_duration:-0:00}" >> "$CACHE_FILE"
+                    CACHE_MEM["$clean_fname"]="${cached_title}"$'\t'"${cached_artist:-Unknown}"$'\t'"${cached_duration:-0:00}"
+                fi
+            fi
         fi
     fi
 

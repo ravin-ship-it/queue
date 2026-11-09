@@ -212,10 +212,13 @@ show_queue() {
 }
 
 cmd_like() {
+    load_cache_to_memory
+    load_liked_tracks_to_memory
     local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
 
     if [ "$#" -eq 0 ] || [ -z "$1" ]; then
         # Default: current playing track
+        local curr_pos=$(echo '{ "command": ["get_property", "playlist-pos"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // "-1"' | head -n 1)
         local item_json=$(echo "$track_info" | jq -s -c 'map(select(.event == null)) | .[0].data[] | select(.current) // empty' 2>/dev/null)
         local filename=$(echo "$item_json" | jq -r '.filename // ""')
         local title=$(echo "$item_json" | jq -r '.title // ""')
@@ -223,8 +226,14 @@ cmd_like() {
             echo -e "${C_PINK}🔇 No track currently playing to like.${C_RESET}"
             return 1
         fi
+        local curr_idx="?"
+        [ "$curr_pos" != "-1" ] && [ -n "$curr_pos" ] && curr_idx=$((curr_pos + 1))
+
+        local formatted_track=$(format_track_log "$curr_idx" "$filename" "$title")
+        local resolved_title=$(get_cached_title "$filename")
+        [ -n "$resolved_title" ] && title="$resolved_title"
         mark_track_liked "$filename" "$title"
-        echo -e "${C_PINK}🩷 Liked & Saved to Liked Songs:${C_RESET} ${C_CYAN}${title:-$filename}${C_RESET}"
+        echo -e "${C_PINK}🩷 Liked & Saved to Liked Songs:${C_RESET} ${formatted_track}"
         return 0
     fi
 
@@ -232,33 +241,47 @@ cmd_like() {
         [ -z "$target" ] && continue
         local filename=""
         local title=""
+        local track_idx="?"
         if [[ "$target" =~ ^[0-9]+$ ]]; then
+            track_idx="$target"
             local idx=$((target - 1))
             local item_json=$(echo "$track_info" | jq -s -c "map(select(.event == null)) | .[0].data[$idx] // empty" 2>/dev/null)
             filename=$(echo "$item_json" | jq -r '.filename // ""')
             title=$(echo "$item_json" | jq -r '.title // ""')
+            if [ -z "$filename" ] && [ -f "$LAST_PLAYLIST_FILE" ]; then
+                filename=$(sed -n "${target}p" "$LAST_PLAYLIST_FILE" 2>/dev/null)
+            fi
         elif [[ "$target" =~ ^http ]]; then
             filename="$target"
             title="$target"
+            local found_idx=$(echo "$track_info" | jq -s -r --arg fn "$filename" 'map(select(.event == null)) | .[0].data | to_entries[] | select(.value.filename == $fn) | .key + 1' 2>/dev/null | head -n 1)
+            [ -n "$found_idx" ] && [ "$found_idx" != "null" ] && track_idx="$found_idx"
         else
             # Search by text in playlist
-            local item_json=$(echo "$track_info" | jq -s -c --arg query "$target" '
+            local found_entry=$(echo "$track_info" | jq -s -c --arg query "$target" '
                 map(select(.event == null)) |
-                .[0].data[] | 
-                select((((.title? // "") | ascii_downcase) | contains($query | ascii_downcase)) or (((.filename? // "") | ascii_downcase) | contains($query | ascii_downcase)))
+                .[0].data | to_entries[] | 
+                select((((.value.title? // "") | ascii_downcase) | contains($query | ascii_downcase)) or (((.value.filename? // "") | ascii_downcase) | contains($query | ascii_downcase)))
             ' 2>/dev/null | head -n 1)
-            filename=$(echo "$item_json" | jq -r '.filename // ""')
-            title=$(echo "$item_json" | jq -r '.title // ""')
+            if [ -n "$found_entry" ]; then
+                track_idx=$(echo "$found_entry" | jq -r '.key + 1')
+                filename=$(echo "$found_entry" | jq -r '.value.filename // ""')
+                title=$(echo "$found_entry" | jq -r '.value.title // ""')
+            fi
         fi
 
         if [ -n "$filename" ]; then
+            local formatted_track=$(format_track_log "$track_idx" "$filename" "$title")
+            local resolved_title=$(get_cached_title "$filename")
+            [ -n "$resolved_title" ] && title="$resolved_title"
             mark_track_liked "$filename" "$title"
-            echo -e "${C_PINK}🩷 Liked & Saved to Liked Songs:${C_RESET} ${C_CYAN}${title:-$filename}${C_RESET}"
+            echo -e "${C_PINK}🩷 Liked & Saved to Liked Songs:${C_RESET} ${formatted_track}"
         else
             local cached_title=$(get_cached_title "$target")
             if [ -n "$cached_title" ]; then
                 mark_track_liked "$target" "$cached_title"
-                echo -e "${C_PINK}🩷 Liked & Saved to Liked Songs:${C_RESET} ${C_CYAN}${cached_title}${C_RESET}"
+                local formatted_track=$(format_track_log "?" "$target" "$cached_title")
+                echo -e "${C_PINK}🩷 Liked & Saved to Liked Songs:${C_RESET} ${formatted_track}"
             else
                 echo -e "${C_PINK}🔍🤷 No track matching [${C_ORANGE}${target}${C_PINK}] found to like.${C_RESET}"
             fi
@@ -267,19 +290,28 @@ cmd_like() {
 }
 
 cmd_unlike() {
+    load_cache_to_memory
+    load_liked_tracks_to_memory
+    load_disliked_tracks_to_memory
     local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
 
     if [ "$#" -eq 0 ] || [ -z "$1" ]; then
+        local curr_pos=$(echo '{ "command": ["get_property", "playlist-pos"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // "-1"' | head -n 1)
         local item_json=$(echo "$track_info" | jq -s -c 'map(select(.event == null)) | .[0].data[] | select(.current) // empty' 2>/dev/null)
         local filename=$(echo "$item_json" | jq -r '.filename // ""')
         local title=$(echo "$item_json" | jq -r '.title // ""')
+        local curr_idx="?"
+        [ "$curr_pos" != "-1" ] && [ -n "$curr_pos" ] && curr_idx=$((curr_pos + 1))
+
         if [ -n "$filename" ] && is_liked_track "$filename"; then
             unmark_track_liked "$filename"
-            echo -e "${C_GRAY}🤍 Removed from Liked Songs:${C_RESET} ${C_CYAN}${title:-$filename}${C_RESET}"
+            local formatted_track=$(format_track_log "$curr_idx" "$filename" "$title")
+            echo -e "${C_GRAY}🤍 Removed from Liked Songs:${C_RESET} ${formatted_track}"
             return 0
         elif [ -n "$filename" ] && is_disliked_track "$filename"; then
             unmark_track_disliked "$filename"
-            echo -e "${C_GREEN}🤍 Removed from Dislike List & Whitelisted:${C_RESET} ${C_CYAN}${title:-$filename}${C_RESET}"
+            local formatted_track=$(format_track_log "$curr_idx" "$filename" "$title")
+            echo -e "${C_GREEN}🤍 Removed from Dislike List & Whitelisted:${C_RESET} ${formatted_track}"
             return 0
         else
             cmd_liked_list
@@ -291,24 +323,33 @@ cmd_unlike() {
         [ -z "$target" ] && continue
         local filename=""
         local title=""
+        local track_idx="?"
         if [[ "$target" =~ ^[0-9]+$ ]]; then
+            track_idx="$target"
             local idx=$((target - 1))
             local item_json=$(echo "$track_info" | jq -s -c "map(select(.event == null)) | .[0].data[$idx] // empty" 2>/dev/null)
             filename=$(echo "$item_json" | jq -r '.filename // ""')
             title=$(echo "$item_json" | jq -r '.title // ""')
+            if [ -z "$filename" ] && [ -f "$LAST_PLAYLIST_FILE" ]; then
+                filename=$(sed -n "${target}p" "$LAST_PLAYLIST_FILE" 2>/dev/null)
+            fi
         elif [[ "$target" =~ ^http ]]; then
             filename="$target"
             title="$target"
+            local found_idx=$(echo "$track_info" | jq -s -r --arg fn "$filename" 'map(select(.event == null)) | .[0].data | to_entries[] | select(.value.filename == $fn) | .key + 1' 2>/dev/null | head -n 1)
+            [ -n "$found_idx" ] && [ "$found_idx" != "null" ] && track_idx="$found_idx"
         else
             # Search by text in playlist
-            local item_json=$(echo "$track_info" | jq -s -c --arg query "$target" '
+            local found_entry=$(echo "$track_info" | jq -s -c --arg query "$target" '
                 map(select(.event == null)) |
-                .[0].data[] | 
-                select((((.title? // "") | ascii_downcase) | contains($query | ascii_downcase)) or (((.filename? // "") | ascii_downcase) | contains($query | ascii_downcase)))
+                .[0].data | to_entries[] | 
+                select((((.value.title? // "") | ascii_downcase) | contains($query | ascii_downcase)) or (((.value.filename? // "") | ascii_downcase) | contains($query | ascii_downcase)))
             ' 2>/dev/null | head -n 1)
-            filename=$(echo "$item_json" | jq -r '.filename // ""')
-            title=$(echo "$item_json" | jq -r '.title // ""')
-            if [ -z "$filename" ]; then
+            if [ -n "$found_entry" ]; then
+                track_idx=$(echo "$found_entry" | jq -r '.key + 1')
+                filename=$(echo "$found_entry" | jq -r '.value.filename // ""')
+                title=$(echo "$found_entry" | jq -r '.value.title // ""')
+            else
                 filename="$target"
                 title="$target"
             fi
@@ -323,12 +364,13 @@ cmd_unlike() {
             unmark_track_liked "$filename"
             unmark_track_disliked "$filename"
 
+            local formatted_track=$(format_track_log "$track_idx" "$filename" "$title")
             if [ "$was_liked" = true ]; then
-                echo -e "${C_GRAY}🤍 Removed from Liked Songs:${C_RESET} ${C_CYAN}${title:-$filename}${C_RESET}"
+                echo -e "${C_GRAY}🤍 Removed from Liked Songs:${C_RESET} ${formatted_track}"
             elif [ "$was_disliked" = true ]; then
-                echo -e "${C_GREEN}🤍 Removed from Dislike List & Whitelisted:${C_RESET} ${C_CYAN}${title:-$filename}${C_RESET}"
+                echo -e "${C_GREEN}🤍 Removed from Dislike List & Whitelisted:${C_RESET} ${formatted_track}"
             else
-                echo -e "${C_GRAY}🤍 Cleared reaction for:${C_RESET} ${C_CYAN}${title:-$filename}${C_RESET}"
+                echo -e "${C_GRAY}🤍 Cleared reaction for:${C_RESET} ${formatted_track}"
             fi
         fi
     done
@@ -609,10 +651,13 @@ cmd_liked_list() {
 }
 
 cmd_dislike() {
+    load_cache_to_memory
+    load_disliked_tracks_to_memory
     local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
 
     if [ "$#" -eq 0 ] || [ -z "$1" ]; then
         # Default: current playing track
+        local curr_pos=$(echo '{ "command": ["get_property", "playlist-pos"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // "-1"' | head -n 1)
         local item_json=$(echo "$track_info" | jq -s -c 'map(select(.event == null)) | .[0].data[] | select(.current) // empty' 2>/dev/null)
         local filename=$(echo "$item_json" | jq -r '.filename // ""')
         local title=$(echo "$item_json" | jq -r '.title // ""')
@@ -620,8 +665,14 @@ cmd_dislike() {
             echo -e "${C_PINK}🔇 No track currently playing to dislike.${C_RESET}"
             return 1
         fi
+        local curr_idx="?"
+        [ "$curr_pos" != "-1" ] && [ -n "$curr_pos" ] && curr_idx=$((curr_pos + 1))
+
+        local formatted_track=$(format_track_log "$curr_idx" "$filename" "$title")
+        local resolved_title=$(get_cached_title "$filename")
+        [ -n "$resolved_title" ] && title="$resolved_title"
         mark_track_disliked "$filename" "$title"
-        echo -e "${C_PINK}💔 Disliked & Blacklisted from Auto Mode:${C_RESET} ${C_CYAN}${title:-$filename}${C_RESET}"
+        echo -e "${C_PINK}💔 Disliked & Blacklisted from Auto Mode:${C_RESET} ${formatted_track}"
         return 0
     fi
 
@@ -629,33 +680,47 @@ cmd_dislike() {
         [ -z "$target" ] && continue
         local filename=""
         local title=""
+        local track_idx="?"
         if [[ "$target" =~ ^[0-9]+$ ]]; then
+            track_idx="$target"
             local idx=$((target - 1))
             local item_json=$(echo "$track_info" | jq -s -c "map(select(.event == null)) | .[0].data[$idx] // empty" 2>/dev/null)
             filename=$(echo "$item_json" | jq -r '.filename // ""')
             title=$(echo "$item_json" | jq -r '.title // ""')
+            if [ -z "$filename" ] && [ -f "$LAST_PLAYLIST_FILE" ]; then
+                filename=$(sed -n "${target}p" "$LAST_PLAYLIST_FILE" 2>/dev/null)
+            fi
         elif [[ "$target" =~ ^http ]]; then
             filename="$target"
             title="$target"
+            local found_idx=$(echo "$track_info" | jq -s -r --arg fn "$filename" 'map(select(.event == null)) | .[0].data | to_entries[] | select(.value.filename == $fn) | .key + 1' 2>/dev/null | head -n 1)
+            [ -n "$found_idx" ] && [ "$found_idx" != "null" ] && track_idx="$found_idx"
         else
             # Search by text in playlist
-            local item_json=$(echo "$track_info" | jq -s -c --arg query "$target" '
+            local found_entry=$(echo "$track_info" | jq -s -c --arg query "$target" '
                 map(select(.event == null)) |
-                .[0].data[] | 
-                select((((.title? // "") | ascii_downcase) | contains($query | ascii_downcase)) or (((.filename? // "") | ascii_downcase) | contains($query | ascii_downcase)))
+                .[0].data | to_entries[] | 
+                select((((.value.title? // "") | ascii_downcase) | contains($query | ascii_downcase)) or (((.value.filename? // "") | ascii_downcase) | contains($query | ascii_downcase)))
             ' 2>/dev/null | head -n 1)
-            filename=$(echo "$item_json" | jq -r '.filename // ""')
-            title=$(echo "$item_json" | jq -r '.title // ""')
+            if [ -n "$found_entry" ]; then
+                track_idx=$(echo "$found_entry" | jq -r '.key + 1')
+                filename=$(echo "$found_entry" | jq -r '.value.filename // ""')
+                title=$(echo "$found_entry" | jq -r '.value.title // ""')
+            fi
         fi
 
         if [ -n "$filename" ]; then
+            local formatted_track=$(format_track_log "$track_idx" "$filename" "$title")
+            local resolved_title=$(get_cached_title "$filename")
+            [ -n "$resolved_title" ] && title="$resolved_title"
             mark_track_disliked "$filename" "$title"
-            echo -e "${C_PINK}💔 Disliked & Blacklisted from Auto Mode:${C_RESET} ${C_CYAN}${title:-$filename}${C_RESET}"
+            echo -e "${C_PINK}💔 Disliked & Blacklisted from Auto Mode:${C_RESET} ${formatted_track}"
         else
             local cached_title=$(get_cached_title "$target")
             if [ -n "$cached_title" ]; then
                 mark_track_disliked "$target" "$cached_title"
-                echo -e "${C_PINK}💔 Disliked & Blacklisted from Auto Mode:${C_RESET} ${C_CYAN}${cached_title}${C_RESET}"
+                local formatted_track=$(format_track_log "?" "$target" "$cached_title")
+                echo -e "${C_PINK}💔 Disliked & Blacklisted from Auto Mode:${C_RESET} ${formatted_track}"
             else
                 echo -e "${C_PINK}🔍🤷 No track matching [${C_ORANGE}${target}${C_PINK}] found to dislike.${C_RESET}"
             fi
@@ -1232,6 +1297,8 @@ remove_from_auto_blacklist() {
 }
 
 cmd_undislike() {
+    load_cache_to_memory
+    load_disliked_tracks_to_memory
     local bl_file="$HOME/.cache/mpv/auto_blacklist"
     if [ ! -f "$bl_file" ] || [ ! -s "$bl_file" ]; then
         echo -e "${C_PINK}ℹ️ Dislike list is currently empty.${C_RESET}"
@@ -1241,6 +1308,7 @@ cmd_undislike() {
     # If no argument passed:
     if [ "$#" -eq 0 ] || [ -z "$1" ]; then
         local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
+        local curr_pos=$(echo '{ "command": ["get_property", "playlist-pos"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // "-1"' | head -n 1)
         local item_json=$(echo "$track_info" | jq -s -c 'map(select(.event == null)) | .[0].data[] | select(.current) // empty' 2>/dev/null)
         local filename=$(echo "$item_json" | jq -r '.filename // ""')
         local title=$(echo "$item_json" | jq -r '.title // ""')
@@ -1252,7 +1320,10 @@ cmd_undislike() {
         if [ -n "$cur_id" ] && grep -E -q "^${cur_id}([[:blank:]]|$)" "$bl_file" 2>/dev/null; then
             remove_from_auto_blacklist "$cur_id"
             [ -n "$filename" ] && remove_from_auto_blacklist "$filename"
-            echo -e "${C_GREEN}✨ Removed from Dislike List & Whitelisted:${C_RESET} ${C_CYAN}${title:-$cur_id}${C_RESET}"
+            local curr_idx="?"
+            [ "$curr_pos" != "-1" ] && [ -n "$curr_pos" ] && curr_idx=$((curr_pos + 1))
+            local formatted_track=$(format_track_log "$curr_idx" "$filename" "$title")
+            echo -e "${C_GREEN}✨ Removed from Dislike List & Whitelisted:${C_RESET} ${formatted_track}"
             return 0
         else
             cmd_dislike_list
@@ -1265,17 +1336,23 @@ cmd_undislike() {
         local b_id=""
         local b_title=""
         local filename=""
+        local track_idx="?"
 
         if [[ "$target" =~ ^[0-9]+$ ]]; then
+            track_idx="$target"
             local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
             local idx=$((target - 1))
             local item_json=$(echo "$track_info" | jq -s -c "map(select(.event == null)) | .[0].data[$idx] // empty" 2>/dev/null)
             filename=$(echo "$item_json" | jq -r '.filename // ""')
             b_title=$(echo "$item_json" | jq -r '.title // ""')
+            if [ -z "$filename" ] && [ -f "$LAST_PLAYLIST_FILE" ]; then
+                filename=$(sed -n "${target}p" "$LAST_PLAYLIST_FILE" 2>/dev/null)
+            fi
             [[ "$filename" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && b_id="${BASH_REMATCH[2]}"
             [ -z "$b_id" ] && b_id="$filename"
         elif [[ "$target" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]]; then
             b_id="${BASH_REMATCH[2]}"
+            filename="$target"
         elif [[ "$target" =~ ^[a-zA-Z0-9_-]{11}$ ]]; then
             b_id="$target"
         else
@@ -1292,7 +1369,8 @@ cmd_undislike() {
             fi
             remove_from_auto_blacklist "$b_id"
             [ -n "$filename" ] && remove_from_auto_blacklist "$filename"
-            echo -e "${C_GREEN}✨ Removed from Dislike List & Whitelisted:${C_RESET} ${C_CYAN}${b_title:-$b_id}${C_RESET}"
+            local formatted_track=$(format_track_log "$track_idx" "${filename:-$b_id}" "$b_title")
+            echo -e "${C_GREEN}✨ Removed from Dislike List & Whitelisted:${C_RESET} ${formatted_track}"
         else
             echo -e "${C_PINK}🔍🤷 Track [${C_ORANGE}${target}${C_PINK}] not found in dislike blacklist.${C_RESET}"
         fi
