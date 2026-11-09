@@ -1,7 +1,195 @@
+format_res_friendly() {
+    local saved_res="$1"
+    local hw_display="${2:-4K UHD}"
+    case "$saved_res" in
+        low|720|720p) echo "Low (720p HD)" ;;
+        mid|1080|1080p) echo "Mid (1080p Full HD)" ;;
+        high|1440|1440p|2k) echo "High (1440p 2K QHD)" ;;
+        max) echo "Max (Ceiling: ${hw_display})" ;;
+        4k|2160) echo "4K UHD" ;;
+        8k|4320) echo "8K UHD (Uncapped)" ;;
+        480) echo "480p SD" ;;
+        360) echo "360p Low" ;;
+        auto) echo "Auto (Smart Dynamic up to ${hw_display})" ;;
+        *) echo "$saved_res" ;;
+    esac
+}
+
+print_stream_and_engine_info() {
+    local sock="${1:-$SOCKET}"
+    local is_blind="${2:-false}"
+    
+    if [ ! -S "$sock" ] || ! (echo '{"command":["get_property","idle-active"]}' | nc ${NC_OPTS:--U} -w 1 "$sock" >/dev/null 2>&1); then
+        return
+    fi
+
+    local mpv_batch
+    mpv_batch=$(echo -e '{"command":["get_property","file-format"]}\n{"command":["get_property","audio-codec-name"]}\n{"command":["get_property","audio-bitrate"]}\n{"command":["get_property","audio-params"]}\n{"command":["get_property","video-params"]}\n{"command":["get_property","track-list"]}\n{"command":["get_property","speed"]}\n{"command":["get_property","loop-file"]}\n{"command":["get_property","loop-playlist"]}\n{"command":["get_property","shuffle"]}\n{"command":["get_property","vid"]}\n{"command":["get_property","af"]}\n{"command":["get_property","pause"]}' | nc ${NC_OPTS:--U} -w 1 "$sock" 2>/dev/null)
+    
+    local parsed_props
+    parsed_props=$(echo "$mpv_batch" | jq -s -r '
+        map(select(.event == null)) |
+        [
+          (.[0].data // "N/A"),
+          (.[1].data // "N/A"),
+          (.[2].data // "N/A"),
+          (.[3].data.samplerate // 48000),
+          (.[3].data.channels // "stereo"),
+          (.[4].data.w // "N/A"),
+          (.[4].data.h // "N/A"),
+          ([.[5].data[]? | select(.type=="video" and .selected==true) | .["demux-fps"]][0] // "N/A"),
+          ([.[5].data[]? | select(.type=="video" and .selected==true) | .codec][0] // "N/A"),
+          (.[6].data // 1.0),
+          (.[7].data // false),
+          (.[8].data // false),
+          (.[9].data // false),
+          (.[10].data // false),
+          ((.[11].data // []) | length),
+          (.[12].data // false)
+        ] | @tsv
+    ' 2>/dev/null)
+    
+    [ -z "$parsed_props" ] && return
+
+    local fmt acodec abitrate asamplerate achannels vw vh vfps vcodec speed loop_f loop_pl shuf vid af_count paused
+    IFS=$'\t' read -r fmt acodec abitrate asamplerate achannels vw vh vfps vcodec speed loop_f loop_pl shuf vid af_count paused <<< "$parsed_props"
+
+    # Format Bitrate
+    if [ "$abitrate" != "N/A" ] && [[ "$abitrate" =~ ^[0-9]+$ ]]; then
+        abitrate="$((abitrate / 1000)) kbps"
+    else
+        abitrate=""
+    fi
+
+    # Format FPS
+    if [[ "$vfps" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+        printf -v vfps "%.0f" "$vfps"
+        vfps="${vfps} FPS"
+    fi
+
+    # Format Speed
+    local speed_fmt="1.00x"
+    if [[ "$speed" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+        speed_fmt=$(printf "%.2fx" "$speed")
+    fi
+
+    # Hardware Ceiling & Saved Resolution Profile
+    local hw_ceil
+    hw_ceil=$(get_hardware_ceiling)
+    local hw_display="4K UHD"
+    [ "$hw_ceil" == "8k" ] && hw_display="8K UHD (Uncapped)"
+    [ "$hw_ceil" == "high" ] && hw_display="1440p 2K QHD"
+    [ "$hw_ceil" == "mid" ] && hw_display="1080p Full HD"
+
+    local saved_res
+    saved_res=$(get_active_saved_res "$sock")
+    local res_friendly
+    res_friendly=$(format_res_friendly "$saved_res" "$hw_display")
+
+    # Determine Engine Badge
+    local engine_badge=""
+    if [ "$IS_WSL" = true ]; then
+        if [ "$(get_queue_mode)" == "hybrid" ]; then
+            engine_badge="${C_ORANGE}Hybrid Boost Mode ⚡${C_GRAY} (120+ FPS Direct3D Host)${C_RESET}"
+        else
+            engine_badge="${C_CYAN}Standalone WSL Mode 🐧${C_GRAY} (60 FPS Mesa D3D12)${C_RESET}"
+        fi
+    elif [ "$IS_MACOS" = true ]; then
+        engine_badge="${C_GREEN}Native macOS 🍏${C_GRAY} (Metal / Cocoa)${C_RESET}"
+    elif [ "$IS_ANDROID" = true ]; then
+        if [ "$(get_queue_mode)" == "hybrid" ]; then
+            engine_badge="${C_ORANGE}Android Hybrid Engine 🤖⚡${C_GRAY} (MPV App + Audio Tunnel)${C_RESET}"
+        else
+            engine_badge="${C_CYAN}Standalone Termux 🐧${C_GRAY} (Headless Audio + Wake-Lock)${C_RESET}"
+        fi
+    else
+        engine_badge="${C_GREEN}Native Linux 🐧${C_GRAY} (Mesa / DRM GPU)${C_RESET}"
+    fi
+
+    # Video Mode Details
+    local video_line=""
+    local mode_line=""
+    local has_video=false
+    if [ "$vid" != "false" ] && [ "$vid" != "no" ] && [ "$vw" != "N/A" ] && [ -n "$vw" ]; then
+        has_video=true
+    fi
+
+    if [ "$has_video" = true ]; then
+        local vid_details="${vw}x${vh}"
+        [ "$vfps" != "N/A" ] && vid_details="${vid_details} @ ${vfps}"
+        [ "$vcodec" != "N/A" ] && vid_details="${vid_details} (${vcodec})"
+        video_line="${C_WHITE}${vid_details}${C_RESET}"
+        if is_video_window_open || [ "$is_blind" == "true" ]; then
+            mode_line="${C_GREEN}Desktop Video Window Active 📺${C_RESET}"
+        else
+            mode_line="${C_CYAN}Video Stream Demuxed 📺${C_GRAY} (Run 'q -vid' to display window)${C_RESET}"
+        fi
+    else
+        video_line="${C_GRAY}Audio Only 🎧 (Bandwidth saving active - 0 video bytes)${C_RESET}"
+        mode_line="${C_PINK}Pure Audio Pipeline 🎧${C_GRAY} (~98% bandwidth reduction)${C_RESET}"
+    fi
+
+    # Audio Stream Line
+    local audio_details="${acodec}"
+    [ "$asamplerate" != "N/A" ] && audio_details="${audio_details} @ ${asamplerate} Hz"
+    local extra_aud=""
+    [ -n "$abitrate" ] && extra_aud="${abitrate}"
+    if [ "$achannels" != "N/A" ] && [ -n "$achannels" ]; then
+        [ -n "$extra_aud" ] && extra_aud="${extra_aud}, ${achannels}" || extra_aud="${achannels}"
+    fi
+    [ -n "$extra_aud" ] && audio_details="${audio_details} (${extra_aud})"
+
+    # Audio FX
+    local fx_badge="${C_GRAY}Off / Flat${C_RESET}"
+    if [[ "$af_count" =~ ^[0-9]+$ ]] && [ "$af_count" -gt 0 ]; then
+        fx_badge="${C_GREEN}Dolby Dynamic EQ Active 🎛️${C_RESET}"
+    fi
+
+    # Section 1: Real-Time Stream Quality
+    echo -e "${C_PURPLE}├${H_LINE:2}┤${C_RESET}"
+    print_boxed_line "${C_PINK}🎵 Real-Time Stream Quality${C_RESET}"
+    print_boxed_line "${C_TEAL}Video Stream: ${video_line}"
+    print_boxed_line "${C_TEAL}Audio Stream: ${C_WHITE}${audio_details}${C_RESET}"
+    [ "$fmt" != "N/A" ] && print_boxed_line "${C_TEAL}Container:    ${C_WHITE}${fmt}${C_RESET}"
+
+    # Section 2: Active Engine & Queue Settings
+    echo -e "${C_PURPLE}├${H_LINE:2}┤${C_RESET}"
+    print_boxed_line "${C_PINK}⚙️ Active Queue & Engine Settings${C_RESET}"
+    print_boxed_line "${C_TEAL}Engine:       $engine_badge"
+    print_boxed_line "${C_TEAL}Mode:         $mode_line"
+    print_boxed_line "${C_TEAL}Profile:      ${C_WHITE}${res_friendly}${C_RESET} ${C_GRAY}• Ceiling: ${hw_display}${C_RESET}"
+    print_boxed_line "${C_TEAL}Playback:     ${C_WHITE}Speed: ${speed_fmt}${C_RESET} ${C_GRAY}• Audio FX: ${fx_badge}${C_RESET}"
+
+    if [ "$is_blind" == "true" ]; then
+        print_boxed_line "${C_TEAL}Session:      ${C_PINK}🕶️ Isolated Playback${C_RESET} ${C_GRAY}(Zero queue or history modification)${C_RESET}"
+    else
+        local loop_badge="${C_GRAY}Loop: Off${C_RESET}"
+        if [ "$loop_f" != "false" ] && [ "$loop_f" != "no" ] && [ "$loop_f" != "0" ]; then
+            loop_badge="${C_GREEN}Track Loop 🔂${C_RESET}"
+        elif [ "$loop_pl" != "false" ] && [ "$loop_pl" != "no" ] && [ "$loop_pl" != "0" ]; then
+            loop_badge="${C_GREEN}Queue Loop 🔁${C_RESET}"
+        fi
+
+        local shuf_badge="${C_GRAY}Shuffle: Off${C_RESET}"
+        if [ "$shuf" == "true" ]; then
+            shuf_badge="${C_GREEN}Shuffle: On 🔀${C_RESET}"
+        fi
+
+        local auto_badge="${C_GRAY}Auto-Discovery: Off${C_RESET}"
+        if [ -f "$HOME/.cache/mpv/auto_enabled" ]; then
+            auto_badge="${C_GREEN}Auto-Discovery: On 🤖${C_RESET}"
+        fi
+
+        print_boxed_line "${C_TEAL}States:       ${loop_badge} ${C_GRAY}•${C_RESET} ${shuf_badge} ${C_GRAY}•${C_RESET} ${auto_badge}"
+    fi
+}
+
 fetch_and_display_url_info() {
     local input="$1"
     local force_title="$2" # Optional override title (e.g. from playlist)
     local is_current="$3"
+    local target_socket="${4:-$SOCKET}"
+    local is_blind="${5:-false}"
     
     echo -e "${C_PINK}🎵 Fetching Remote Metadata...${C_RESET}"
     
@@ -22,13 +210,23 @@ fetch_and_display_url_info() {
 
     # Queue Check
     local queue_status="Not in queue"
-    local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
-    local queue_idx=$(echo "$track_info" | jq -s -r --arg term "$search_term" \
-        'map(select(.event == null)) | .[0].data | select(type == "array") | to_entries | .[] | 
-        select((.value.filename | contains($term))) | 
-        .key + 1
-    ' 2>/dev/null | head -n 1)
-    [ -n "$queue_idx" ] && [ "$queue_idx" != "null" ] && queue_status="Queued at #$queue_idx"
+    local queue_display=""
+    if [ "$is_blind" == "true" ]; then
+        queue_display="${C_PINK}🕶️ Isolated Session${C_RESET} ${C_GRAY}(Zero queue or history modification)${C_RESET}"
+    else
+        local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
+        local queue_idx=$(echo "$track_info" | jq -s -r --arg term "$search_term" \
+            'map(select(.event == null)) | .[0].data | select(type == "array") | to_entries | .[] | 
+            select((.value.filename | contains($term))) | 
+            .key + 1
+        ' 2>/dev/null | head -n 1)
+        [ -n "$queue_idx" ] && [ "$queue_idx" != "null" ] && queue_status="Queued at #$queue_idx"
+        queue_display="${C_ORANGE}${queue_status}${C_RESET}"
+        if [[ "$queue_status" == *"Queued at"* ]]; then
+            local idx=$(echo "$queue_status" | grep -oP '\d+')
+            queue_display="${C_TEAL}Queued at ${C_WHITE}[${C_ORANGE}${idx}${C_WHITE}]${C_RESET}"
+        fi
+    fi
     
     # Fetch Metadata (Robustly)
     local opts=("--extractor-args" "youtube:player_client=visionos,android,web" "--dump-json" "--no-warnings" "--skip-download" "--ignore-errors" "--flat-playlist")
@@ -38,37 +236,61 @@ fetch_and_display_url_info() {
     if [ -z "$json_dump" ]; then
         if [ -n "$force_title" ] || [ "$is_current" == "true" ]; then
             local display_t="${force_title:-$clean_url}"
-            local queue_display="${C_ORANGE}${queue_status}${C_RESET}"
-            if [[ "$queue_status" == *"Queued at"* ]]; then
-                local idx=$(echo "$queue_status" | grep -oP '\d+')
-                queue_display="${C_TEAL}Queued at ${C_WHITE}[${C_ORANGE}${idx}${C_WHITE}]${C_RESET}"
-            fi
 
-            print_header_box "${C_PINK}🪷 Track Metadata${C_RESET}"
+            local h_box_title="${C_PINK}🪷 Track Metadata${C_RESET}"
+            [ "$is_blind" == "true" ] && h_box_title="${C_PINK}🕶️ Queue Blind Mode (One-Time Isolated Playback)${C_RESET}"
+            print_header_box "$h_box_title"
             print_boxed_line "${C_TEAL}Title:    ${C_CYAN}${display_t:0:$((INNER_WIDTH-12))}${C_RESET}"
             print_boxed_line "${C_TEAL}Source:   ${C_VIOLET}${clean_url:0:$((INNER_WIDTH-12))}${C_RESET}"
-            print_boxed_line "${C_TEAL}Queue:    ${queue_display}"
+            if [ "$is_blind" == "true" ]; then
+                print_boxed_line "${C_TEAL}Session:  ${queue_display}"
+            else
+                print_boxed_line "${C_TEAL}Queue:    ${queue_display}"
+            fi
             print_boxed_line "${C_GRAY}(Remote details restricted by YouTube bot protection)${C_RESET}"
             
             if [ "$is_current" == "true" ]; then
-                local mpv_extended=$(echo -e '{"command":["get_property","file-format"]}\n{"command":["get_property","audio-codec"]}\n{"command":["get_property","audio-params/samplerate"]}\n{"command":["get_property","duration"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | (.[0].data // "N/A"), (.[1].data // "N/A"), (.[2].data // "N/A"), (.[3].data // "N/A")')
-                mapfile -t ext_props <<< "$mpv_extended"
-                local fmt="${ext_props[0]}" codec="${ext_props[1]}" rate="${ext_props[2]}" dur="${ext_props[3]}"
-                
-                if [ "$dur" != "N/A" ] && [[ "$dur" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-                    dur=$(printf "%d:%02d" "$((${dur%.*} / 60))" "$((${dur%.*} % 60))")
-                fi
-
-                echo -e "${C_PURPLE}├${H_LINE:2}┤${C_RESET}"
-                print_boxed_line "${C_PINK}🎵 Current Playback Quality${C_RESET}"
-                print_boxed_line "${C_TEAL}Format:   ${C_WHITE}$fmt${C_RESET}"
-                print_boxed_line "${C_TEAL}Codec:    ${C_WHITE}$codec${C_RESET}"
-                print_boxed_line "${C_TEAL}Rate:     ${C_WHITE}${rate} Hz${C_RESET}"
-                print_boxed_line "${C_TEAL}Duration: ${C_WHITE}$dur${C_RESET}"
+                print_stream_and_engine_info "$target_socket" "$is_blind"
             fi
             printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
             B_LINE=${B_LINE// /─}
-            echo -e "${C_GRAY}${B_LINE}${C_RESET}"
+            echo -e "${C_PURPLE}${B_LINE}${C_RESET}"
+
+            if [ -t 0 ] && [ -t 1 ]; then
+                echo -ne "${C_PINK}>>> Press 'l' to like/unlike, 'x' to dislike, 'd' to download, 'v' for video, 'a' for audio, 'r' for quality, or ENTER to return: ${C_RESET}"
+                read -r -n 1 user_key < /dev/tty 2>/dev/null || read -r -n 1 user_key
+                echo ""
+                if [[ "$user_key" =~ ^[lL]$ ]]; then
+                    if is_liked_track "$clean_url" "$video_id"; then
+                        cmd_unlike "$clean_url"
+                    else
+                        cmd_like "$clean_url"
+                    fi
+                elif [[ "$user_key" =~ ^[dD]$ ]]; then
+                    cmd_download "$clean_url"
+                elif [[ "$user_key" =~ ^[xX]$ ]]; then
+                    if is_disliked_track "$clean_url" "$video_id"; then
+                        cmd_undislike "$clean_url"
+                    else
+                        cmd_dislike "$clean_url"
+                    fi
+                elif [[ "$user_key" =~ ^[vV]$ ]]; then
+                    if [ "$is_blind" == "true" ]; then
+                        echo '{"command":["cycle","video"]}' | nc ${NC_OPTS:--U} -w 1 "$target_socket" >/dev/null 2>&1
+                        echo -e "${C_CYAN}📺 Toggled video stream in Blind Mode session.${C_RESET}"
+                    else
+                        cmd_video_toggle ""
+                    fi
+                elif [[ "$user_key" =~ ^[aA]$ ]]; then
+                    if [ "$is_blind" == "true" ]; then
+                        cmd_language -pb
+                    else
+                        cmd_language ""
+                    fi
+                elif [[ "$user_key" =~ ^[rR]$ ]]; then
+                    cmd_resolution ""
+                fi
+            fi
             return
         else
             echo -e "${C_PINK}🙈 Failed to fetch info... the internet might be playing hide and seek!${C_RESET}"
@@ -141,13 +363,17 @@ fetch_and_display_url_info() {
         fi
 
         # Format Queue Status
-        local queue_display="${C_ORANGE}${queue_status}${C_RESET}"
-        if [[ "$queue_status" == *"Queued at"* ]]; then
-            local idx=$(echo "$queue_status" | grep -oP '\d+')
-            queue_display="${C_TEAL}Queued at ${C_WHITE}[${C_ORANGE}${idx}${C_WHITE}]${C_RESET}"
+        if [ "$is_blind" != "true" ]; then
+            queue_display="${C_ORANGE}${queue_status}${C_RESET}"
+            if [[ "$queue_status" == *"Queued at"* ]]; then
+                local idx=$(echo "$queue_status" | grep -oP '\d+')
+                queue_display="${C_TEAL}Queued at ${C_WHITE}[${C_ORANGE}${idx}${C_WHITE}]${C_RESET}"
+            fi
         fi
         
-        print_header_box "${C_PINK}🪷 Track Metadata${C_RESET}"
+        local h_box_title="${C_PINK}🪷 Track Metadata${C_RESET}"
+        [ "$is_blind" == "true" ] && h_box_title="${C_PINK}🕶️ Queue Blind Mode (One-Time Isolated Playback)${C_RESET}"
+        print_header_box "$h_box_title"
         print_boxed_line "${C_TEAL}Title:    ${C_CYAN}${title:0:$((INNER_WIDTH-12))}${C_RESET}"
         print_boxed_line "${C_TEAL}Artist:   ${C_LIGHT_PINK}${artist}${C_RESET}"
         print_boxed_line "${C_TEAL}Duration: ${C_ORANGE}${dur}${C_RESET}"
@@ -207,7 +433,7 @@ fetch_and_display_url_info() {
         fi
 
         if [ "$is_current" == "true" ]; then
-            local is_paused=$(echo '{ "command": ["get_property", "pause"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // false')
+            local is_paused=$(echo '{ "command": ["get_property", "pause"] }' | nc ${NC_OPTS:--U} -w 1 "$target_socket" 2>/dev/null | jq -r '.data // false')
             if [ "$is_paused" == "true" ]; then
                 print_boxed_line "${C_TEAL}Status:   ${C_YELLOW}⏸ Paused${C_RESET} (${queue_display})${pref_badge}"
             else
@@ -221,20 +447,7 @@ fetch_and_display_url_info() {
         fi
         
         if [ "$is_current" == "true" ]; then
-            local mpv_props=$(echo -e '{"command":["get_property","file-format"]}\n{"command":["get_property","audio-codec-name"]}\n{"command":["get_property","audio-bitrate"]}\n{"command":["get_property","audio-params/samplerate"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | (.[0].data // "N/A"), (.[1].data // "N/A"), (.[2].data // "N/A"), (.[3].data // "N/A")')
-            mapfile -t props <<< "$mpv_props"
-            local fmt="${props[0]}" codec="${props[1]}" bitrate="${props[2]}" rate="${props[3]}"
-            
-            if [ "$bitrate" != "N/A" ] && [[ "$bitrate" =~ ^[0-9]+$ ]]; then
-                bitrate="$((bitrate / 1000)) kbps"
-            fi
-            
-            echo -e "${C_PURPLE}├${H_LINE:2}┤${C_RESET}"
-            print_boxed_line "${C_PINK}🎵 Current Playback Quality${C_RESET}"
-            print_boxed_line "${C_TEAL}Format:   ${C_WHITE}$fmt${C_RESET}"
-            print_boxed_line "${C_TEAL}Codec:    ${C_WHITE}$codec${C_RESET}"
-            print_boxed_line "${C_TEAL}Bitrate:  ${C_WHITE}$bitrate${C_RESET}"
-            print_boxed_line "${C_TEAL}Rate:     ${C_WHITE}${rate} Hz${C_RESET}"
+            print_stream_and_engine_info "$target_socket" "$is_blind"
         fi
         
         printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
@@ -242,7 +455,7 @@ fetch_and_display_url_info() {
         echo -e "${C_PURPLE}${B_LINE}${C_RESET}"
 
         if [ -t 0 ] && [ -t 1 ]; then
-            echo -ne "${C_PINK}>>> Press 'l' to like/unlike, 'x' to dislike/undislike, 'd' to download, 'v' for video, 'a' for audio, or ENTER to return: ${C_RESET}"
+            echo -ne "${C_PINK}>>> Press 'l' to like/unlike, 'x' to dislike, 'd' to download, 'v' for video, 'a' for audio, 'r' for quality, or ENTER to return: ${C_RESET}"
             read -r -n 1 user_key < /dev/tty 2>/dev/null || read -r -n 1 user_key
             echo ""
             if [[ "$user_key" =~ ^[lL]$ ]]; then
@@ -260,9 +473,20 @@ fetch_and_display_url_info() {
                     cmd_dislike "$clean_url"
                 fi
             elif [[ "$user_key" =~ ^[vV]$ ]]; then
-                cmd_video_toggle "$index"
+                if [ "$is_blind" == "true" ]; then
+                    echo '{"command":["cycle","video"]}' | nc ${NC_OPTS:--U} -w 1 "$target_socket" >/dev/null 2>&1
+                    echo -e "${C_CYAN}📺 Toggled video stream in Blind Mode session.${C_RESET}"
+                else
+                    cmd_video_toggle ""
+                fi
             elif [[ "$user_key" =~ ^[aA]$ ]]; then
-                cmd_language ""
+                if [ "$is_blind" == "true" ]; then
+                    cmd_language -pb
+                else
+                    cmd_language ""
+                fi
+            elif [[ "$user_key" =~ ^[rR]$ ]]; then
+                cmd_resolution ""
             fi
         fi
     fi
@@ -650,11 +874,89 @@ cmd_info() {
     
     # CASE 1: Input is a URL (Direct)
     if [[ "$input" =~ ^http.* ]]; then
-        fetch_and_display_url_info "$input"
+        fetch_and_display_url_info "$input" "" "false" "$SOCKET" "false"
         return
     fi
 
-    # CASE 2: Playlist Index (or Current)
+    # Probe Blind Mode Session
+    local blind_socket="$HOME/.cache/mpv/blind.sock"
+    local is_blind_running=false
+    local blind_path=""
+    local blind_title=""
+
+    if [ -f "$HOME/.cache/mpv/blind_active" ]; then
+        local rec_sock
+        rec_sock=$(grep -m1 '^socket=' "$HOME/.cache/mpv/blind_active" 2>/dev/null | cut -d= -f2-)
+        [ -n "$rec_sock" ] && blind_socket="$rec_sock"
+        if [ -S "$blind_socket" ] && echo '{"command":["get_property","idle-active"]}' | nc ${NC_OPTS:--U} -w 1 "$blind_socket" >/dev/null 2>&1; then
+            is_blind_running=true
+            blind_path=$(grep -m1 '^path=' "$HOME/.cache/mpv/blind_active" 2>/dev/null | cut -d= -f2-)
+            blind_title=$(grep -m1 '^title=' "$HOME/.cache/mpv/blind_active" 2>/dev/null | cut -d= -f2-)
+        elif pgrep -f "Queue \[Blind Mode\]" >/dev/null 2>&1 || pgrep -f "mpv-blind-pipe" >/dev/null 2>&1; then
+            is_blind_running=true
+            blind_path=$(grep -m1 '^path=' "$HOME/.cache/mpv/blind_active" 2>/dev/null | cut -d= -f2-)
+            blind_title=$(grep -m1 '^title=' "$HOME/.cache/mpv/blind_active" 2>/dev/null | cut -d= -f2-)
+        else
+            rm -f "$HOME/.cache/mpv/blind_active" 2>/dev/null
+        fi
+    fi
+
+    # CASE 2: No argument given and Blind Mode is actively running -> Inspect Blind Mode!
+    if [ -z "$input" ] && [ "$is_blind_running" = true ]; then
+        if [ -z "$blind_path" ] && [ -S "$blind_socket" ]; then
+            blind_path=$(echo '{"command":["get_property","path"]}' | nc ${NC_OPTS:--U} -w 1 "$blind_socket" 2>/dev/null | jq -r '.data // ""')
+        fi
+        if [ -z "$blind_title" ] && [ -S "$blind_socket" ]; then
+            blind_title=$(echo '{"command":["get_property","media-title"]}' | nc ${NC_OPTS:--U} -w 1 "$blind_socket" 2>/dev/null | jq -r '.data // ""')
+        fi
+        [ -z "$blind_title" ] && blind_title="$blind_path"
+
+        if [[ "$blind_path" =~ ^http.* ]]; then
+            fetch_and_display_url_info "$blind_path" "$blind_title" "true" "$blind_socket" "true"
+            return
+        fi
+
+        # Local Blind Track
+        print_header_box "${C_PINK}🕶️ Queue Blind Mode (One-Time Isolated Playback)${C_RESET}"
+        print_boxed_line "${C_TEAL}Title:       ${C_CYAN}${blind_title:0:$((INNER_WIDTH-15))}${C_RESET}"
+        print_boxed_line "${C_TEAL}Source Path: ${C_VIOLET}${blind_path:0:$((INNER_WIDTH-15))}${C_RESET}"
+        
+        local b_paused=$(echo '{"command":["get_property","pause"]}' | nc ${NC_OPTS:--U} -w 1 "$blind_socket" 2>/dev/null | jq -r '.data // false')
+        if [ "$b_paused" == "true" ]; then
+            print_boxed_line "${C_TEAL}Status:      ${C_YELLOW}⏸ Paused${C_RESET} ${C_GRAY}(Isolated Session)${C_RESET}"
+        else
+            print_boxed_line "${C_TEAL}Status:      ${C_PURPLE}▶ Playing${C_RESET} ${C_GRAY}(Isolated Session)${C_RESET}"
+        fi
+
+        print_stream_and_engine_info "$blind_socket" "true"
+
+        printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
+        B_LINE=${B_LINE// /─}
+        echo -e "${C_PURPLE}${B_LINE}${C_RESET}"
+
+        if [ -t 0 ] && [ -t 1 ]; then
+            echo -ne "${C_PINK}>>> Press 'l' to like, 'x' to dislike, 'd' to download, 'v' for video, 'a' for audio, 'r' for quality, or ENTER to return: ${C_RESET}"
+            read -r -n 1 user_key < /dev/tty 2>/dev/null || read -r -n 1 user_key
+            echo ""
+            if [[ "$user_key" =~ ^[lL]$ ]]; then
+                cmd_like "$blind_path"
+            elif [[ "$user_key" =~ ^[xX]$ ]]; then
+                cmd_dislike "$blind_path"
+            elif [[ "$user_key" =~ ^[dD]$ ]]; then
+                cmd_download "$blind_path"
+            elif [[ "$user_key" =~ ^[vV]$ ]]; then
+                echo '{"command":["cycle","video"]}' | nc ${NC_OPTS:--U} -w 1 "$blind_socket" >/dev/null 2>&1
+                echo -e "${C_CYAN}📺 Toggled video in Blind Mode session.${C_RESET}"
+            elif [[ "$user_key" =~ ^[aA]$ ]]; then
+                cmd_language -pb
+            elif [[ "$user_key" =~ ^[rR]$ ]]; then
+                cmd_resolution ""
+            fi
+        fi
+        return
+    fi
+
+    # CASE 3: Playlist Index (or Current Normal Queue)
     local index="$input"
     local is_current_target=false
     local header_title="Track Info"
@@ -697,7 +999,7 @@ cmd_info() {
 
     # *** SMART UPGRADE: If filename is a URL, use remote fetcher! ***
     if [[ "$filename" =~ ^http.* ]]; then
-        fetch_and_display_url_info "$filename" "$title" "$is_current_target"
+        fetch_and_display_url_info "$filename" "$title" "$is_current_target" "$SOCKET" "false"
         return
     fi
 
@@ -726,50 +1028,14 @@ cmd_info() {
 
     # Extended Info (Only available if track is currently playing AND local)
     if [ "$is_current_target" == "true" ]; then
-        local mpv_extended=$(echo -e '{"command":["get_property","file-format"]}\n{"command":["get_property","audio-codec"]}\n{"command":["get_property","audio-params/samplerate"]}\n{"command":["get_property","duration"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -r 'map(select(.event == null)) | (.[0].data // "N/A"), (.[1].data // "N/A"), (.[2].data // "N/A"), (.[3].data // "N/A")')
-        mapfile -t ext_props <<< "$mpv_extended"
-        local fmt="${ext_props[0]}" codec="${ext_props[1]}" rate="${ext_props[2]}" dur="${ext_props[3]}"
-        
-        if [ "$dur" != "N/A" ] && [[ "$dur" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-            dur=$(printf "%d:%02d" "$((${dur%.*} / 60))" "$((${dur%.*} % 60))")
-        fi
-
-        echo -e "${C_GRAY}${H_LINE}${C_RESET}"
-        print_boxed_line "${C_TEAL}Format:      ${C_WHITE}$fmt${C_RESET}"
-        print_boxed_line "${C_TEAL}Codec:       ${C_WHITE}$codec${C_RESET}"
-        print_boxed_line "${C_TEAL}Rate:        ${C_WHITE}${rate} Hz${C_RESET}"
-        print_boxed_line "${C_TEAL}Duration:    ${C_WHITE}$dur${C_RESET}"
-
-        local mpv_audio_tracks
-        mpv_audio_tracks=$(echo '{"command":["get_property","track-list"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '[.data[]? | select(.type=="audio")] | map("[" + (.id|tostring) + "] " + (.lang // "und") + " (" + (.title // .codec // "audio") + ")" + (if .selected then " (Active)" else "" end)) | join(" • ")' 2>/dev/null)
-        [ -n "$mpv_audio_tracks" ] && print_boxed_line "${C_TEAL}Audio:       ${C_WHITE}${mpv_audio_tracks:0:$((INNER_WIDTH-15))}${C_RESET}"
-
-        local engine_badge=""
-        if [ "$IS_WSL" = true ]; then
-            if [ "$(get_queue_mode)" == "hybrid" ]; then
-                engine_badge="${C_ORANGE}Hybrid Boost Mode ⚡${C_GRAY} (120+ FPS Direct3D)${C_RESET}"
-            else
-                engine_badge="${C_CYAN}Standalone WSL Mode 🐧${C_GRAY} (60 FPS Mesa D3D12)${C_RESET}"
-            fi
-        elif [ "$IS_MACOS" = true ]; then
-            engine_badge="${C_GREEN}Native macOS 🍏${C_GRAY} (Metal / Cocoa)${C_RESET}"
-        elif [ "$IS_ANDROID" = true ]; then
-            if [ "$(get_queue_mode)" == "hybrid" ]; then
-                engine_badge="${C_ORANGE}Android Hybrid Engine 🤖⚡${C_GRAY} (MPV App + Audio Tunnel)${C_RESET}"
-            else
-                engine_badge="${C_CYAN}Standalone Termux 🐧${C_GRAY} (Headless Audio + Wake-Lock)${C_RESET}"
-            fi
-        else
-            engine_badge="${C_GREEN}Native Linux 🐧${C_GRAY} (Mesa / DRM)${C_RESET}"
-        fi
-        print_boxed_line "${C_TEAL}Engine:      $engine_badge"
+        print_stream_and_engine_info "$SOCKET" "false"
     fi
     printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
     B_LINE=${B_LINE// /─}
-    echo -e "${C_GRAY}${B_LINE}${C_RESET}"
+    echo -e "${C_PURPLE}${B_LINE}${C_RESET}"
 
     if [ -t 0 ] && [ -t 1 ]; then
-        echo -ne "${C_PINK}>>> Press 'l' to like/unlike, 'x' to dislike/undislike, or ENTER to return: ${C_RESET}"
+        echo -ne "${C_PINK}>>> Press 'l' to like/unlike, 'x' to dislike, 'd' to download, 'v' for video, 'a' for audio, 'r' for quality, or ENTER to return: ${C_RESET}"
         read -r -n 1 user_key < /dev/tty 2>/dev/null || read -r -n 1 user_key
         echo ""
         if [[ "$user_key" =~ ^[lL]$ ]]; then
@@ -784,6 +1050,14 @@ cmd_info() {
             else
                 cmd_dislike "$filename"
             fi
+        elif [[ "$user_key" =~ ^[dD]$ ]]; then
+            cmd_download "$filename"
+        elif [[ "$user_key" =~ ^[vV]$ ]]; then
+            cmd_video_toggle ""
+        elif [[ "$user_key" =~ ^[aA]$ ]]; then
+            cmd_language ""
+        elif [[ "$user_key" =~ ^[rR]$ ]]; then
+            cmd_resolution ""
         fi
     fi
 }
@@ -2155,10 +2429,11 @@ detect_hardware_ceiling() {
 }
 
 get_active_saved_res() {
+    local target_sock="${1:-$SOCKET}"
     local saved_res=""
-    if [ -S "$SOCKET" ]; then
+    if [ -S "$target_sock" ]; then
         local live_prop
-        live_prop=$(echo '{"command":["get_property","user-data/queue-res"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // empty' 2>/dev/null)
+        live_prop=$(echo '{"command":["get_property","user-data/queue-res"]}' | nc $NC_OPTS -w 1 "$target_sock" 2>/dev/null | jq -r 'select(.event == null) | .data // empty' 2>/dev/null)
         [ -n "$live_prop" ] && saved_res="$live_prop"
     fi
     if [ -z "$saved_res" ] && [ "$(get_queue_mode)" == "hybrid" ] && command -v get_windows_user_dir >/dev/null 2>&1; then
@@ -2203,10 +2478,16 @@ cmd_resolution() {
             fi
             echo -e "${C_CYAN}💻 Hardware Playback Ceiling set to:${C_RESET} ${C_PINK}${new_ceiling}${C_RESET}"
             # If MPV is running, trigger quality reload with current tier
+            local cur_p
+            cur_p=$(get_active_saved_res)
             if [ -S "$SOCKET" ]; then
-                local cur_p
-                cur_p=$(get_active_saved_res)
                 echo "{\"command\":[\"script-message\",\"change-quality\",\"$cur_p\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+            fi
+            local b_sock="$HOME/.cache/mpv/blind.sock"
+            if [ -f "$HOME/.cache/mpv/blind_active" ]; then
+                local rec_sock=$(grep -m1 '^socket=' "$HOME/.cache/mpv/blind_active" 2>/dev/null | cut -d= -f2-)
+                [ -n "$rec_sock" ] && b_sock="$rec_sock"
+                [ -S "$b_sock" ] && echo "{\"command\":[\"script-message\",\"change-quality\",\"$cur_p\"]}" | nc $NC_OPTS -w 1 "$b_sock" >/dev/null 2>&1
             fi
             return 0
         else
@@ -2280,11 +2561,7 @@ cmd_resolution() {
             label="Auto / Smart (Hardware ceiling: ${hw_ceil}, protects buffer & frame-rate)"
             ;;
         "")
-            if is_audio_mode_active; then
-                cmd_audio_mode "status"
-                return 0
-            fi
-            # Query / Show active resolution status
+            # Hardware Ceiling Display
             local hw_ceil
             hw_ceil=$(get_hardware_ceiling)
             local hw_display="4K UHD"
@@ -2292,20 +2569,59 @@ cmd_resolution() {
             [ "$hw_ceil" == "high" ] && hw_display="1440p 2K QHD"
             [ "$hw_ceil" == "mid" ] && hw_display="1080p Full HD"
 
+            # 1. Probe Blind Mode session first
+            local blind_sock="$HOME/.cache/mpv/blind.sock"
+            local blind_active=false
+            if [ -f "$HOME/.cache/mpv/blind_active" ]; then
+                local rec_sock=$(grep -m1 '^socket=' "$HOME/.cache/mpv/blind_active" 2>/dev/null | cut -d= -f2-)
+                [ -n "$rec_sock" ] && blind_sock="$rec_sock"
+                if [ -S "$blind_sock" ] && echo '{"command":["get_property","idle-active"]}' | nc ${NC_OPTS:--U} -w 1 "$blind_sock" >/dev/null 2>&1; then
+                    blind_active=true
+                fi
+            fi
+
+            if [ "$blind_active" = true ]; then
+                local cur_w cur_h cur_fps cur_codec cur_acodec cur_samplerate
+                local res_info
+                res_info=$(echo -e '{"command":["get_property","video-params"]}\n{"command":["get_property","track-list"]}\n{"command":["get_property","audio-params"]}' | nc ${NC_OPTS:--U} -w 1 "$blind_sock" 2>/dev/null)
+                cur_w=$(echo "$res_info" | jq -s -r 'map(select(.event == null)) | .[0].data.w // "N/A"' 2>/dev/null)
+                cur_h=$(echo "$res_info" | jq -s -r 'map(select(.event == null)) | .[0].data.h // "N/A"' 2>/dev/null)
+                cur_fps=$(echo "$res_info" | jq -s -r 'map(select(.event == null)) | (.[1].data[]? | select(.type=="video" and .selected==true) | .["demux-fps"]) // "N/A"' 2>/dev/null)
+                cur_codec=$(echo "$res_info" | jq -s -r 'map(select(.event == null)) | (.[1].data[]? | select(.type=="video" and .selected==true) | .codec) // "N/A"' 2>/dev/null)
+                cur_acodec=$(echo "$res_info" | jq -s -r 'map(select(.event == null)) | (.[1].data[]? | select(.type=="audio" and .selected==true) | .codec) // "opus"' 2>/dev/null)
+                cur_samplerate=$(echo "$res_info" | jq -s -r 'map(select(.event == null)) | .[2].data.samplerate // 48000' 2>/dev/null)
+                [[ "$cur_fps" =~ ^[0-9]+(\.[0-9]+)?$ ]] && printf -v cur_fps "%.0f" "$cur_fps"
+
+                local saved_res
+                saved_res=$(get_active_saved_res "$blind_sock")
+                local res_friendly
+                res_friendly=$(format_res_friendly "$saved_res" "$hw_display")
+
+                if [ "$cur_w" == "N/A" ] || [ -z "$cur_w" ]; then
+                    echo -e "${C_CYAN}🕶️ Blind Mode Video Stream:${C_RESET} ${C_GRAY}Idle / Audio Only (No video actively rendering)${C_RESET}"
+                    echo -e "   ${C_PINK}Active Profile:${C_RESET}           ${C_WHITE}${res_friendly}${C_RESET}"
+                    echo -e "   ${C_TEAL}Hardware Ceiling:${C_RESET}         ${C_WHITE}${hw_display}${C_RESET} (${C_GRAY}Smart GPU capability cap${C_RESET})"
+                else
+                    echo -e "${C_CYAN}🕶️ Active Video Quality (Blind Mode):${C_RESET} ${C_WHITE}${cur_w}x${cur_h}${C_RESET} @ ${C_PINK}${cur_fps} FPS${C_RESET} (${C_GRAY}codec: ${cur_codec}${C_RESET})"
+                    echo -e "${C_CYAN}🔊 Active Audio Stream:${C_RESET}               ${C_GREEN}${cur_acodec}${C_RESET} @ ${C_WHITE}${cur_samplerate} Hz${C_RESET} (${C_GRAY}pristine stream${C_RESET})"
+                    echo -e "   ${C_PINK}Active Profile:${C_RESET}                    ${C_WHITE}${res_friendly}${C_RESET}"
+                    echo -e "   ${C_TEAL}Hardware Ceiling:${C_RESET}                  ${C_WHITE}${hw_display}${C_RESET} (${C_GRAY}Smart GPU capability cap${C_RESET})"
+                fi
+                echo -e "${C_GRAY}💡 Quick Switch: 'q -res low' | 'q -res mid' | 'q -res high' | 'q -res max' | 'q -res auto'${C_RESET}"
+                echo -e "${C_GRAY}   Or inside video window press keys: ${C_WHITE}0${C_GRAY} (Auto) | ${C_WHITE}1${C_GRAY} (Low) | ${C_WHITE}2${C_GRAY} (Mid) | ${C_WHITE}3${C_GRAY} (High) | ${C_WHITE}4${C_GRAY} (Max)${C_RESET}"
+                return 0
+            fi
+
+            if is_audio_mode_active; then
+                cmd_audio_mode "status"
+                return 0
+            fi
+
             if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
                 local saved_res="auto"
                 [ -f "$HOME/.config/mpv/queue_res" ] && saved_res=$(cat "$HOME/.config/mpv/queue_res" 2>/dev/null | tr -d '[:space:]')
-                local res_desc="Auto / Smart (Adapts to internet)"
-                case "$saved_res" in
-                    low|720|720p) res_desc="Low / 720p HD (Fluid 60 FPS / data saver)" ;;
-                    mid|1080|1080p) res_desc="Mid / 1080p Full HD (Crisp 60 FPS)" ;;
-                    high|1440|1440p|2k) res_desc="High / 1440p 2K QHD (Ultra-crisp 60 FPS)" ;;
-                    max|4k|2160) res_desc="Max / 4K UHD (Hardware ceiling smooth)" ;;
-                    8k|4320) res_desc="8K UHD (Uncapped)" ;;
-                    480|480p) res_desc="480p SD (Low-bandwidth smooth)" ;;
-                    360|360p) res_desc="360p Low (Emergency smooth)" ;;
-                    auto) res_desc="Auto / Smart (Hardware ceiling: 4K, protects buffer)" ;;
-                esac
+                local res_desc
+                res_desc=$(format_res_friendly "$saved_res" "$hw_display")
                 echo -e "╭─────────────────────────────────────────────────────────────────────────╮"
                 echo -e "│ 📱 ${C_PURPLE}Queue Video Quality Profile (Android Mobile)${C_RESET}                          │"
                 echo -e "├─────────────────────────────────────────────────────────────────────────┤"
@@ -2335,19 +2651,8 @@ cmd_resolution() {
                 local saved_res
                 saved_res=$(get_active_saved_res)
                 echo "$saved_res" > "$HOME/.config/mpv/queue_res" 2>/dev/null
-                local res_friendly="Auto"
-                case "$saved_res" in
-                    low|720|720p) res_friendly="Low (720p HD)" ;;
-                    mid|1080|1080p) res_friendly="Mid (1080p Full HD)" ;;
-                    high|1440|1440p|2k) res_friendly="High (1440p 2K QHD)" ;;
-                    max) res_friendly="Max (Hardware Ceiling: ${hw_display})" ;;
-                    4k|2160) res_friendly="4K UHD" ;;
-                    8k|4320) res_friendly="8K UHD (Uncapped)" ;;
-                    480) res_friendly="480p SD" ;;
-                    360) res_friendly="360p Low" ;;
-                    auto) res_friendly="Auto (Smart Dynamic up to ${hw_display})" ;;
-                    *) res_friendly="$saved_res" ;;
-                esac
+                local res_friendly
+                res_friendly=$(format_res_friendly "$saved_res" "$hw_display")
 
                 if [ "$cur_w" == "N/A" ] || [ -z "$cur_w" ]; then
                     local current_fmt
@@ -2364,19 +2669,8 @@ cmd_resolution() {
             else
                 local saved_res
                 saved_res=$(get_active_saved_res)
-                local res_friendly="Auto"
-                case "$saved_res" in
-                    low|720|720p) res_friendly="Low (720p HD)" ;;
-                    mid|1080|1080p) res_friendly="Mid (1080p Full HD)" ;;
-                    high|1440|1440p|2k) res_friendly="High (1440p 2K QHD)" ;;
-                    max) res_friendly="Max (Hardware Ceiling: ${hw_display})" ;;
-                    4k|2160) res_friendly="4K UHD" ;;
-                    8k|4320) res_friendly="8K UHD (Uncapped)" ;;
-                    480) res_friendly="480p SD" ;;
-                    360) res_friendly="360p Low" ;;
-                    auto) res_friendly="Auto (Smart Dynamic up to ${hw_display})" ;;
-                    *) res_friendly="$saved_res" ;;
-                esac
+                local res_friendly
+                res_friendly=$(format_res_friendly "$saved_res" "$hw_display")
                 echo -e "${C_CYAN}📺 Video Quality Profile:${C_RESET} ${C_PINK}${res_friendly}${C_RESET}"
                 echo -e "   ${C_TEAL}Hardware Ceiling:${C_RESET}     ${C_WHITE}${hw_display}${C_RESET} (${C_GRAY}Smart GPU capability cap${C_RESET})"
             fi
@@ -2445,21 +2739,28 @@ cmd_resolution() {
         return 0
     fi
 
-    # Desktop Player (Linux / WSL2)
-    if [ ! -S "$SOCKET" ] || ! (echo '{"command":["get_property","idle-active"]}' | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1); then
-        echo -e "${C_CYAN}📺 Video Quality set to:${C_RESET} ${C_PINK}${label}${C_RESET}"
-        echo -e "${C_GRAY}   Default profile saved. Will be applied automatically on next playback.${C_RESET}"
-        return 0
+    # Desktop Player (Linux / WSL2) - Dispatch to active session(s)
+    local dispatched=false
+    local blind_sock="$HOME/.cache/mpv/blind.sock"
+    if [ -f "$HOME/.cache/mpv/blind_active" ]; then
+        local rec_sock=$(grep -m1 '^socket=' "$HOME/.cache/mpv/blind_active" 2>/dev/null | cut -d= -f2-)
+        [ -n "$rec_sock" ] && blind_sock="$rec_sock"
+        if [ -S "$blind_sock" ] && echo '{"command":["get_property","idle-active"]}' | nc ${NC_OPTS:--U} -w 1 "$blind_sock" >/dev/null 2>&1; then
+            echo "{\"command\":[\"script-message\",\"change-quality\",\"$clean_target\"]}" | nc ${NC_OPTS:--U} -w 1 "$blind_sock" >/dev/null 2>&1
+            dispatched=true
+        fi
     fi
 
-    # Dispatch SINGLE script-message command to queue_video.lua (handles seamless timestamp memory & reload)
-    echo "{\"command\":[\"script-message\",\"change-quality\",\"$clean_target\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+    if [ -S "$SOCKET" ] && echo '{"command":["get_property","idle-active"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1; then
+        echo "{\"command\":[\"script-message\",\"change-quality\",\"$clean_target\"]}" | nc ${NC_OPTS:--U} -w 1 "$SOCKET" >/dev/null 2>&1
+        dispatched=true
+    fi
 
     echo -e "${C_CYAN}📺 Video Quality set to:${C_RESET} ${C_PINK}${label}${C_RESET}"
-    if ! is_video_window_open && [ "$IS_ANDROID" = false ]; then
-        echo -e "${C_GRAY}💡 Note: Currently in background audio mode. Open video window with 'q -vid' to view.${C_RESET}"
-    else
+    if [ "$dispatched" = true ]; then
         echo -e "${C_GRAY}   Reloaded stream with high-framerate matching (playback position preserved).${C_RESET}"
+    else
+        echo -e "${C_GRAY}   Default profile saved. Will be applied automatically on next playback.${C_RESET}"
     fi
 }
 
