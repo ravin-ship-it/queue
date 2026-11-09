@@ -3537,12 +3537,17 @@ cmd_play() {
         # Restore saved properties (shuffle, loop, pos)
         restore_state_properties
         
-        # Determine start index (Saved position or first)
+        # Determine start index (user requested index, saved position, or first)
         local start_idx="${saved_target_pos:-0}"
+        if [ -n "$index" ] && [[ "$index" =~ ^[0-9]+$ ]] && [ "$index" -ge 1 ]; then
+            start_idx=$((index - 1))
+        fi
         [[ ! "$start_idx" =~ ^[0-9]+$ ]] && start_idx=0
-        local saved_target_time
-        saved_target_time=$(jq -r '.time // 0' "$HOME/.cache/mpv/state.json" 2>/dev/null)
-        [[ ! "$saved_target_time" =~ ^[0-9]+(\.[0-9]+)?$ ]] && saved_target_time=0
+        local saved_target_time=0
+        if [ -z "$index" ]; then
+            saved_target_time=$(jq -r '.time // 0' "$HOME/.cache/mpv/state.json" 2>/dev/null)
+            [[ ! "$saved_target_time" =~ ^[0-9]+(\.[0-9]+)?$ ]] && saved_target_time=0
+        fi
 
         # Force Playback Start with timestamp restore
         local start_cmds=""
@@ -3638,7 +3643,13 @@ cmd_play() {
             if [ "$is_eof" == "true" ] || [ "$is_idle" == "true" ] || [ "$cur_pos" -lt 0 ]; then
                 # Replay current track or start if at EOF / idle
                 local start_idx=0
-                [ "$cur_pos" -ge 0 ] 2>/dev/null && start_idx="$cur_pos"
+                if [ "$cur_pos" -ge 0 ] 2>/dev/null; then
+                    start_idx="$cur_pos"
+                else
+                    local saved_p
+                    saved_p=$(jq -r '.pos // 0' "$HOME/.cache/mpv/state.json" 2>/dev/null)
+                    [[ "$saved_p" =~ ^[0-9]+$ ]] && start_idx="$saved_p"
+                fi
                 echo "{\"command\": [\"playlist-play-index\", $start_idx]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
                 if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
                     echo '{ "command": ["set_property", "pause", true] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1

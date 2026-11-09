@@ -1026,13 +1026,31 @@ local function check_hardware_lag()
     end
 end
 
+local last_periodic_tick = nil
+
 -- Periodic Adaptive Watcher & Position Cache
 mp.add_periodic_timer(2.0, function()
-    -- Maintain playback position cache
+    local now = mp.get_time()
+    local elapsed = 2.0
+    if last_periodic_tick and now then
+        elapsed = now - last_periodic_tick
+    end
+    last_periodic_tick = now
+
+    -- 0. Sleep / Hibernation Wake Guard:
+    -- If a 2.0s timer experiences a gap > 6.0s, host machine was sleeping or hibernated.
+    -- TCP sockets are dead and Wi-Fi needs 5-15s to reconnect. Pause immediately to protect queue!
+    if elapsed > 6.0 and not check_blind_mode() then
+        mp.set_property_bool("pause", true)
+        mp.commandv("show-text", "📶 Resumed from sleep: waiting for network connection...", 8000)
+        trigger_network_offline_freeze(last_valid_pos, last_valid_time)
+    end
+
+    -- Maintain playback position cache (only update when online to prevent corrupted state)
     local p = mp.get_property_number("playlist-pos", -1)
     local t = mp.get_property_number("time-pos", 0)
     local path = mp.get_property("path", "")
-    if p >= 0 and t > 0 then
+    if p >= 0 and t > 0 and not network_offline then
         last_valid_pos = p
         last_valid_time = t
         if path ~= "" then last_valid_url = path end
@@ -1052,6 +1070,8 @@ end)
 local network_offline = false
 local network_probe_timer = nil
 local consecutive_net_errors = 0
+local deferred_load_hook = nil
+local was_playing_before_sleep = true
 
 local function check_internet_connectivity(cb)
     local is_win = (package.config:sub(1,1) == "\\") or (os.getenv("WINDIR") ~= nil)
@@ -1066,21 +1086,41 @@ local function check_internet_connectivity(cb)
         if success and res and res.status == 0 then
             cb(true)
         else
-            cb(false)
+            -- Secondary fallback to 8.8.8.8
+            local ping_cmd2 = is_win and {"ping", "-n", "1", "-w", "1000", "8.8.8.8"} or {"ping", "-c", "1", "-W", "1", "8.8.8.8"}
+            mp.command_native_async({
+                name = "subprocess",
+                args = ping_cmd2,
+                capture_stdout = false,
+                capture_stderr = false
+            }, function(s2, r2, e2)
+                if s2 and r2 and r2.status == 0 then
+                    cb(true)
+                else
+                    cb(false)
+                end
+            end)
         end
     end)
 end
 
-local function trigger_network_offline_freeze(saved_pos, saved_time)
+function trigger_network_offline_freeze(saved_pos, saved_time)
     if network_offline then return end
     network_offline = true
 
+    local cur_paused = mp.get_property_bool("pause", false)
+    was_playing_before_sleep = not cur_paused
     mp.set_property_bool("pause", true)
-    local track_num = (saved_pos and (saved_pos + 1)) or 1
+
+    local target_pos = (saved_pos and saved_pos >= 0) and saved_pos or last_valid_pos
+    if target_pos < 0 then
+        target_pos = get_saved_pos()
+    end
+    local track_num = (target_pos and (target_pos + 1)) or 1
     mp.commandv("show-text", "📶 Network Offline: Paused Queue at track #" .. track_num .. ". Waiting for internet...", 60000)
 
     if network_probe_timer then network_probe_timer:kill() end
-    network_probe_timer = mp.add_periodic_timer(2.5, function()
+    network_probe_timer = mp.add_periodic_timer(2.0, function()
         check_internet_connectivity(function(is_online)
             if is_online then
                 -- Internet connection restored!
@@ -1089,13 +1129,27 @@ local function trigger_network_offline_freeze(saved_pos, saved_time)
                 consecutive_net_errors = 0
                 mp.commandv("show-text", "✅ Internet Restored! Resuming track #" .. track_num .. "...", 3500)
 
+                -- Release any deferred hook so mpv load pipeline can proceed
+                if deferred_load_hook then
+                    local h = deferred_load_hook
+                    deferred_load_hook = nil
+                    pcall(function() h:cont() end)
+                end
+
+                -- Seek and reload track cleanly (forces ytdl to obtain fresh stream tokens)
                 if saved_time and saved_time > 2.0 then
                     queue_resume_seek(saved_time)
+                elseif last_valid_time and last_valid_time > 2.0 then
+                    queue_resume_seek(last_valid_time)
                 end
-                if saved_pos and saved_pos >= 0 then
-                    mp.commandv("playlist-play-index", saved_pos)
+
+                if target_pos and target_pos >= 0 then
+                    mp.commandv("playlist-play-index", target_pos)
                 end
-                mp.set_property_bool("pause", false)
+
+                if was_playing_before_sleep then
+                    mp.set_property_bool("pause", false)
+                end
             else
                 -- Still offline: keep informing the user without skipping tracks
                 mp.commandv("show-text", "📶 Still offline: Queue waiting for internet connection...", 2200)
@@ -1103,6 +1157,40 @@ local function trigger_network_offline_freeze(saved_pos, saved_time)
         end)
     end)
 end
+
+-- Hook: Intercept track loading to halt MPV core from attempting network fetch while offline
+mp.add_hook("on_load", 10, function(hook)
+    if check_blind_mode() then return end
+
+    if network_offline then
+        deferred_load_hook = hook
+        hook:defer()
+        return
+    end
+end)
+
+-- Hook: Catch load failures synchronously before MPV can cascade to the next playlist track
+mp.add_hook("on_load_fail", 10, function(hook)
+    if check_blind_mode() then return end
+
+    hook:defer()
+    check_internet_connectivity(function(is_online)
+        if not is_online then
+            deferred_load_hook = hook
+            trigger_network_offline_freeze(last_valid_pos, last_valid_time)
+        else
+            consecutive_net_errors = consecutive_net_errors + 1
+            if consecutive_net_errors < 3 then
+                mp.commandv("show-text", "⚠️ Stream unplayable (deleted or restricted). Moving to next...", 3000)
+                pcall(function() hook:cont() end)
+            else
+                mp.set_property_bool("pause", true)
+                mp.commandv("show-text", "⚠️ Multiple tracks unplayable. Paused Queue.", 5000)
+                pcall(function() hook:cont() end)
+            end
+        end
+    end)
+end)
 
 local function on_file_end(event)
     if event.reason == "eof" then
@@ -1114,6 +1202,11 @@ local function on_file_end(event)
         if event.reason == "error" then
             mp.set_property_bool("pause", false)
         end
+        return
+    end
+
+    if network_offline then
+        -- Freeze queue: do not advance on network failure!
         return
     end
 
@@ -1134,7 +1227,6 @@ local function on_file_end(event)
 
             check_internet_connectivity(function(is_online)
                 if is_online then
-                    -- Internet is working, but this specific URL failed (e.g. copyright / dead video)
                     if consecutive_net_errors < 3 then
                         mp.commandv("show-text", "⚠️ Stream unavailable (deleted or restricted). Moving to next...", 3000)
                         mp.set_property_bool("pause", false)
@@ -1143,7 +1235,6 @@ local function on_file_end(event)
                         mp.commandv("show-text", "⚠️ Multiple tracks unplayable. Pausing Queue.", 5000)
                     end
                 else
-                    -- Complete internet drop! Freeze queue immediately and wait for connection!
                     trigger_network_offline_freeze(last_valid_pos, last_valid_time)
                 end
             end)
@@ -1300,15 +1391,11 @@ mp.observe_property("playlist-count", "number", function(name, count)
 end)
 mp.observe_property("playlist-pos", "number", function(name, val)
     if val and val >= 0 then
-        if not has_restored_session then
-            if target_restore_pos > 0 and val == target_restore_pos then
-                has_restored_session = true
-            elseif target_restore_pos <= 0 then
-                has_restored_session = true
-            end
+        has_restored_session = true
+        if not network_offline then
+            last_valid_pos = val
+            save_session_state()
         end
-        last_valid_pos = val
-        save_session_state()
     end
 end)
 mp.observe_property("shuffle", "bool", on_shuffle_change)
