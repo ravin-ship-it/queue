@@ -81,6 +81,7 @@ local function pop_history()
 end
 
 local function smart_next(is_auto_eof)
+    if check_blind_mode() then return end
     local shuf = mp.get_property_bool("shuffle", false)
     local count = mp.get_property_number("playlist-count", 0)
     local pos = mp.get_property_number("playlist-pos", -1)
@@ -117,6 +118,7 @@ local function smart_next(is_auto_eof)
 end
 
 local function smart_prev()
+    if check_blind_mode() then return end
     local shuf = mp.get_property_bool("shuffle", false)
     if shuf then
         local prev_idx = pop_history()
@@ -179,7 +181,7 @@ local function update_state()
             end
         end
     else
-        if state_file then pcall(os.remove, state_file) end
+        if state_file and not check_blind_mode() then pcall(os.remove, state_file) end
     end
 end
 
@@ -225,6 +227,7 @@ local function is_audio_mode_active()
 end
 
 local function save_audio_mode(enabled)
+    if check_blind_mode() then return end
     if not audio_mode_file then return end
     local f = io.open(audio_mode_file, "w")
     if f then
@@ -250,6 +253,7 @@ local function get_saved_speed()
 end
 
 local function save_speed(val)
+    if check_blind_mode() then return end
     if not speed_file or not val then return end
     local f = io.open(speed_file, "w")
     if f then
@@ -291,6 +295,7 @@ local function get_saved_res()
 end
 
 local function save_res_pref(tier)
+    if check_blind_mode() then return end
     if not res_file or not tier then return end
     local f = io.open(res_file, "w")
     if f then
@@ -405,9 +410,9 @@ local function get_quality_format(tier, lang)
         return audio_fmt
     end
 
-    -- Blind Mode: Enforce universal hardware-accelerated 1080p AVC1 to prevent software AV1/VP9 decoding stalls
-    if check_blind_mode() then
-        return "bestvideo[height<=1080][fps<=60][vcodec^=avc1][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=1080]+" .. audio_fmt .. "/best"
+    -- Blind Mode: Enforce optimal 1080p high-framerate stream as default for auto tier
+    if check_blind_mode() and (tier == "auto" or not tier or tier == "") then
+        return "bestvideo[height<=1080][fps<=60][format_note!*=Premium]+" .. audio_fmt .. "/bestvideo[height<=1080]+" .. audio_fmt .. "/best"
     end
 
     if tier == "auto" or tier == "max" then
@@ -564,7 +569,7 @@ local function change_quality(target, is_auto_adaptive)
         mp.set_property("video", "no")
         mp.set_property("force-window", "no")
         mp.set_property_bool("window-minimized", true)
-        if state_file then pcall(os.remove, state_file) end
+        if state_file and not check_blind_mode() then pcall(os.remove, state_file) end
     else
         if is_audio_mode_active() then
             save_audio_mode(false)
@@ -1413,7 +1418,7 @@ mp.register_script_message("set-audio-mode", function(val)
         mp.set_property("video", "no")
         mp.set_property("force-window", "no")
         mp.set_property_bool("window-minimized", true)
-        if state_file then pcall(os.remove, state_file) end
+        if state_file and not check_blind_mode() then pcall(os.remove, state_file) end
         local fmt = get_quality_format("audio", current_lang)
         mp.set_property("ytdl-format", fmt)
     else
@@ -1484,6 +1489,10 @@ mp.add_key_binding("_", "scale_sub_underscore", function() adjust_scale(-0.05) e
 
 -- Window Close & Session Exit Hotkeys (Cross button [X], Alt+F4, q, Q quits session)
 local function stop_session()
+    if check_blind_mode() then
+        mp.commandv("quit")
+        return
+    end
     has_restored_session = true
     save_session_state()
     if state_file then pcall(os.remove, state_file) end
@@ -1492,6 +1501,7 @@ end
 
 mp.register_script_message("stop-session", stop_session)
 mp.register_event("shutdown", function()
+    if check_blind_mode() then return end
     has_restored_session = true
     save_session_state()
     if state_file then pcall(os.remove, state_file) end

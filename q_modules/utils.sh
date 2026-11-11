@@ -103,7 +103,8 @@ check_and_resume() {
             if [ -n "$force_idx" ]; then
                  # Wait for playlist to actually have the item (Race condition fix)
                  for i in {1..15}; do
-                     local cnt=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
+                     local cnt=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // empty' 2>/dev/null | tail -n 1)
+                     [[ ! "$cnt" =~ ^[0-9]+$ ]] && cnt=0
                      if [ "$cnt" -gt "$force_idx" ]; then break; fi
                      sleep 0.1
                  done
@@ -764,10 +765,15 @@ ensure_mpv_running() {
             if [ -z "$win_mpv" ] || [ -z "$relay_bin" ]; then
                 echo -e "${C_PINK}⚠️ Windows Hybrid prerequisites not met. Falling back to Standalone Linux Engine...${C_RESET}"
             else
-                taskkill.exe /F /IM mpv.exe </dev/null 2>/dev/null || true
-                taskkill.exe /F /IM mpv.com </dev/null 2>/dev/null || true
-                taskkill.exe /F /IM PipeRelay.exe </dev/null 2>/dev/null || true
-                pkill -f "hybrid_bridge.py" 2>/dev/null || true
+                if [ -f "$HOME/.cache/mpv/blind_active" ]; then
+                    powershell.exe -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name = 'mpv.exe' or Name = 'mpv.com'\" | Where-Object { \$_.CommandLine -like '*mpv-q-pipe*' } | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force }" </dev/null >/dev/null 2>&1 || true
+                    pgrep -f "hybrid_bridge.py" | grep -v "blind" | xargs -r kill 2>/dev/null || true
+                else
+                    taskkill.exe /F /IM mpv.exe </dev/null 2>/dev/null || true
+                    taskkill.exe /F /IM mpv.com </dev/null 2>/dev/null || true
+                    taskkill.exe /F /IM PipeRelay.exe </dev/null 2>/dev/null || true
+                    pkill -f "hybrid_bridge.py" 2>/dev/null || true
+                fi
 
                 local pipe_name="mpv-q-pipe"
                 local win_ytdlp
@@ -846,10 +852,14 @@ ensure_mpv_running() {
                 return 0
             else
                 echo -e "${C_PINK}⚠️ Windows MPV unavailable or blocked by policy. Falling back to Standalone Linux Engine...${C_RESET}"
-                pkill -f "hybrid_bridge.py" 2>/dev/null || true
-                taskkill.exe /F /IM mpv.exe </dev/null 2>/dev/null || true
-                taskkill.exe /F /IM mpv.com </dev/null 2>/dev/null || true
-                taskkill.exe /F /IM PipeRelay.exe </dev/null 2>/dev/null || true
+                if [ -f "$HOME/.cache/mpv/blind_active" ]; then
+                    powershell.exe -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name = 'mpv.exe' or Name = 'mpv.com'\" | Where-Object { \$_.CommandLine -like '*mpv-q-pipe*' } | ForEach-Object { Stop-Process -Id \$_.ProcessId -Force }" </dev/null >/dev/null 2>&1 || true
+                else
+                    pkill -f "hybrid_bridge.py" 2>/dev/null || true
+                    taskkill.exe /F /IM mpv.exe </dev/null 2>/dev/null || true
+                    taskkill.exe /F /IM mpv.com </dev/null 2>/dev/null || true
+                    taskkill.exe /F /IM PipeRelay.exe </dev/null 2>/dev/null || true
+                fi
                 rm -f "$SOCKET"
                 mkdir -p "$HOME/.config/mpv"
                 echo "standalone" > "$HOME/.config/mpv/queue_mode" 2>/dev/null || true

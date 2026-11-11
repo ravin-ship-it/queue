@@ -1660,6 +1660,18 @@ EOF
 cmd_video_toggle() {
     local target_idx="$1"
 
+    # --- BLIND MODE VIDEO TOGGLE (Operates on isolated session without touching main queue) ---
+    local blind_sock="$HOME/.cache/mpv/blind.sock"
+    if [ -f "$HOME/.cache/mpv/blind_active" ]; then
+        local rec_sock=$(grep -m1 '^socket=' "$HOME/.cache/mpv/blind_active" 2>/dev/null | cut -d= -f2-)
+        [ -n "$rec_sock" ] && blind_sock="$rec_sock"
+        if [ -S "$blind_sock" ] && echo '{"command":["get_property","idle-active"]}' | nc ${NC_OPTS:--U} -w 1 "$blind_sock" >/dev/null 2>&1; then
+            echo -e "${C_CYAN}📺 Toggling video window in active Blind Mode session...${C_RESET}"
+            echo -e '{"command":["set_property","vid","auto"]}\n{"command":["set_property","video","auto"]}\n{"command":["set_property","force-window","yes"]}\n{"command":["set_property","window-minimized",false]}\n{"command":["cycle","video"]}' | nc ${NC_OPTS:--U} -w 1 "$blind_sock" >/dev/null 2>&1
+            return 0
+        fi
+    fi
+
     # --- ANDROID / TERMUX HYBRID VIDEO HANDOFF ---
     if [ "$IS_ANDROID" = true ] || (command -v getprop >/dev/null 2>&1 && [ -d "/data/data/com.termux" ]); then
         cmd_android_video_handoff "$target_idx"
@@ -1909,6 +1921,25 @@ cmd_audio_mode() {
             action="off"
         else
             action="on"
+        fi
+    fi
+
+    # Blind Mode session support
+    local blind_sock="$HOME/.cache/mpv/blind.sock"
+    if [ -f "$HOME/.cache/mpv/blind_active" ]; then
+        local rec_sock
+        rec_sock=$(grep -m1 '^socket=' "$HOME/.cache/mpv/blind_active" 2>/dev/null | cut -d= -f2-)
+        [ -n "$rec_sock" ] && blind_sock="$rec_sock"
+        if [ -S "$blind_sock" ] && echo '{"command":["get_property","idle-active"]}' | nc ${NC_OPTS:--U} -w 1 "$blind_sock" >/dev/null 2>&1; then
+            if [ "$action" == "on" ] || [ "$action" == "enable" ] || [ "$action" == "1" ]; then
+                echo -e '{"command":["set_property","vid","no"]}\n{"command":["set_property","video","no"]}\n{"command":["set_property","force-window","no"]}\n{"command":["set_property","window-minimized",true]}' | nc ${NC_OPTS:--U} -w 1 "$blind_sock" >/dev/null 2>&1
+                echo -e "🎧 ${C_PINK}Blind Mode: Pure Audio Mode Enabled (Video hidden)${C_RESET}"
+                return 0
+            elif [ "$action" == "off" ] || [ "$action" == "disable" ] || [ "$action" == "0" ]; then
+                echo -e '{"command":["set_property","vid","auto"]}\n{"command":["set_property","video","auto"]}\n{"command":["set_property","force-window","yes"]}\n{"command":["set_property","window-minimized",false]}' | nc ${NC_OPTS:--U} -w 1 "$blind_sock" >/dev/null 2>&1
+                echo -e "📺 ${C_GREEN}Blind Mode: Video Window Restored${C_RESET}"
+                return 0
+            fi
         fi
     fi
 
@@ -3955,7 +3986,7 @@ cmd_blind_play() {
     else
         blind_audio_fmt="(bestaudio[language=${blind_lang}][acodec=opus]/bestaudio[language^=${blind_lang}][acodec=opus]/bestaudio[language=${blind_lang}]/bestaudio[language^=${blind_lang}]/bestaudio[acodec=opus]/bestaudio[acodec^=mp4a]/bestaudio)"
     fi
-    local blind_ytdl_fmt="bestvideo[height<=1080][fps<=60][vcodec^=avc1][format_note!*=Premium]+${blind_audio_fmt}/bestvideo[height<=1080]+${blind_audio_fmt}/best"
+    local blind_ytdl_fmt="bestvideo[height<=1080][fps<=60][format_note!*=Premium]+${blind_audio_fmt}/bestvideo[height<=1080]+${blind_audio_fmt}/best"
 
     print_header_box "${C_PINK}🕶️ Queue Blind Mode (One-Time Isolated Playback)${C_RESET}"
     print_boxed_line "${C_TEAL}Playing:   ${C_CYAN}${display_title:0:$((INNER_WIDTH-12))}${C_RESET}"
@@ -4030,7 +4061,13 @@ cmd_blind_play() {
                 "--title=Queue [Blind Mode]: $display_title"
                 "--geometry=50%x50%"
                 "--input-ipc-server=\\\\.\\pipe\\$blind_pipe"
-                "--msg-level=all=warn,ao=error"
+                "--no-terminal"
+                "--terminal=no"
+                "--msg-level=all=error,ffmpeg=fatal,lavf=fatal,tls=fatal,https=fatal"
+                "--stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5"
+                "--demuxer-max-bytes=256MiB"
+                "--demuxer-readahead-secs=60"
+                "--network-timeout=30"
                 "--script-opts=${blind_script_opts}"
             )
             [ "$force_vid" = true ] && win_opts+=("--video=auto" "--vid=auto" "--force-window=yes")
@@ -4048,7 +4085,8 @@ cmd_blind_play() {
             fi
 
             # Run Windows MPV in background and wait so signals can be intercepted
-            "$win_mpv" "${win_opts[@]}" "$play_target" </dev/null &
+            local blind_err_log="$HOME/.cache/mpv/blind_err.log"
+            "$win_mpv" "${win_opts[@]}" "$play_target" </dev/null >/dev/null 2>"$blind_err_log" &
             mpv_pid=$!
             wait "$mpv_pid" 2>/dev/null
             cleanup_blind_mode
@@ -4100,7 +4138,13 @@ cmd_blind_play() {
         "--keep-open=no"
         "--title=Queue [Blind Mode]: $display_title"
         "--input-ipc-server=$blind_socket"
-        "--msg-level=all=warn,ao=error,pw.conf=error"
+        "--no-terminal"
+        "--terminal=no"
+        "--msg-level=all=error,ffmpeg=fatal,lavf=fatal,tls=fatal,https=fatal"
+        "--stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5"
+        "--demuxer-max-bytes=256MiB"
+        "--demuxer-readahead-secs=60"
+        "--network-timeout=30"
         "--alang=${alang_arg}"
         "--slang=${alang_arg}"
         "--script-opts=queue_video-blind=yes,queue-blind=yes,blind=yes"
@@ -4133,7 +4177,8 @@ cmd_blind_play() {
     [ -f "$HOME/.config/mpv/scripts/queue_video.lua" ] && standalone_opts+=("--script=$HOME/.config/mpv/scripts/queue_video.lua")
     [ -f "$HOME/.config/mpv/input.conf" ] && standalone_opts+=("--input-conf=$HOME/.config/mpv/input.conf")
 
-    mpv "${standalone_opts[@]}" "$play_target" &
+    local blind_err_log="$HOME/.cache/mpv/blind_err.log"
+    mpv "${standalone_opts[@]}" "$play_target" </dev/null >/dev/null 2>"$blind_err_log" &
     mpv_pid=$!
     wait "$mpv_pid" 2>/dev/null
 

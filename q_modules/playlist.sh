@@ -192,8 +192,9 @@ cmd_playlist_load() {
 
     if [ "$total_loaded" -gt 0 ] && { [[ "$load_mode" == *"Replace"* ]] || [[ "$load_mode" == *"New Queue"* ]]; }; then
         for i in {1..15}; do
-            local cur_cnt=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
-            if [[ "$cur_cnt" =~ ^[0-9]+$ ]] && [ "$cur_cnt" -gt 0 ]; then break; fi
+            local cur_cnt=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // empty' 2>/dev/null | tail -n 1)
+            [[ ! "$cur_cnt" =~ ^[0-9]+$ ]] && cur_cnt=0
+            if [ "$cur_cnt" -gt 0 ]; then break; fi
             sleep 0.1
         done
         if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
@@ -345,7 +346,8 @@ cmd_playlist_list() {
         done < <(echo "$selection" | awk -F'::' '{print $2}')
 
         for i in {1..15}; do
-            local cur_cnt=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
+            local cur_cnt=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // empty' 2>/dev/null | tail -n 1)
+            [[ ! "$cur_cnt" =~ ^[0-9]+$ ]] && cur_cnt=0
             if [ "$cur_cnt" -gt 0 ]; then break; fi
             sleep 0.1
         done

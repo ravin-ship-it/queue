@@ -160,7 +160,8 @@ execute_batch() {
             echo -e "$batch_cmds" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
 
             for i in {1..15}; do
-                local cur_cnt=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
+                local cur_cnt=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // empty' 2>/dev/null | tail -n 1)
+                [[ ! "$cur_cnt" =~ ^[0-9]+$ ]] && cur_cnt=0
                 if [ "$cur_cnt" -gt 0 ]; then break; fi
                 sleep 0.1
             done
@@ -198,7 +199,7 @@ execute_batch() {
 
         if [ "$MPV_RUNNING" = true ]; then
             # Current count before appending new items
-            local init_count=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
+            local init_count=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // empty' 2>/dev/null | tail -n 1)
             [[ ! "$init_count" =~ ^[0-9]+$ ]] && init_count=0
 
             local batch_cmds=""
@@ -233,7 +234,8 @@ execute_batch() {
 
             # Stabilization: wait for playlist count to increase
             for i in {1..15}; do
-                local cur_cnt=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // 0')
+                local cur_cnt=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // empty' 2>/dev/null | tail -n 1)
+                [[ ! "$cur_cnt" =~ ^[0-9]+$ ]] && cur_cnt=0
                 if [ "$cur_cnt" -gt "$init_count" ]; then break; fi
                 sleep 0.1
             done

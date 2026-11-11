@@ -229,9 +229,10 @@ cmd_like() {
         local curr_idx="?"
         [ "$curr_pos" != "-1" ] && [ -n "$curr_pos" ] && curr_idx=$((curr_pos + 1))
 
-        local formatted_track=$(format_track_log "$curr_idx" "$filename" "$title")
         local resolved_title=$(get_cached_title "$filename")
-        [ -n "$resolved_title" ] && title="$resolved_title"
+        [ -n "$resolved_title" ] && [ "$resolved_title" != "null" ] && title="$resolved_title"
+        local resolved_artist=$(get_cached_artist "$filename")
+        local formatted_track=$(format_track_log "$curr_idx" "$filename" "$title" "$resolved_artist")
         mark_track_liked "$filename" "$title"
         echo -e "${C_PINK}🩷 Liked & Saved to Liked Songs:${C_RESET} ${formatted_track}"
         return 0
@@ -271,16 +272,46 @@ cmd_like() {
         fi
 
         if [ -n "$filename" ]; then
-            local formatted_track=$(format_track_log "$track_idx" "$filename" "$title")
-            local resolved_title=$(get_cached_title "$filename")
-            [ -n "$resolved_title" ] && title="$resolved_title"
+            local clean_fname="${filename%%\\t*}"
+            clean_fname="${clean_fname%%[[:space:]]*}"
+
+            local resolved_title=$(get_cached_title "$clean_fname")
+            [ -z "$resolved_title" ] && resolved_title=$(get_cached_title "$filename")
+            [ -n "$resolved_title" ] && [ "$resolved_title" != "null" ] && title="$resolved_title"
+            local resolved_artist=$(get_cached_artist "$clean_fname")
+            [ -z "$resolved_artist" ] && resolved_artist=$(get_cached_artist "$filename")
+
+            # Fast online title and artist resolution if not cached
+            if [ -z "$title" ] || [[ "$title" =~ ^https?:// ]] || [[ "$title" == watch\?v=* ]]; then
+                if [[ "$clean_fname" =~ (youtube\.com|youtu\.be) ]]; then
+                    local vid_id=""
+                    [[ "$clean_fname" =~ v=([a-zA-Z0-9_-]{11}) ]] && vid_id="${BASH_REMATCH[1]}"
+                    [[ "$clean_fname" =~ youtu\.be\/([a-zA-Z0-9_-]{11}) ]] && vid_id="${BASH_REMATCH[1]}"
+                    if [ -n "$vid_id" ]; then
+                        local oe_json
+                        oe_json=$(curl -s --max-time 2 "https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${vid_id}&format=json" 2>/dev/null)
+                        local oe_t oe_a
+                        oe_t=$(echo "$oe_json" | jq -r '.title // empty' 2>/dev/null)
+                        oe_a=$(echo "$oe_json" | jq -r '.author_name // empty' 2>/dev/null)
+                        if [ -n "$oe_t" ]; then
+                            title="$oe_t"
+                            [ -z "$resolved_artist" ] && resolved_artist="$oe_a"
+                            printf "%s\t%s\t%s\t%s\n" "$clean_fname" "$title" "${resolved_artist:-Unknown}" "0:00" >> "$CACHE_FILE"
+                            CACHE_MEM["$clean_fname"]="${title}"$'\t'"${resolved_artist:-Unknown}"$'\t'"0:00"
+                        fi
+                    fi
+                fi
+            fi
+
+            local formatted_track=$(format_track_log "$track_idx" "$filename" "$title" "$resolved_artist")
             mark_track_liked "$filename" "$title"
             echo -e "${C_PINK}🩷 Liked & Saved to Liked Songs:${C_RESET} ${formatted_track}"
         else
             local cached_title=$(get_cached_title "$target")
             if [ -n "$cached_title" ]; then
                 mark_track_liked "$target" "$cached_title"
-                local formatted_track=$(format_track_log "?" "$target" "$cached_title")
+                local cached_artist=$(get_cached_artist "$target")
+                local formatted_track=$(format_track_log "?" "$target" "$cached_title" "$cached_artist")
                 echo -e "${C_PINK}🩷 Liked & Saved to Liked Songs:${C_RESET} ${formatted_track}"
             else
                 echo -e "${C_PINK}🔍🤷 No track matching [${C_ORANGE}${target}${C_PINK}] found to like.${C_RESET}"
@@ -303,14 +334,18 @@ cmd_unlike() {
         local curr_idx="?"
         [ "$curr_pos" != "-1" ] && [ -n "$curr_pos" ] && curr_idx=$((curr_pos + 1))
 
+        local resolved_title=$(get_cached_title "$filename")
+        [ -n "$resolved_title" ] && [ "$resolved_title" != "null" ] && title="$resolved_title"
+        local resolved_artist=$(get_cached_artist "$filename")
+
         if [ -n "$filename" ] && is_liked_track "$filename"; then
             unmark_track_liked "$filename"
-            local formatted_track=$(format_track_log "$curr_idx" "$filename" "$title")
+            local formatted_track=$(format_track_log "$curr_idx" "$filename" "$title" "$resolved_artist")
             echo -e "${C_GRAY}🤍 Removed from Liked Songs:${C_RESET} ${formatted_track}"
             return 0
         elif [ -n "$filename" ] && is_disliked_track "$filename"; then
             unmark_track_disliked "$filename"
-            local formatted_track=$(format_track_log "$curr_idx" "$filename" "$title")
+            local formatted_track=$(format_track_log "$curr_idx" "$filename" "$title" "$resolved_artist")
             echo -e "${C_GREEN}🤍 Removed from Dislike List & Whitelisted:${C_RESET} ${formatted_track}"
             return 0
         else
@@ -356,6 +391,37 @@ cmd_unlike() {
         fi
 
         if [ -n "$filename" ]; then
+            local clean_fname="${filename%%\\t*}"
+            clean_fname="${clean_fname%%[[:space:]]*}"
+
+            local resolved_title=$(get_cached_title "$clean_fname")
+            [ -z "$resolved_title" ] && resolved_title=$(get_cached_title "$filename")
+            [ -n "$resolved_title" ] && [ "$resolved_title" != "null" ] && title="$resolved_title"
+            local resolved_artist=$(get_cached_artist "$clean_fname")
+            [ -z "$resolved_artist" ] && resolved_artist=$(get_cached_artist "$filename")
+
+            # Fast online title and artist resolution if not cached
+            if [ -z "$title" ] || [[ "$title" =~ ^https?:// ]] || [[ "$title" == watch\?v=* ]]; then
+                if [[ "$clean_fname" =~ (youtube\.com|youtu\.be) ]]; then
+                    local vid_id=""
+                    [[ "$clean_fname" =~ v=([a-zA-Z0-9_-]{11}) ]] && vid_id="${BASH_REMATCH[1]}"
+                    [[ "$clean_fname" =~ youtu\.be\/([a-zA-Z0-9_-]{11}) ]] && vid_id="${BASH_REMATCH[1]}"
+                    if [ -n "$vid_id" ]; then
+                        local oe_json
+                        oe_json=$(curl -s --max-time 2 "https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${vid_id}&format=json" 2>/dev/null)
+                        local oe_t oe_a
+                        oe_t=$(echo "$oe_json" | jq -r '.title // empty' 2>/dev/null)
+                        oe_a=$(echo "$oe_json" | jq -r '.author_name // empty' 2>/dev/null)
+                        if [ -n "$oe_t" ]; then
+                            title="$oe_t"
+                            [ -z "$resolved_artist" ] && resolved_artist="$oe_a"
+                            printf "%s\t%s\t%s\t%s\n" "$clean_fname" "$title" "${resolved_artist:-Unknown}" "0:00" >> "$CACHE_FILE"
+                            CACHE_MEM["$clean_fname"]="${title}"$'\t'"${resolved_artist:-Unknown}"$'\t'"0:00"
+                        fi
+                    fi
+                fi
+            fi
+
             local was_liked=false
             local was_disliked=false
             is_liked_track "$filename" && was_liked=true
@@ -364,7 +430,7 @@ cmd_unlike() {
             unmark_track_liked "$filename"
             unmark_track_disliked "$filename"
 
-            local formatted_track=$(format_track_log "$track_idx" "$filename" "$title")
+            local formatted_track=$(format_track_log "$track_idx" "$filename" "$title" "$resolved_artist")
             if [ "$was_liked" = true ]; then
                 echo -e "${C_GRAY}🤍 Removed from Liked Songs:${C_RESET} ${formatted_track}"
             elif [ "$was_disliked" = true ]; then
@@ -668,9 +734,10 @@ cmd_dislike() {
         local curr_idx="?"
         [ "$curr_pos" != "-1" ] && [ -n "$curr_pos" ] && curr_idx=$((curr_pos + 1))
 
-        local formatted_track=$(format_track_log "$curr_idx" "$filename" "$title")
         local resolved_title=$(get_cached_title "$filename")
-        [ -n "$resolved_title" ] && title="$resolved_title"
+        [ -n "$resolved_title" ] && [ "$resolved_title" != "null" ] && title="$resolved_title"
+        local resolved_artist=$(get_cached_artist "$filename")
+        local formatted_track=$(format_track_log "$curr_idx" "$filename" "$title" "$resolved_artist")
         mark_track_disliked "$filename" "$title"
         echo -e "${C_PINK}💔 Disliked & Blacklisted from Auto Mode:${C_RESET} ${formatted_track}"
         return 0
@@ -710,16 +777,46 @@ cmd_dislike() {
         fi
 
         if [ -n "$filename" ]; then
-            local formatted_track=$(format_track_log "$track_idx" "$filename" "$title")
-            local resolved_title=$(get_cached_title "$filename")
-            [ -n "$resolved_title" ] && title="$resolved_title"
+            local clean_fname="${filename%%\\t*}"
+            clean_fname="${clean_fname%%[[:space:]]*}"
+
+            local resolved_title=$(get_cached_title "$clean_fname")
+            [ -z "$resolved_title" ] && resolved_title=$(get_cached_title "$filename")
+            [ -n "$resolved_title" ] && [ "$resolved_title" != "null" ] && title="$resolved_title"
+            local resolved_artist=$(get_cached_artist "$clean_fname")
+            [ -z "$resolved_artist" ] && resolved_artist=$(get_cached_artist "$filename")
+
+            # Fast online title and artist resolution if not cached
+            if [ -z "$title" ] || [[ "$title" =~ ^https?:// ]] || [[ "$title" == watch\?v=* ]]; then
+                if [[ "$clean_fname" =~ (youtube\.com|youtu\.be) ]]; then
+                    local vid_id=""
+                    [[ "$clean_fname" =~ v=([a-zA-Z0-9_-]{11}) ]] && vid_id="${BASH_REMATCH[1]}"
+                    [[ "$clean_fname" =~ youtu\.be\/([a-zA-Z0-9_-]{11}) ]] && vid_id="${BASH_REMATCH[1]}"
+                    if [ -n "$vid_id" ]; then
+                        local oe_json
+                        oe_json=$(curl -s --max-time 2 "https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${vid_id}&format=json" 2>/dev/null)
+                        local oe_t oe_a
+                        oe_t=$(echo "$oe_json" | jq -r '.title // empty' 2>/dev/null)
+                        oe_a=$(echo "$oe_json" | jq -r '.author_name // empty' 2>/dev/null)
+                        if [ -n "$oe_t" ]; then
+                            title="$oe_t"
+                            [ -z "$resolved_artist" ] && resolved_artist="$oe_a"
+                            printf "%s\t%s\t%s\t%s\n" "$clean_fname" "$title" "${resolved_artist:-Unknown}" "0:00" >> "$CACHE_FILE"
+                            CACHE_MEM["$clean_fname"]="${title}"$'\t'"${resolved_artist:-Unknown}"$'\t'"0:00"
+                        fi
+                    fi
+                fi
+            fi
+
+            local formatted_track=$(format_track_log "$track_idx" "$filename" "$title" "$resolved_artist")
             mark_track_disliked "$filename" "$title"
             echo -e "${C_PINK}💔 Disliked & Blacklisted from Auto Mode:${C_RESET} ${formatted_track}"
         else
             local cached_title=$(get_cached_title "$target")
             if [ -n "$cached_title" ]; then
                 mark_track_disliked "$target" "$cached_title"
-                local formatted_track=$(format_track_log "?" "$target" "$cached_title")
+                local cached_artist=$(get_cached_artist "$target")
+                local formatted_track=$(format_track_log "?" "$target" "$cached_title" "$cached_artist")
                 echo -e "${C_PINK}💔 Disliked & Blacklisted from Auto Mode:${C_RESET} ${formatted_track}"
             else
                 echo -e "${C_PINK}🔍🤷 No track matching [${C_ORANGE}${target}${C_PINK}] found to dislike.${C_RESET}"
