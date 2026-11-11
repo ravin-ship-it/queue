@@ -232,70 +232,78 @@ fetch_and_display_url_info() {
     local opts=("--extractor-args" "youtube:player_client=visionos,android,web" "--dump-json" "--no-warnings" "--skip-download" "--ignore-errors" "--flat-playlist")
     command -v node >/dev/null 2>&1 && opts+=("--js-runtimes" "node")
     [ -n "$COOKIES_FILE" ] && [ -f "$COOKIES_FILE" ] && opts+=("--cookies" "$COOKIES_FILE")
-    local json_dump=$(run_with_timeout 30 yt-dlp "${opts[@]}" -- "$clean_url" 2>/dev/null)
+    local json_dump=$(run_with_timeout 45 yt-dlp "${opts[@]}" -- "$clean_url" 2>/dev/null)
     if [ -z "$json_dump" ]; then
-        if [ -n "$force_title" ] || [ "$is_current" == "true" ]; then
-            local display_t="${force_title:-$clean_url}"
-
-            local h_box_title="${C_PINK}🪷 Track Metadata${C_RESET}"
-            [ "$is_blind" == "true" ] && h_box_title="${C_PINK}🕶️ Queue Blind Mode (One-Time Isolated Playback)${C_RESET}"
-            print_header_box "$h_box_title"
-            print_boxed_line "${C_TEAL}Title:    ${C_CYAN}${display_t:0:$((INNER_WIDTH-12))}${C_RESET}"
-            print_boxed_line "${C_TEAL}Source:   ${C_VIOLET}${clean_url:0:$((INNER_WIDTH-12))}${C_RESET}"
-            if [ "$is_blind" == "true" ]; then
-                print_boxed_line "${C_TEAL}Session:  ${queue_display}"
-            else
-                print_boxed_line "${C_TEAL}Queue:    ${queue_display}"
-            fi
-            print_boxed_line "${C_GRAY}(Remote details restricted by YouTube bot protection)${C_RESET}"
-            
-            if [ "$is_current" == "true" ]; then
-                print_stream_and_engine_info "$target_socket" "$is_blind"
-            fi
-            printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
-            B_LINE=${B_LINE// /─}
-            echo -e "${C_PURPLE}${B_LINE}${C_RESET}"
-
-            if [ -t 0 ] && [ -t 1 ]; then
-                echo -ne "${C_PINK}>>> Press 'l' to like/unlike, 'x' to dislike, 'd' to download, 'v' for video, 'a' for audio, 'r' for quality, or ENTER to return: ${C_RESET}"
-                read -r -n 1 user_key < /dev/tty 2>/dev/null || read -r -n 1 user_key
-                echo ""
-                if [[ "$user_key" =~ ^[lL]$ ]]; then
-                    if is_liked_track "$clean_url" "$video_id"; then
-                        cmd_unlike "$clean_url"
-                    else
-                        cmd_like "$clean_url"
-                    fi
-                elif [[ "$user_key" =~ ^[dD]$ ]]; then
-                    cmd_download "$clean_url"
-                elif [[ "$user_key" =~ ^[xX]$ ]]; then
-                    if is_disliked_track "$clean_url" "$video_id"; then
-                        cmd_undislike "$clean_url"
-                    else
-                        cmd_dislike "$clean_url"
-                    fi
-                elif [[ "$user_key" =~ ^[vV]$ ]]; then
-                    if [ "$is_blind" == "true" ]; then
-                        echo '{"command":["cycle","video"]}' | nc ${NC_OPTS:--U} -w 1 "$target_socket" >/dev/null 2>&1
-                        echo -e "${C_CYAN}📺 Toggled video stream in Blind Mode session.${C_RESET}"
-                    else
-                        cmd_video_toggle ""
-                    fi
-                elif [[ "$user_key" =~ ^[aA]$ ]]; then
-                    if [ "$is_blind" == "true" ]; then
-                        cmd_language -pb
-                    else
-                        cmd_language ""
-                    fi
-                elif [[ "$user_key" =~ ^[rR]$ ]]; then
-                    cmd_resolution ""
-                fi
-            fi
-            return
-        else
-            echo -e "${C_PINK}🙈 Failed to fetch info... the internet might be playing hide and seek!${C_RESET}"
-            return
+        local display_t="$force_title"
+        if [ -z "$display_t" ] || [ "$display_t" == "N/A" ] || [[ "$display_t" =~ ^https?:// ]]; then
+            display_t=$(get_cached_title "$clean_url")
         fi
+        if [ -z "$display_t" ] || [ "$display_t" == "N/A" ] || [[ "$display_t" =~ ^https?:// ]]; then
+            if [ -n "$video_id" ]; then
+                local fast_oe
+                fast_oe=$(curl -4 -s --max-time 4 "https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${video_id}&format=json" 2>/dev/null)
+                local oe_t
+                oe_t=$(echo "$fast_oe" | jq -r '.title // empty' 2>/dev/null)
+                [ -n "$oe_t" ] && display_t="$oe_t"
+            fi
+        fi
+        [ -z "$display_t" ] && display_t="$clean_url"
+
+        local h_box_title="${C_PINK}🪷 Track Metadata${C_RESET}"
+        [ "$is_blind" == "true" ] && h_box_title="${C_PINK}🕶️ Queue Blind Mode (One-Time Isolated Playback)${C_RESET}"
+        print_header_box "$h_box_title"
+        print_boxed_line "${C_TEAL}Title:    ${C_CYAN}${display_t:0:$((INNER_WIDTH-12))}${C_RESET}"
+        print_boxed_line "${C_TEAL}Source:   ${C_VIOLET}${clean_url:0:$((INNER_WIDTH-12))}${C_RESET}"
+        if [ "$is_blind" == "true" ]; then
+            print_boxed_line "${C_TEAL}Session:  ${queue_display}"
+        else
+            print_boxed_line "${C_TEAL}Queue:    ${queue_display}"
+        fi
+        print_boxed_line "${C_GRAY}(Remote details restricted by YouTube bot protection)${C_RESET}"
+        
+        if [ "$is_current" == "true" ]; then
+            print_stream_and_engine_info "$target_socket" "$is_blind"
+        fi
+        printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
+        B_LINE=${B_LINE// /─}
+        echo -e "${C_PURPLE}${B_LINE}${C_RESET}"
+
+        if [ -t 0 ] && [ -t 1 ]; then
+            echo -ne "${C_PINK}>>> Press 'l' to like/unlike, 'x' to dislike, 'd' to download, 'v' for video, 'a' for audio, 'r' for quality, or ENTER to return: ${C_RESET}"
+            read -r -n 1 user_key < /dev/tty 2>/dev/null || read -r -n 1 user_key
+            echo ""
+            if [[ "$user_key" =~ ^[lL]$ ]]; then
+                if is_liked_track "$clean_url" "$video_id"; then
+                    cmd_unlike "$clean_url"
+                else
+                    cmd_like "$clean_url"
+                fi
+            elif [[ "$user_key" =~ ^[dD]$ ]]; then
+                cmd_download "$clean_url"
+            elif [[ "$user_key" =~ ^[xX]$ ]]; then
+                if is_disliked_track "$clean_url" "$video_id"; then
+                    cmd_undislike "$clean_url"
+                else
+                    cmd_dislike "$clean_url"
+                fi
+            elif [[ "$user_key" =~ ^[vV]$ ]]; then
+                if [ "$is_blind" == "true" ]; then
+                    echo '{"command":["cycle","video"]}' | nc ${NC_OPTS:--U} -w 1 "$target_socket" >/dev/null 2>&1
+                    echo -e "${C_CYAN}📺 Toggled video stream in Blind Mode session.${C_RESET}"
+                else
+                    cmd_video_toggle ""
+                fi
+            elif [[ "$user_key" =~ ^[aA]$ ]]; then
+                if [ "$is_blind" == "true" ]; then
+                    cmd_language -pb
+                else
+                    cmd_language ""
+                fi
+            elif [[ "$user_key" =~ ^[rR]$ ]]; then
+                cmd_resolution ""
+            fi
+        fi
+        return
     fi
     
     # Check if we have multiple lines (Playlist) or single line
@@ -341,16 +349,43 @@ fetch_and_display_url_info() {
              B_LINE=${B_LINE// /─}
              echo -e "${C_GRAY}${B_LINE}${C_RESET}"
         else
-            local title=$(echo "$json_dump" | jq -r '.title')
-        # Use existing title from MPV if available and yt-dlp title is generic
-        [ -n "$force_title" ] && [ "$force_title" != "N/A" ] && title="$force_title"
-        
-        local artist=$(echo "$json_dump" | jq -r '.uploader // .artist // "N/A"')
-        local dur=$(echo "$json_dump" | jq -r '.duration_string')
-        local platform=$(echo "$json_dump" | jq -r '.extractor_key')
-        local views=$(echo "$json_dump" | jq -r '.view_count // 0')
-        local likes=$(echo "$json_dump" | jq -r '.like_count // 0')
-        local date=$(echo "$json_dump" | jq -r '.upload_date // "N/A"')
+            local title=$(echo "$json_dump" | jq -r '.title // empty')
+            # If title from yt-dlp is missing or is just a URL, fall back to non-URL force_title, cache, or oEmbed
+            if [ -z "$title" ] || [ "$title" == "null" ] || [ "$title" == "N/A" ] || [[ "$title" =~ ^https?:// ]]; then
+                if [ -n "$force_title" ] && [ "$force_title" != "N/A" ] && [[ ! "$force_title" =~ ^https?:// ]]; then
+                    title="$force_title"
+                else
+                    local cached_t
+                    cached_t=$(get_cached_title "$clean_url")
+                    if [ -n "$cached_t" ] && [ "$cached_t" != "null" ] && [[ ! "$cached_t" =~ ^https?:// ]]; then
+                        title="$cached_t"
+                    elif [ -n "$video_id" ]; then
+                        local fast_oe
+                        fast_oe=$(curl -s --max-time 3 "https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${video_id}&format=json" 2>/dev/null)
+                        local oe_t
+                        oe_t=$(echo "$fast_oe" | jq -r '.title // empty' 2>/dev/null)
+                        [ -n "$oe_t" ] && title="$oe_t"
+                    fi
+                fi
+            fi
+            [ -z "$title" ] && title="$clean_url"
+            
+            local artist=$(echo "$json_dump" | jq -r '.uploader // .artist // "N/A"')
+            local dur=$(echo "$json_dump" | jq -r '.duration_string')
+            local platform=$(echo "$json_dump" | jq -r '.extractor_key')
+            local views=$(echo "$json_dump" | jq -r '.view_count // 0')
+            local likes=$(echo "$json_dump" | jq -r '.like_count // 0')
+            local date=$(echo "$json_dump" | jq -r '.upload_date // "N/A"')
+
+            # Save resolved title and artist to cache
+            if [ -n "$title" ] && [[ ! "$title" =~ ^https?:// ]]; then
+                mkdir -p "$(dirname "$CACHE_FILE")" 2>/dev/null
+                printf "%s\t%s\t%s\t%s\n" "$clean_url" "$title" "${artist:-Unknown}" "${dur:-0:00}" >> "$CACHE_FILE"
+                CACHE_MEM["$clean_url"]="${title}"$'\t'"${artist:-Unknown}"$'\t'"${dur:-0:00}"
+                if [ "$is_blind" == "true" ] && [ -f "$HOME/.cache/mpv/blind_active" ]; then
+                    sed -i "s|^title=.*|title=${title}|" "$HOME/.cache/mpv/blind_active" 2>/dev/null
+                fi
+            fi
         
         if [[ "$views" =~ ^[0-9]+$ ]]; then views=$(printf "%'d" "$views"); fi
         if [[ "$likes" =~ ^[0-9]+$ ]]; then likes=$(printf "%'d" "$likes"); fi
@@ -906,13 +941,23 @@ cmd_info() {
         if [ -z "$blind_path" ] && [ -S "$blind_socket" ]; then
             blind_path=$(echo '{"command":["get_property","path"]}' | nc ${NC_OPTS:--U} -w 1 "$blind_socket" 2>/dev/null | jq -r '.data // ""')
         fi
-        if [ -z "$blind_title" ] && [ -S "$blind_socket" ]; then
-            blind_title=$(echo '{"command":["get_property","media-title"]}' | nc ${NC_OPTS:--U} -w 1 "$blind_socket" 2>/dev/null | jq -r '.data // ""')
+        if [ -S "$blind_socket" ]; then
+            local mpv_mtitle
+            mpv_mtitle=$(echo '{"command":["get_property","media-title"]}' | nc ${NC_OPTS:--U} -w 1 "$blind_socket" 2>/dev/null | jq -r 'select(.event == null) | .data // empty' 2>/dev/null | tail -n 1)
+            if [ -n "$mpv_mtitle" ] && [[ ! "$mpv_mtitle" =~ ^https?:// ]]; then
+                blind_title="$mpv_mtitle"
+            fi
         fi
-        [ -z "$blind_title" ] && blind_title="$blind_path"
+        if [[ "$blind_title" =~ ^https?:// ]] || [ -z "$blind_title" ]; then
+            local c_t
+            c_t=$(get_cached_title "$blind_path")
+            [ -n "$c_t" ] && [[ ! "$c_t" =~ ^https?:// ]] && blind_title="$c_t"
+        fi
+        local pass_blind_t="$blind_title"
+        [[ "$pass_blind_t" =~ ^https?:// ]] && pass_blind_t=""
 
         if [[ "$blind_path" =~ ^http.* ]]; then
-            fetch_and_display_url_info "$blind_path" "$blind_title" "true" "$blind_socket" "true"
+            fetch_and_display_url_info "$blind_path" "$pass_blind_t" "true" "$blind_socket" "true"
             return
         fi
 
@@ -3926,12 +3971,27 @@ cmd_blind_play() {
     elif [[ "$target" =~ ^http.* ]]; then
         play_target="$target"
         echo -e "${C_CYAN}🔍 Inspecting stream metadata...${C_RESET}"
-        local ytdl_title_cmd=("yt-dlp" "--no-warnings" "--skip-download" "--dump-json")
+
+        # Fast oEmbed resolution for instant title
+        local oe_vid=""
+        [[ "$play_target" =~ (youtu\.be\/|v=)([^&?\/]+) ]] && oe_vid="${BASH_REMATCH[2]}"
+        if [ -n "$oe_vid" ]; then
+            local fast_oe
+            fast_oe=$(curl -4 -s --max-time 4 "https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${oe_vid}&format=json" 2>/dev/null)
+            local oe_t
+            oe_t=$(echo "$fast_oe" | jq -r '.title // empty' 2>/dev/null)
+            [ -n "$oe_t" ] && display_title="$oe_t"
+        fi
+
+        local ytdl_title_cmd=("yt-dlp" "--extractor-args" "youtube:player_client=visionos,android,web" "--no-warnings" "--skip-download" "--dump-json" "--flat-playlist")
         command -v node >/dev/null 2>&1 && ytdl_title_cmd+=("--js-runtimes" "node")
+        [ -n "$COOKIES_FILE" ] && [ -f "$COOKIES_FILE" ] && ytdl_title_cmd+=("--cookies" "$COOKIES_FILE")
         local raw_json
-        raw_json=$(run_with_timeout 12 "${ytdl_title_cmd[@]}" -- "$play_target" 2>/dev/null)
+        raw_json=$(run_with_timeout 8 "${ytdl_title_cmd[@]}" -- "$play_target" 2>/dev/null)
         if [ -n "$raw_json" ]; then
-            display_title=$(echo "$raw_json" | jq -r '.title // empty' 2>/dev/null)
+            local yt_t
+            yt_t=$(echo "$raw_json" | jq -r '.title // empty' 2>/dev/null)
+            [ -n "$yt_t" ] && display_title="$yt_t"
             local b_langs
             b_langs=$(echo "$raw_json" | jq -c '[.formats[]? | select(.vcodec == "none" and .acodec != "none") | {lang: (.language // "auto"), note: (.format_note // "")}] | unique_by(.lang)' 2>/dev/null)
             if [ -n "$b_langs" ] && [ "$b_langs" != "[]" ]; then
