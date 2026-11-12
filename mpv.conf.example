@@ -15,13 +15,13 @@ audio-pitch-correction=yes
 msg-level=ao=warn,pw.conf=error
 
 # Network & Streaming Reconnect Resilience (Fluid Readahead & Fluctuation Protection)
-network-timeout=30
-stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_delay_max=5
+network-timeout=12
+stream-lavf-o=reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_on_http_error=4xx,5xx,reconnect_delay_max=4
 cache=yes
 cache-secs=300
 cache-pause=yes
-cache-pause-wait=2
-cache-pause-initial=yes
+cache-pause-wait=1
+cache-pause-initial=no
 demuxer-max-bytes=512MiB
 demuxer-max-back-bytes=128MiB
 demuxer-readahead-secs=300

@@ -486,6 +486,46 @@ local last_adaptation_time = 0
 local recent_stalls = {}
 local stable_buffer_seconds = 0
 
+-- =========================================================================
+-- Fortress Quality & Stream State Machine
+-- Guarantees atomic, freeze-proof resolution, audio, and language switching
+-- =========================================================================
+
+local QualityState = {
+    is_switching = false,
+    target_tier = nil,
+    target_pos = 0,
+    start_time = 0,
+    generation = 0,
+    seek_fallback_timer = nil
+}
+
+local function is_quality_switch_in_flight()
+    if not QualityState.is_switching then return false end
+    local now = mp.get_time()
+    -- Safety circuit breaker: auto-release lock after 25s max to prevent permanent hang
+    if now - QualityState.start_time > 25.0 then
+        QualityState.is_switching = false
+        if QualityState.seek_fallback_timer then
+            QualityState.seek_fallback_timer:kill()
+            QualityState.seek_fallback_timer = nil
+        end
+        return false
+    end
+    return true
+end
+
+local function finish_quality_switch()
+    QualityState.is_switching = false
+    QualityState.target_tier = nil
+    QualityState.target_pos = 0
+    if QualityState.seek_fallback_timer then
+        QualityState.seek_fallback_timer:kill()
+        QualityState.seek_fallback_timer = nil
+    end
+    mp.set_property("start", "none")
+end
+
 local pending_resume_pos = nil
 local resume_timer = nil
 
@@ -495,6 +535,7 @@ local last_valid_time = 0
 local last_valid_url = ""
 
 local function do_resume_seek()
+    if is_quality_switch_in_flight() then return end
     if not pending_resume_pos then
         if resume_timer then resume_timer:kill(); resume_timer = nil end
         return
@@ -520,9 +561,9 @@ local function queue_resume_seek(pos)
     if resume_timer then resume_timer:kill() end
 
     local attempts = 0
-    resume_timer = mp.add_periodic_timer(0.12, function()
+    resume_timer = mp.add_periodic_timer(0.25, function()
         attempts = attempts + 1
-        if not pending_resume_pos or attempts > 60 then
+        if not pending_resume_pos or attempts > 30 then
             if resume_timer then resume_timer:kill(); resume_timer = nil end
             pending_resume_pos = nil
             return
@@ -563,6 +604,13 @@ local function change_quality(target, is_auto_adaptive)
         target = "auto"
     end
 
+    local now = mp.get_time()
+
+    -- Fortress Debounce: If already switching to the same quality target, ignore duplicate command
+    if QualityState.is_switching and QualityState.target_tier == target and (now - QualityState.start_time < 3.0) then
+        return
+    end
+
     if target == "audio" then
         save_audio_mode(true)
         mp.set_property("vid", "no")
@@ -585,26 +633,43 @@ local function change_quality(target, is_auto_adaptive)
             starved_buffer_seconds = 0
             recent_stalls = {}
             stable_buffer_seconds = 0
-            track_start_time = mp.get_time()
-            last_adaptation_time = mp.get_time()
+            track_start_time = now
+            last_adaptation_time = now
         else
             current_tier = target
-            track_start_time = mp.get_time()
-            last_adaptation_time = mp.get_time()
+            track_start_time = now
+            last_adaptation_time = now
         end
         pcall(mp.set_property, "user-data/queue-res", current_tier)
     end
 
-    -- Capture current timestamp and set start property + queue seek on reload
+    -- Capture current timestamp safely
     local cur_time = mp.get_property_number("time-pos")
     if (not cur_time or cur_time < 1.0) and last_valid_time > 1.0 then
         cur_time = last_valid_time
     end
-    if cur_time and cur_time > 1.0 then
-        arm_resume_seek(cur_time)
+    if not cur_time or cur_time < 0 then cur_time = 0 end
+
+    -- Activate Fortress QualityState lock
+    QualityState.is_switching = true
+    QualityState.target_tier = target
+    QualityState.target_pos = cur_time
+    QualityState.start_time = now
+    QualityState.generation = QualityState.generation + 1
+
+    -- Kill any pending resume seek timers to avoid competing with demuxer
+    pending_resume_pos = nil
+    if resume_timer then resume_timer:kill(); resume_timer = nil end
+    if QualityState.seek_fallback_timer then
+        QualityState.seek_fallback_timer:kill()
+        QualityState.seek_fallback_timer = nil
+    end
+
+    -- Apply native demuxer start offset: ffmpeg fetches HTTP ranges directly from timestamp
+    if cur_time > 1.0 then
         mp.set_property("start", string.format("%.2f", cur_time))
     else
-        pending_resume_pos = nil
+        mp.set_property("start", "none")
     end
 
     local fmt = get_quality_format(target, current_lang)
@@ -621,15 +686,30 @@ end
 
 local function change_resolution(fmt, label)
     if not fmt or fmt == "" then return end
+    local now = mp.get_time()
     local cur_time = mp.get_property_number("time-pos")
     if (not cur_time or cur_time < 1.0) and last_valid_time > 1.0 then
         cur_time = last_valid_time
     end
-    if cur_time and cur_time > 1.0 then
-        arm_resume_seek(cur_time)
+    if not cur_time or cur_time < 0 then cur_time = 0 end
+
+    QualityState.is_switching = true
+    QualityState.target_tier = "custom"
+    QualityState.target_pos = cur_time
+    QualityState.start_time = now
+    QualityState.generation = QualityState.generation + 1
+
+    pending_resume_pos = nil
+    if resume_timer then resume_timer:kill(); resume_timer = nil end
+    if QualityState.seek_fallback_timer then
+        QualityState.seek_fallback_timer:kill()
+        QualityState.seek_fallback_timer = nil
+    end
+
+    if cur_time > 1.0 then
         mp.set_property("start", string.format("%.2f", cur_time))
     else
-        pending_resume_pos = nil
+        mp.set_property("start", "none")
     end
 
     mp.set_property("ytdl-format", fmt)
@@ -651,12 +731,7 @@ local function change_language(lang, label)
     if (not cur_time or cur_time < 1.0) and last_valid_time > 1.0 then
         cur_time = last_valid_time
     end
-    if cur_time and cur_time > 1.0 then
-        arm_resume_seek(cur_time)
-        mp.set_property("start", string.format("%.2f", cur_time))
-    else
-        pending_resume_pos = nil
-    end
+    if not cur_time or cur_time < 0 then cur_time = 0 end
 
     -- 1. Check for native multi-track audio container (MKV / MP4 / local file)
     local tracks = mp.get_property_native("track-list", {})
@@ -680,6 +755,24 @@ local function change_language(lang, label)
     end
 
     -- 2. Remote / YouTube DASH stream reload
+    QualityState.is_switching = true
+    QualityState.target_tier = current_tier
+    QualityState.target_pos = cur_time
+    QualityState.start_time = mp.get_time()
+    QualityState.generation = QualityState.generation + 1
+
+    pending_resume_pos = nil
+    if resume_timer then resume_timer:kill(); resume_timer = nil end
+    if QualityState.seek_fallback_timer then
+        QualityState.seek_fallback_timer:kill()
+        QualityState.seek_fallback_timer = nil
+    end
+
+    if cur_time > 1.0 then
+        mp.set_property("start", string.format("%.2f", cur_time))
+    else
+        mp.set_property("start", "none")
+    end
     if lang == "auto" then
         pcall(mp.set_property, "alang", "auto,en,eng,und")
         pcall(mp.set_property, "slang", "auto,en,eng,und")
@@ -855,6 +948,7 @@ end
 
 local function evaluate_adaptive_bitrate()
     if is_audio_mode_active() or check_blind_mode() then return end
+    if is_quality_switch_in_flight() then return end
     if not is_auto_mode then return end
 
     -- If player is idle or stream has not started demuxing frames yet, do not evaluate
@@ -872,8 +966,11 @@ local function evaluate_adaptive_bitrate()
     if not is_remote then return end -- Strict local file immunity: zero network downshifts
 
     local now = mp.get_time()
-    -- 15-second grace period on new track start to allow demuxer to establish DASH buffers
+    -- 15-second grace period on new track start or quality switch to allow demuxer to establish DASH buffers
     if track_start_time > 0 and (now - track_start_time < 15) then
+        return
+    end
+    if QualityState.start_time > 0 and (now - QualityState.start_time < 20) then
         return
     end
 
@@ -937,6 +1034,7 @@ end
 
 local function on_cache_pause_change(name, is_paused)
     if not is_paused then return end
+    if is_quality_switch_in_flight() then return end
     evaluate_adaptive_bitrate()
 end
 
@@ -952,9 +1050,13 @@ local last_lag_check_time = 0
 
 local function check_hardware_lag()
     if is_audio_mode_active() then return end
+    if is_quality_switch_in_flight() then return end
     local idle = mp.get_property_bool("idle-active", false)
     local paused = mp.get_property_bool("pause", false)
     if idle or paused then return end
+
+    local now = mp.get_time()
+    if QualityState.start_time > 0 and (now - QualityState.start_time < 15.0) then return end
 
     local cur_time = mp.get_property_number("time-pos", nil)
     if not cur_time or cur_time < 3.0 then return end
@@ -1031,6 +1133,95 @@ local function check_hardware_lag()
     end
 end
 
+-- =========================================================================
+-- 4c. Intelligent Buffer Stall Watchdog (Debian Fortress Grade)
+-- Unfreezes network buffering stalls without interrupting active resolution switches
+-- =========================================================================
+
+local stall_counter = 0
+local last_stall_pos = nil
+local last_stall_time = 0
+local last_reconnect_time = 0
+
+local function check_and_recover_stall()
+    if is_quality_switch_in_flight() then
+        stall_counter = 0
+        return
+    end
+
+    local idle = mp.get_property_bool("idle-active", false)
+    if idle then stall_counter = 0; return end
+
+    local path = mp.get_property("path", "")
+    if not path or path == "" then stall_counter = 0; return end
+
+    local is_remote = (path:match("^https?://") ~= nil) or (path:match("^ytdl://") ~= nil)
+    if not is_remote then stall_counter = 0; return end
+
+    local user_paused = mp.get_property_bool("pause", false)
+    local cache_paused = mp.get_property_bool("paused-for-cache", false)
+    local cur_time = mp.get_property_number("time-pos", nil)
+    local cache_dur = mp.get_property_number("demuxer-cache-duration", 0)
+
+    -- If user intentionally paused playback and not starving, do not interfere
+    if user_paused and not cache_paused then
+        stall_counter = 0
+        return
+    end
+
+    -- If time position is advancing smoothly, reset stall counter
+    if cur_time and last_stall_pos and math.abs(cur_time - last_stall_pos) > 0.1 then
+        stall_counter = 0
+        last_stall_pos = cur_time
+        return
+    end
+    last_stall_pos = cur_time
+
+    -- Detect true stall: cache is paused OR time position frozen with empty buffer (< 0.5s)
+    local is_stalled = false
+    if cache_paused then
+        is_stalled = true
+    elseif cur_time and cache_dur < 0.5 then
+        is_stalled = true
+    end
+
+    if is_stalled then
+        stall_counter = stall_counter + 1
+        local now = mp.get_time()
+
+        -- STAGE 1: Light Demuxer Flush (at 4s of continuous stall = 2 ticks of 2s)
+        -- Issues exact 0 seek to flush dead TCP socket without reloading yt-dlp
+        if stall_counter == 2 and (now - last_stall_time > 10) then
+            last_stall_time = now
+            mp.commandv("show-text", "🔄 Buffer stalled: re-syncing stream...", 1800)
+            mp.commandv("seek", 0, "relative", "exact")
+            mp.set_property_bool("pause", false)
+        end
+
+        -- STAGE 2: Deep Reconnect & Adaptive Downshift (at 8s of continuous stall)
+        -- YouTube CDN socket died: reload stream cleanly using Fortress State Machine
+        if stall_counter == 4 and (now - last_reconnect_time > 16) then
+            last_reconnect_time = now
+            stall_counter = 0
+
+            local next_tier = current_tier
+            if not is_audio_mode_active() and current_tier ~= "low" and current_tier ~= "480" and current_tier ~= "360" then
+                if current_tier == "auto" or current_tier == "max" or current_tier == "high" then
+                    next_tier = "mid"
+                else
+                    next_tier = "low"
+                end
+                mp.commandv("show-text", "⚡ Network slow: downshifting to " .. next_tier .. "...", 2500)
+            else
+                mp.commandv("show-text", "⚡ Refreshing connection & stream buffer...", 2500)
+            end
+            change_quality(next_tier, true)
+        end
+    else
+        stall_counter = 0
+    end
+end
+
 local last_periodic_tick = nil
 
 -- Periodic Adaptive Watcher & Position Cache
@@ -1043,19 +1234,18 @@ mp.add_periodic_timer(2.0, function()
     last_periodic_tick = now
 
     -- 0. Sleep / Hibernation Wake Guard:
-    -- If a 2.0s timer experiences a gap > 6.0s, host machine was sleeping or hibernated.
-    -- TCP sockets are dead and Wi-Fi needs 5-15s to reconnect. Pause immediately to protect queue!
-    if elapsed > 6.0 and not check_blind_mode() then
+    -- If a 2.0s timer experiences a gap > 15.0s, laptop was closed or hibernated.
+    -- Pause playback to protect queue from rapid offline skipping.
+    if elapsed > 15.0 and not check_blind_mode() and not is_quality_switch_in_flight() then
         mp.set_property_bool("pause", true)
-        mp.commandv("show-text", "📶 Resumed from sleep: waiting for network connection...", 8000)
-        trigger_network_offline_freeze(last_valid_pos, last_valid_time)
+        mp.commandv("show-text", "📶 Resumed from sleep: Queue paused. Press Space to resume.", 6000)
     end
 
-    -- Maintain playback position cache (only update when online to prevent corrupted state)
+    -- Maintain playback position cache
     local p = mp.get_property_number("playlist-pos", -1)
     local t = mp.get_property_number("time-pos", 0)
     local path = mp.get_property("path", "")
-    if p >= 0 and t > 0 and not network_offline then
+    if p >= 0 and t > 0 and not is_quality_switch_in_flight() then
         last_valid_pos = p
         last_valid_time = t
         if path ~= "" then last_valid_url = path end
@@ -1064,140 +1254,51 @@ mp.add_periodic_timer(2.0, function()
     -- 1. Hardware Lag & Frame Drop Guard (Prevents device stutter)
     check_hardware_lag()
 
-    -- 2. Evaluate adaptive bitrate with playable buffer protection
+    -- 2. Buffer Stall Watchdog (Debian Fortress Grade)
+    check_and_recover_stall()
+
+    -- 3. Evaluate adaptive bitrate with playable buffer protection
     evaluate_adaptive_bitrate()
 end)
 
 -- =========================================================================
--- 5. Anti-Suicide & Network Drop Recovery Guard
+-- 5. Anti-Suicide & Stream Error Guard
+-- Prevents cascading playlist skips on restricted/broken tracks and protects quality switches
 -- =========================================================================
 
-local network_offline = false
-local network_probe_timer = nil
 local consecutive_net_errors = 0
-local deferred_load_hook = nil
-local was_playing_before_sleep = true
 
-local function check_internet_connectivity(cb)
-    local is_win = (package.config:sub(1,1) == "\\") or (os.getenv("WINDIR") ~= nil)
-    local ping_cmd = is_win and {"ping", "-n", "1", "-w", "1000", "1.1.1.1"} or {"ping", "-c", "1", "-W", "1", "1.1.1.1"}
-
-    mp.command_native_async({
-        name = "subprocess",
-        args = ping_cmd,
-        capture_stdout = false,
-        capture_stderr = false
-    }, function(success, res, err)
-        if success and res and res.status == 0 then
-            cb(true)
-        else
-            -- Secondary fallback to 8.8.8.8
-            local ping_cmd2 = is_win and {"ping", "-n", "1", "-w", "1000", "8.8.8.8"} or {"ping", "-c", "1", "-W", "1", "8.8.8.8"}
-            mp.command_native_async({
-                name = "subprocess",
-                args = ping_cmd2,
-                capture_stdout = false,
-                capture_stderr = false
-            }, function(s2, r2, e2)
-                if s2 and r2 and r2.status == 0 then
-                    cb(true)
-                else
-                    cb(false)
-                end
-            end)
-        end
-    end)
-end
-
-function trigger_network_offline_freeze(saved_pos, saved_time)
-    if network_offline then return end
-    network_offline = true
-
-    local cur_paused = mp.get_property_bool("pause", false)
-    was_playing_before_sleep = not cur_paused
-    mp.set_property_bool("pause", true)
-
-    local target_pos = (saved_pos and saved_pos >= 0) and saved_pos or last_valid_pos
-    if target_pos < 0 then
-        target_pos = get_saved_pos()
-    end
-    local track_num = (target_pos and (target_pos + 1)) or 1
-    mp.commandv("show-text", "📶 Network Offline: Paused Queue at track #" .. track_num .. ". Waiting for internet...", 60000)
-
-    if network_probe_timer then network_probe_timer:kill() end
-    network_probe_timer = mp.add_periodic_timer(2.0, function()
-        check_internet_connectivity(function(is_online)
-            if is_online then
-                -- Internet connection restored!
-                if network_probe_timer then network_probe_timer:kill(); network_probe_timer = nil end
-                network_offline = false
-                consecutive_net_errors = 0
-                mp.commandv("show-text", "✅ Internet Restored! Resuming track #" .. track_num .. "...", 3500)
-
-                -- Release any deferred hook so mpv load pipeline can proceed
-                if deferred_load_hook then
-                    local h = deferred_load_hook
-                    deferred_load_hook = nil
-                    pcall(function() h:cont() end)
-                end
-
-                -- Seek and reload track cleanly (forces ytdl to obtain fresh stream tokens)
-                if saved_time and saved_time > 2.0 then
-                    queue_resume_seek(saved_time)
-                elseif last_valid_time and last_valid_time > 2.0 then
-                    queue_resume_seek(last_valid_time)
-                end
-
-                if target_pos and target_pos >= 0 then
-                    mp.commandv("playlist-play-index", target_pos)
-                end
-
-                if was_playing_before_sleep then
-                    mp.set_property_bool("pause", false)
-                end
-            else
-                -- Still offline: keep informing the user without skipping tracks
-                mp.commandv("show-text", "📶 Still offline: Queue waiting for internet connection...", 2200)
-            end
-        end)
-    end)
-end
-
--- Hook: Intercept track loading to halt MPV core from attempting network fetch while offline
-mp.add_hook("on_load", 10, function(hook)
-    if check_blind_mode() then return end
-
-    if network_offline then
-        deferred_load_hook = hook
-        hook:defer()
-        return
-    end
-end)
-
--- Hook: Catch load failures synchronously before MPV can cascade to the next playlist track
+-- Hook: Catch load failures synchronously and prevent cascading playlist crash
 mp.add_hook("on_load_fail", 10, function(hook)
     if check_blind_mode() then return end
 
-    hook:defer()
-    check_internet_connectivity(function(is_online)
-        if not is_online then
-            deferred_load_hook = hook
-            trigger_network_offline_freeze(last_valid_pos, last_valid_time)
-        else
-            consecutive_net_errors = consecutive_net_errors + 1
-            if consecutive_net_errors < 3 then
-                mp.commandv("show-text", "⚠️ Stream unplayable (deleted or restricted). Moving to next...", 3000)
-                pcall(function() hook:cont() end)
-            else
-                mp.set_property_bool("pause", true)
-                mp.commandv("show-text", "⚠️ Multiple tracks unplayable. Paused Queue.", 5000)
-                pcall(function() hook:cont() end)
-            end
+    if is_quality_switch_in_flight() then
+        if QualityState.target_tier ~= "auto" and QualityState.target_tier ~= "low" then
+            mp.commandv("show-text", "⚠️ Selected quality unavailable. Falling back to Auto HD...", 3000)
+            finish_quality_switch()
+            change_quality("auto", false)
+            pcall(function() hook:cont() end)
+            return
         end
-    end)
+    end
+
+    consecutive_net_errors = consecutive_net_errors + 1
+    if consecutive_net_errors < 3 then
+        mp.commandv("show-text", "⚠️ Stream unplayable (restricted or deleted). Moving to next...", 3000)
+    else
+        mp.commandv("show-text", "⚠️ Multiple tracks unplayable. Paused Queue.", 5000)
+        mp.set_property_bool("pause", true)
+    end
+    pcall(function() hook:cont() end)
 end)
 
 local function on_file_end(event)
+    if is_quality_switch_in_flight() then
+        -- The previous stream ended because of a deliberate quality switch reload.
+        -- Completely ignore: do not increment errors and do not skip track!
+        return
+    end
+
     if event.reason == "eof" then
         if resume_timer then resume_timer:kill(); resume_timer = nil end
         pending_resume_pos = nil
@@ -1210,41 +1311,17 @@ local function on_file_end(event)
         return
     end
 
-    if network_offline then
-        -- Freeze queue: do not advance on network failure!
-        return
-    end
-
     if event.reason == "error" then
-        local current_path = mp.get_property("path", "")
-        if (not current_path or current_path == "") and last_valid_url ~= "" then
-            current_path = last_valid_url
-        end
-
-        local is_remote = false
-        if current_path then
-            is_remote = (current_path:match("^https?://") ~= nil) or (current_path:match("^ytdl://") ~= nil)
-        end
-
-        if is_remote then
-            consecutive_net_errors = consecutive_net_errors + 1
+        consecutive_net_errors = consecutive_net_errors + 1
+        if consecutive_net_errors < 3 then
+            mp.commandv("show-text", "⚠️ Stream unavailable. Moving to next track...", 3000)
+            mp.set_property_bool("pause", false)
+            smart_next(true)
+        else
+            mp.commandv("show-text", "⚠️ Multiple tracks unplayable. Pausing Queue.", 5000)
             mp.set_property_bool("pause", true)
-
-            check_internet_connectivity(function(is_online)
-                if is_online then
-                    if consecutive_net_errors < 3 then
-                        mp.commandv("show-text", "⚠️ Stream unavailable (deleted or restricted). Moving to next...", 3000)
-                        mp.set_property_bool("pause", false)
-                        smart_next(true)
-                    else
-                        mp.commandv("show-text", "⚠️ Multiple tracks unplayable. Pausing Queue.", 5000)
-                    end
-                else
-                    trigger_network_offline_freeze(last_valid_pos, last_valid_time)
-                end
-            end)
-            return
         end
+        return
     end
 
     if event.reason ~= "eof" then return end
@@ -1337,17 +1414,22 @@ end
 -- =========================================================================
 
 local function on_file_loaded()
-    mp.set_property("start", "none")
-    if pending_resume_pos and pending_resume_pos > 1.0 then
-        local p = pending_resume_pos
-        queue_resume_seek(p)
+    if is_quality_switch_in_flight() then
         mp.set_property_bool("pause", false)
-    elseif check_blind_mode() then
-        mp.set_property_bool("pause", false)
+    else
+        mp.set_property("start", "none")
+        if pending_resume_pos and pending_resume_pos > 1.0 then
+            local p = pending_resume_pos
+            queue_resume_seek(p)
+            mp.set_property_bool("pause", false)
+        elseif check_blind_mode() then
+            mp.set_property_bool("pause", false)
+        end
     end
     prev_dec_drops = 0
     prev_vo_drops = 0
     consecutive_lag_checks = 0
+    consecutive_net_errors = 0
     last_lag_check_time = 0
     track_start_time = mp.get_time()
     save_session_state()
@@ -1365,7 +1447,7 @@ local function on_file_loaded()
         local fmt = get_quality_format("audio", current_lang)
         mp.set_property("ytdl-format", fmt)
     else
-        if path and path ~= "" then
+        if path and path ~= "" and not is_quality_switch_in_flight() then
             local is_remote = (path:match("^https?://") ~= nil) or (path:match("^ytdl://") ~= nil)
             if is_remote and is_auto_mode and not check_blind_mode() then
                 current_tier = "auto"
@@ -1383,10 +1465,27 @@ local function on_file_loaded()
     end
 end
 
+local function on_playback_restart()
+    if is_quality_switch_in_flight() then
+        local gen = QualityState.generation
+        mp.set_property_bool("pause", false)
+
+        if QualityState.seek_fallback_timer then QualityState.seek_fallback_timer:kill() end
+        QualityState.seek_fallback_timer = mp.add_timeout(1.5, function()
+            if QualityState.generation == gen then
+                finish_quality_switch()
+            end
+        end)
+    else
+        do_resume_seek()
+    end
+end
+
 mp.register_event("end-file", on_file_end)
 mp.register_event("file-loaded", on_file_loaded)
-mp.register_event("playback-restart", do_resume_seek)
+mp.register_event("playback-restart", on_playback_restart)
 mp.observe_property("playlist-count", "number", function(name, count)
+    if check_blind_mode() then return end
     if count and count > 0 and not has_restored_session and target_restore_pos > 0 then
         if target_restore_pos < count then
             mp.commandv("playlist-play-index", target_restore_pos)
@@ -1397,7 +1496,7 @@ end)
 mp.observe_property("playlist-pos", "number", function(name, val)
     if val and val >= 0 then
         has_restored_session = true
-        if not network_offline then
+        if not check_blind_mode() then
             last_valid_pos = val
             save_session_state()
         end
