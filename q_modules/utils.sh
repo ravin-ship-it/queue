@@ -1070,6 +1070,60 @@ clear_auto_tracks() {
     AUTO_TRACKS_MEM=()
 }
 
+reorder_user_before_auto() {
+    [ -S "$SOCKET" ] || return 0
+
+    local pl_raw
+    pl_raw=$(echo '{"command":["get_property","playlist"]}' | nc ${NC_OPTS:--U} -w 1 "$SOCKET" 2>/dev/null)
+    [ -z "$pl_raw" ] && return 0
+
+    load_auto_tracks_to_memory
+
+    local cur_pos
+    cur_pos=$(echo "$pl_raw" | jq -r 'select(.event == null) | .data | to_entries[] | select(.value.current == true) | .key' 2>/dev/null | head -n 1)
+    [[ ! "$cur_pos" =~ ^[0-9]+$ ]] && cur_pos=-1
+
+    local unplayed_tracks
+    unplayed_tracks=$(echo "$pl_raw" | jq -r --argjson cur "$cur_pos" '
+        select(.event == null) | .data | to_entries[] | select(.key > $cur) | "\(.key)\t\(.value.filename // "")"
+    ' 2>/dev/null)
+    [ -z "$unplayed_tracks" ] && return 0
+
+    local first_auto_idx=""
+    declare -a user_indices_to_move=()
+
+    while IFS=$'\t' read -r idx fname; do
+        [ -z "$idx" ] && continue
+        if is_auto_track "$fname"; then
+            if [ -z "$first_auto_idx" ]; then
+                first_auto_idx="$idx"
+            fi
+        else
+            if [ -n "$first_auto_idx" ]; then
+                user_indices_to_move+=("$idx")
+            fi
+        fi
+    done <<< "$unplayed_tracks"
+
+    if [ -n "$first_auto_idx" ] && [ ${#user_indices_to_move[@]} -gt 0 ]; then
+        local move_cmds=""
+        local k=0
+        for u_idx in "${user_indices_to_move[@]}"; do
+            local dest=$((first_auto_idx + k))
+            local json_mv=$(jq -nc --argjson from "$u_idx" --argjson to "$dest" '{"command": ["playlist-move", $from, $to]}')
+            move_cmds+="${json_mv}\n"
+            ((k++))
+        done
+        if [ -n "$move_cmds" ]; then
+            echo -e "$move_cmds" | nc ${NC_OPTS:--U} -w 1 "$SOCKET" > /dev/null 2>&1
+            ( sleep 0.3; save_current_playlist true ) >/dev/null 2>&1 & disown
+        fi
+        echo "$first_auto_idx"
+        return 0
+    fi
+    return 0
+}
+
 # --- Liked & Disliked Tracks Subsystem ---
 LIKED_TRACKS_FILE="$HOME/.cache/mpv/liked_tracks"
 LIKED_PLAYLIST_FILE="$HOME/.local/share/mpv/playlists/Liked.txt"

@@ -240,6 +240,14 @@ execute_batch() {
                 sleep 0.1
             done
 
+            # Reorder newly appended user tracks ahead of any unplayed auto-discovery tracks
+            local first_auto
+            first_auto=$(reorder_user_before_auto)
+            local final_dest_idx=$((init_count + 1))
+            if [[ "$first_auto" =~ ^[0-9]+$ ]]; then
+                final_dest_idx=$((first_auto + 1))
+            fi
+
             if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
                 local bridge_port
                 bridge_port=$(ensure_android_bridge_running)
@@ -252,16 +260,20 @@ execute_batch() {
             fi
 
             if [ "$SHOULD_START_PLAY" = true ]; then
+                local play_target=$init_count
+                if [[ "$first_auto" =~ ^[0-9]+$ ]]; then
+                    play_target=$first_auto
+                fi
                 if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
-                    echo "{\"command\": [\"playlist-play-index\", $init_count]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                    echo "{\"command\": [\"playlist-play-index\", $play_target]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
                     echo '{"command": ["set_property", "pause", true]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
                     echo '{"command": ["set_property", "mute", true]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
                     echo '{"command": ["set_property", "ao", "null"]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
                     log_now_playing "|> Playing: "
-                    cmd_android_video_handoff "$((init_count + 1))"
+                    cmd_android_video_handoff "$((play_target + 1))"
                 else
                     # Directly play the newly added track immediately
-                    echo "{\"command\": [\"playlist-play-index\", $init_count]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                    echo "{\"command\": [\"playlist-play-index\", $play_target]}" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
                     echo '{"command": ["set_property", "pause", false]}' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
                     wait_for_playback_start
                     log_now_playing "|> Playing: "
@@ -273,7 +285,7 @@ execute_batch() {
                 else
                     local display_title="${PLAYLIST_TITLES[0]}"
                     [ -z "$display_title" ] && display_title=$(basename "${PLAYLIST_URLS[0]}")
-                    local formatted_track=$(format_track_log "$((init_count + 1))" "${PLAYLIST_URLS[0]}" "$display_title")
+                    local formatted_track=$(format_track_log "$final_dest_idx" "${PLAYLIST_URLS[0]}" "$display_title")
                     echo -e "${C_PINK}✅ Queued ${formatted_track}${C_RESET}"
                 fi
             fi

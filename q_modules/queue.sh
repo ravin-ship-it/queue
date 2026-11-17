@@ -30,6 +30,9 @@ show_queue() {
     load_liked_tracks_to_memory
     load_disliked_tracks_to_memory
 
+    # Self-heal & ensure user tracks are ordered ahead of auto-discovery tracks
+    reorder_user_before_auto >/dev/null 2>&1
+
     local mpv_raw=$(echo -e '{"command":["get_property","playlist"]}\n{"command":["get_property","pause"]}\n{"command":["get_property","idle-active"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
     local is_paused=$(echo "$mpv_raw" | jq -s -r 'map(select(.event == null)) | .[1].data // false')
     local is_idle=$(echo "$mpv_raw" | jq -s -r 'map(select(.event == null)) | .[2].data // false')
@@ -694,9 +697,10 @@ cmd_liked_list() {
                 local u=$(echo "$row" | awk -F'\t' '{print $2}')
                 local t=$(echo "$row" | awk -F'\t' '{print $3}')
                 if [ -n "$u" ]; then
-                    queue_item_ipc "$u" "$t" "" ""
+                    queue_item_ipc "$u" "$t" "" "" false
                 fi
             done <<< "$sel"
+            reorder_user_before_auto >/dev/null 2>&1
             echo -e "${C_GREEN}✅ Appended ${sel_count} liked track(s) to queue.${C_RESET}"
             break
         elif echo "$track_action" | grep -q "Unlike"; then
@@ -1329,6 +1333,7 @@ queue_item_ipc() {
     local title="$2"
     local artist="$3"
     local duration="$4"
+    local is_auto="${5:-false}"
     
     # Robust URL cleaning (Only for remote URLs)
     local clean_url="$url"
@@ -1338,8 +1343,11 @@ queue_item_ipc() {
         clean_url=$(echo "$clean_url" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
     fi
     
-    # Mark as auto-added track (tagged with Ⓐ)
-    mark_track_auto "$clean_url"
+    if [ "$is_auto" = true ] || [ "$is_auto" = "true" ]; then
+        mark_track_auto "$clean_url"
+    else
+        unmark_track_auto "$clean_url"
+    fi
     
     # Get current playlist size to determine new index efficiently
     local count=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // 0')
@@ -1356,17 +1364,32 @@ queue_item_ipc() {
         fi
     fi
 
-    local display_title_log="$title"
-    [ -z "$display_title_log" ] && display_title_log=$(basename "$clean_url")
-
-    local formatted_track=$(format_track_log "$next_index" "$clean_url" "$display_title_log")
-    echo -e "${C_PINK}✅ Queued ${formatted_track}"
-
     local target_path=$(format_path_for_mpv "$clean_url")
     local load_mode="append"
     [ "$count" -eq 0 ] && load_mode="append-play"
     local json_cmd=$(jq -nc --arg path "$target_path" --arg m "$load_mode" '{"command": ["loadfile", $path, $m]}')
     send_ipc "$json_cmd" > /dev/null
+
+    local final_idx=$next_index
+    if [ "$is_auto" != true ] && [ "$is_auto" != "true" ]; then
+        for i in {1..10}; do
+            local cur_cnt=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // empty' 2>/dev/null | tail -n 1)
+            [[ ! "$cur_cnt" =~ ^[0-9]+$ ]] && cur_cnt=0
+            if [ "$cur_cnt" -gt "$count" ]; then break; fi
+            sleep 0.05
+        done
+        local first_auto
+        first_auto=$(reorder_user_before_auto)
+        if [[ "$first_auto" =~ ^[0-9]+$ ]]; then
+            final_idx=$((first_auto + 1))
+        fi
+    fi
+
+    local display_title_log="$title"
+    [ -z "$display_title_log" ] && display_title_log=$(basename "$clean_url")
+
+    local formatted_track=$(format_track_log "$final_idx" "$clean_url" "$display_title_log")
+    echo -e "${C_PINK}✅ Queued ${formatted_track}"
 
     if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
         local bridge_port
@@ -2117,7 +2140,7 @@ auto_queue_related() {
 
         echo "[$(date +%T)] [Success] Queuing (Score: $chosen_score): $chosen_t (by $chosen_a)" >> "$debug_log"
         mark_track_auto "$chosen_url"
-        queue_item_ipc "$chosen_url" "$chosen_t" "$chosen_a" "$chosen_d"
+        queue_item_ipc "$chosen_url" "$chosen_t" "$chosen_a" "$chosen_d" true
 
         # Record in history & recent artists
         [[ "$chosen_url" =~ (v=|be\/|embed\/|watch\?v=)([a-zA-Z0-9_-]{11}) ]] && echo "${BASH_REMATCH[2]}" >> "$history_file"

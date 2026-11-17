@@ -183,6 +183,7 @@ cmd_playlist_load() {
                 [ "$temp_list" != "$file" ] && rm -f "$temp_list"
                 continue
             fi
+            reorder_user_before_auto >/dev/null 2>&1
         fi
         
         ((total_loaded += count))
@@ -389,10 +390,12 @@ cmd_playlist_list() {
             clean_url="${clean_url%%[[:space:]]*}"
             clean_url=$(echo "$clean_url" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
         fi
+        unmark_track_auto "$clean_url"
         local target_path=$(format_path_for_mpv "$clean_url")
         local json_cmd=$(jq -nc --arg path "$target_path" '{"command": ["loadfile", $path, "append"]}')
         send_ipc "$json_cmd" > /dev/null
     done < <(echo "$urls")
+    reorder_user_before_auto >/dev/null 2>&1
     
     echo -e "${C_GREEN}✅ Loaded ${C_ORANGE}${sel_count}${C_GREEN} tracks from ${C_CYAN}${selected_pl}${C_RESET}"
     if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
