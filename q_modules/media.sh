@@ -1777,17 +1777,28 @@ cmd_video_toggle() {
         return 1
     fi
 
-    local reload_needed=false
-    if is_audio_mode_active; then
-        reload_needed=true
-        set_audio_mode "false"
-        echo "{\"command\":[\"script-message\",\"set-audio-mode\",\"false\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
-    else
-        local pre_vid
-        pre_vid=$(echo '{"command":["get_property","vid"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // false')
-        if [ "$pre_vid" == "false" ] || [ "$pre_vid" == "no" ]; then
-            reload_needed=true
+    local pre_time=0
+    local pre_pos=0
+    if [ "$MPV_RUNNING" = true ] && [ -S "$SOCKET" ]; then
+        local snap
+        snap=$(echo -e '{"command":["get_property","time-pos"]}\n{"command":["get_property","playlist-pos"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r 'map(select(.event == null)) | (.[0].data // 0), "\t", (.[1].data // 0)')
+        if [ -n "$snap" ]; then
+            IFS=$'\t' read -r pre_time pre_pos <<< "$snap"
         fi
+    fi
+
+    local reload_needed=false
+    local was_audio=false
+    if is_audio_mode_active; then
+        was_audio=true
+    fi
+    set_audio_mode "false"
+    echo "{\"command\":[\"script-message\",\"set-audio-mode\",\"false\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+
+    local pre_vid
+    pre_vid=$(echo '{"command":["get_property","vid"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // false')
+    if [ "$was_audio" = true ] || [ "$pre_vid" == "false" ] || [ "$pre_vid" == "no" ]; then
+        reload_needed=true
     fi
 
     # Determine VO & GPU context across platforms and engines:
@@ -1927,6 +1938,9 @@ cmd_video_toggle() {
     if [ "$reload_needed" = true ]; then
         local cur_time
         cur_time=$(echo '{"command":["get_property","time-pos"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // 0')
+        if (( $(echo "$pre_time > $cur_time" | bc -l 2>/dev/null || echo 0) )); then
+            cur_time="$pre_time"
+        fi
         local cur_path
         cur_path=$(echo '{"command":["get_property","path"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // ""')
         if [[ "$cur_path" =~ ^http.* ]] || [[ "$cur_path" =~ ^ytdl.* ]]; then
@@ -1937,6 +1951,31 @@ cmd_video_toggle() {
             fi
             r_batch+="{\"command\":[\"playlist-play-index\",\"current\"]}\n"
             echo -e "$r_batch" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+
+            # Resilient seek confirmation watcher: ensures stream demuxer reaches exact timestamp
+            if (( $(echo "$cur_time > 1" | bc -l 2>/dev/null || echo 0) )); then
+                local seek_target="$cur_time"
+                local target_p="${pre_pos:-0}"
+                (
+                    for attempt in {1..50}; do
+                        sleep 0.15
+                        [ ! -S "$SOCKET" ] && break
+                        local probe
+                        probe=$(echo -e '{"command":["get_property","seekable"]}\n{"command":["get_property","time-pos"]}\n{"command":["get_property","playlist-pos"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r 'map(select(.event == null)) | (.[0].data // false), "\t", (.[1].data // 0), "\t", (.[2].data // -1)')
+                        [ -z "$probe" ] && continue
+                        IFS=$'\t' read -r is_seekable t_pos p_pos <<< "$probe"
+                        [ "$p_pos" != "$target_p" ] && break
+                        if [ "$is_seekable" == "true" ] && [ -n "$t_pos" ] && [ "$t_pos" != "null" ]; then
+                            local diff=$(echo "$t_pos - $seek_target" | bc -l 2>/dev/null || echo 0)
+                            diff=${diff#-}
+                            if (( $(echo "$diff > 2.5" | bc -l 2>/dev/null || echo 0) )) && (( $(echo "$t_pos < 5.0" | bc -l 2>/dev/null || echo 0) )); then
+                                echo "{\"command\":[\"seek\",$seek_target,\"absolute\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+                            fi
+                            break
+                        fi
+                    done
+                ) >/dev/null 2>&1 & disown
+            fi
         fi
     fi
 
@@ -2005,8 +2044,12 @@ cmd_audio_mode() {
         fi
 
         if [ "$MPV_RUNNING" = true ] && [ -S "$SOCKET" ]; then
-            local cur_pos cur_time
-            cur_time=$(echo '{"command":["get_property","time-pos"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // 0')
+            local cur_pos=0 cur_time=0
+            local snap
+            snap=$(echo -e '{"command":["get_property","time-pos"]}\n{"command":["get_property","playlist-pos"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r 'map(select(.event == null)) | (.[0].data // 0), "\t", (.[1].data // 0)')
+            if [ -n "$snap" ]; then
+                IFS=$'\t' read -r cur_time cur_pos <<< "$snap"
+            fi
             
             # Send batch commands to MPV:
             # 1. Hide/close window cleanly
@@ -2032,6 +2075,31 @@ cmd_audio_mode() {
                 batch+="{\"command\":[\"playlist-play-index\",\"current\"]}\n"
             fi
             echo -e "$batch" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+
+            # Resilient seek confirmation watcher for seamless audio-mode transition
+            if (( $(echo "$cur_time > 1" | bc -l 2>/dev/null || echo 0) )); then
+                local seek_target="$cur_time"
+                local target_p="${cur_pos:-0}"
+                (
+                    for attempt in {1..50}; do
+                        sleep 0.15
+                        [ ! -S "$SOCKET" ] && break
+                        local probe
+                        probe=$(echo -e '{"command":["get_property","seekable"]}\n{"command":["get_property","time-pos"]}\n{"command":["get_property","playlist-pos"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r 'map(select(.event == null)) | (.[0].data // false), "\t", (.[1].data // 0), "\t", (.[2].data // -1)')
+                        [ -z "$probe" ] && continue
+                        IFS=$'\t' read -r is_seekable t_pos p_pos <<< "$probe"
+                        [ "$p_pos" != "$target_p" ] && break
+                        if [ "$is_seekable" == "true" ] && [ -n "$t_pos" ] && [ "$t_pos" != "null" ]; then
+                            local diff=$(echo "$t_pos - $seek_target" | bc -l 2>/dev/null || echo 0)
+                            diff=${diff#-}
+                            if (( $(echo "$diff > 2.5" | bc -l 2>/dev/null || echo 0) )) && (( $(echo "$t_pos < 5.0" | bc -l 2>/dev/null || echo 0) )); then
+                                echo "{\"command\":[\"seek\",$seek_target,\"absolute\"]}" | nc $NC_OPTS -w 1 "$SOCKET" >/dev/null 2>&1
+                            fi
+                            break
+                        fi
+                    done
+                ) >/dev/null 2>&1 & disown
+            fi
         fi
 
         echo -e "🎧 ${C_GREEN}Audio-Only Mode Enabled!${C_RESET}"
@@ -2041,7 +2109,6 @@ cmd_audio_mode() {
         echo -e "   ${C_GRAY}💡 To restore desktop video anytime: ${C_WHITE}q -vid${C_GRAY} or ${C_WHITE}q -aud off${C_RESET}"
         return 0
     elif [ "$action" == "off" ] || [ "$action" == "disable" ] || [ "$action" == "0" ]; then
-        set_audio_mode "false"
         echo -e "📺 ${C_CYAN}Restoring Video Pipeline...${C_RESET}"
         cmd_video_toggle ""
         return $?

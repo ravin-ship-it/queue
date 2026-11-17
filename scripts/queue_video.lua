@@ -549,14 +549,16 @@ local function do_resume_seek()
     if seekable and cur_time and cur_time >= 0 then
         if math.abs(cur_time - pos) > 2.0 then
             mp.commandv("seek", pos, "absolute")
+        else
+            pending_resume_pos = nil
+            if resume_timer then resume_timer:kill(); resume_timer = nil end
         end
         mp.set_property_bool("pause", false)
-        pending_resume_pos = nil
-        if resume_timer then resume_timer:kill(); resume_timer = nil end
     end
 end
 
 local function queue_resume_seek(pos)
+    pos = tonumber(pos)
     if not pos or pos <= 1.0 then return end
     pending_resume_pos = pos
     if resume_timer then resume_timer:kill() end
@@ -564,7 +566,7 @@ local function queue_resume_seek(pos)
     local attempts = 0
     resume_timer = mp.add_periodic_timer(0.25, function()
         attempts = attempts + 1
-        if not pending_resume_pos or attempts > 30 then
+        if not pending_resume_pos or attempts > 100 then
             if resume_timer then resume_timer:kill(); resume_timer = nil end
             pending_resume_pos = nil
             return
@@ -574,8 +576,25 @@ local function queue_resume_seek(pos)
 end
 
 local function arm_resume_seek(pos)
+    pos = tonumber(pos)
     if not pos or pos <= 1.0 then return end
-    queue_resume_seek(pos)
+
+    local now = mp.get_time()
+    QualityState.is_switching = true
+    QualityState.target_tier = "resume"
+    QualityState.target_pos = pos
+    QualityState.start_time = now
+    QualityState.generation = QualityState.generation + 1
+
+    if QualityState.seek_fallback_timer then
+        QualityState.seek_fallback_timer:kill()
+        QualityState.seek_fallback_timer = nil
+    end
+
+    pending_resume_pos = pos
+    if resume_timer then resume_timer:kill(); resume_timer = nil end
+
+    mp.set_property("start", "none")
 end
 
 local function change_quality(target, is_auto_adaptive)
@@ -1275,7 +1294,7 @@ mp.add_hook("on_load_fail", 10, function(hook)
     if check_blind_mode() then return end
 
     if is_quality_switch_in_flight() then
-        if QualityState.target_tier ~= "auto" and QualityState.target_tier ~= "low" then
+        if QualityState.target_tier ~= "auto" and QualityState.target_tier ~= "low" and QualityState.target_tier ~= "resume" then
             mp.commandv("show-text", "⚠️ Selected quality unavailable. Falling back to Auto HD...", 3000)
             finish_quality_switch()
             change_quality("auto", false)
@@ -1484,14 +1503,33 @@ local function on_playback_restart()
         local gen = QualityState.generation
         mp.set_property_bool("pause", false)
 
-        if QualityState.target_pos and QualityState.target_pos > 1.0 then
-            local pos = QualityState.target_pos
+        local target_pos = QualityState.target_pos
+        if target_pos and target_pos > 1.0 then
             QualityState.target_pos = 0
-            mp.commandv("seek", pos, "absolute")
+            mp.commandv("seek", target_pos, "absolute")
+
+            -- Active seek verifier: ensure stream demuxer jumps to target_pos
+            local check_count = 0
+            local verify_timer = nil
+            verify_timer = mp.add_periodic_timer(0.25, function()
+                check_count = check_count + 1
+                if QualityState.generation ~= gen or check_count > 16 then
+                    if verify_timer then verify_timer:kill(); verify_timer = nil end
+                    return
+                end
+                local cur = mp.get_property_number("time-pos", 0)
+                if cur and cur > 0 then
+                    if math.abs(cur - target_pos) <= 3.0 or cur >= target_pos then
+                        if verify_timer then verify_timer:kill(); verify_timer = nil end
+                    elseif check_count % 3 == 0 and cur < (target_pos - 3.0) then
+                        mp.commandv("seek", target_pos, "absolute")
+                    end
+                end
+            end)
         end
 
         if QualityState.seek_fallback_timer then QualityState.seek_fallback_timer:kill() end
-        QualityState.seek_fallback_timer = mp.add_timeout(1.5, function()
+        QualityState.seek_fallback_timer = mp.add_timeout(2.5, function()
             if QualityState.generation == gen then
                 finish_quality_switch()
             end
