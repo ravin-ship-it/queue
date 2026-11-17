@@ -1931,8 +1931,8 @@ cmd_video_toggle() {
         cur_path=$(echo '{"command":["get_property","path"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // ""')
         if [[ "$cur_path" =~ ^http.* ]] || [[ "$cur_path" =~ ^ytdl.* ]]; then
             local r_batch=""
+            r_batch+="{\"command\":[\"set_property\",\"start\",\"none\"]}\n"
             if (( $(echo "$cur_time > 1" | bc -l 2>/dev/null || echo 0) )); then
-                r_batch+="{\"command\":[\"set_property\",\"start\",\"$cur_time\"]}\n"
                 r_batch+="{\"command\":[\"script-message\",\"arm-resume-seek\",\"$cur_time\"]}\n"
             fi
             r_batch+="{\"command\":[\"playlist-play-index\",\"current\"]}\n"
@@ -2025,8 +2025,8 @@ cmd_audio_mode() {
             local cur_path
             cur_path=$(echo '{"command":["get_property","path"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // ""')
             if [[ "$cur_path" =~ ^http.* ]] || [[ "$cur_path" =~ ^ytdl.* ]]; then
+                batch+="{\"command\":[\"set_property\",\"start\",\"none\"]}\n"
                 if (( $(echo "$cur_time > 1" | bc -l 2>/dev/null || echo 0) )); then
-                    batch+="{\"command\":[\"set_property\",\"start\",\"$cur_time\"]}\n"
                     batch+="{\"command\":[\"script-message\",\"arm-resume-seek\",\"$cur_time\"]}\n"
                 fi
                 batch+="{\"command\":[\"playlist-play-index\",\"current\"]}\n"
@@ -2387,8 +2387,8 @@ cmd_hybrid_toggle() {
 
             # 1. Atomic batch command: pre-set start timestamp, arm Lua resume seeker, and trigger playlist index
             local r_batch=""
+            r_batch+="{\"command\":[\"set_property\",\"start\",\"none\"]}\n"
             if [ "$valid_time" != "0" ]; then
-                r_batch+="{\"command\":[\"set_property\",\"start\",\"$valid_time\"]}\n"
                 r_batch+="{\"command\":[\"script-message\",\"arm-resume-seek\",\"$valid_time\"]}\n"
             fi
             r_batch+="{\"command\":[\"playlist-play-index\",$cur_pos]}\n"
@@ -3627,8 +3627,8 @@ cmd_play() {
 
         # Force Playback Start with timestamp restore
         local start_cmds=""
+        start_cmds+="{\"command\":[\"set_property\",\"start\",\"none\"]}\n"
         if (( $(echo "$saved_target_time > 1" | bc -l 2>/dev/null || echo 0) )); then
-            start_cmds+="{\"command\":[\"set_property\",\"start\",\"$saved_target_time\"]}\n"
             start_cmds+="{\"command\":[\"script-message\",\"arm-resume-seek\",\"$saved_target_time\"]}\n"
         fi
         start_cmds+="{\"command\":[\"playlist-play-index\",$start_idx]}\n"

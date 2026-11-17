@@ -668,12 +668,8 @@ local function change_quality(target, is_auto_adaptive)
         QualityState.seek_fallback_timer = nil
     end
 
-    -- Apply native demuxer start offset: ffmpeg fetches HTTP ranges directly from timestamp
-    if cur_time > 1.0 then
-        mp.set_property("start", string.format("%.2f", cur_time))
-    else
-        mp.set_property("start", "none")
-    end
+    -- Always ensure demuxer start offset is 'none' to prevent sticky seeking deadlocks
+    mp.set_property("start", "none")
 
     local fmt = get_quality_format(target, current_lang)
     mp.set_property("ytdl-format", fmt)
@@ -711,11 +707,7 @@ local function change_resolution(fmt, label)
         QualityState.seek_fallback_timer = nil
     end
 
-    if cur_time > 1.0 then
-        mp.set_property("start", string.format("%.2f", cur_time))
-    else
-        mp.set_property("start", "none")
-    end
+    mp.set_property("start", "none")
 
     mp.set_property("ytdl-format", fmt)
     mp.commandv("playlist-play-index", "current")
@@ -775,11 +767,7 @@ local function change_language(lang, label)
         QualityState.seek_fallback_timer = nil
     end
 
-    if cur_time > 1.0 then
-        mp.set_property("start", string.format("%.2f", cur_time))
-    else
-        mp.set_property("start", "none")
-    end
+    mp.set_property("start", "none")
     if lang == "auto" then
         pcall(mp.set_property, "alang", "auto,en,eng,und")
         pcall(mp.set_property, "slang", "auto,en,eng,und")
@@ -1495,6 +1483,12 @@ local function on_playback_restart()
     if is_quality_switch_in_flight() then
         local gen = QualityState.generation
         mp.set_property_bool("pause", false)
+
+        if QualityState.target_pos and QualityState.target_pos > 1.0 then
+            local pos = QualityState.target_pos
+            QualityState.target_pos = 0
+            mp.commandv("seek", pos, "absolute")
+        end
 
         if QualityState.seek_fallback_timer then QualityState.seek_fallback_timer:kill() end
         QualityState.seek_fallback_timer = mp.add_timeout(1.5, function()
