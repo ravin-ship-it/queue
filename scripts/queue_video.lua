@@ -104,8 +104,9 @@ local function smart_next(is_auto_eof)
         if is_auto_eof then
             local loop_p = mp.get_property("loop-playlist", "no")
             if pos >= 0 and (pos + 1) < count then
-                mp.commandv("playlist-next")
-                mp.set_property_bool("pause", false)
+                -- MPV core naturally advances to the next track on EOF.
+                -- Calling playlist-next here causes a destructive double-skip!
+                return
             elseif loop_p ~= "no" and loop_p ~= "false" and count > 0 then
                 mp.commandv("playlist-play-index", 0)
                 mp.set_property_bool("pause", false)
@@ -645,7 +646,9 @@ local function change_quality(target, is_auto_adaptive)
 
     -- Capture current timestamp safely
     local cur_time = mp.get_property_number("time-pos")
-    if (not cur_time or cur_time < 1.0) and last_valid_time > 1.0 then
+    local cur_path = mp.get_property("path", "")
+    local cur_p = mp.get_property_number("playlist-pos", -1)
+    if (not cur_time or cur_time < 1.0) and last_valid_time > 1.0 and last_valid_pos == cur_p and last_valid_url == cur_path then
         cur_time = last_valid_time
     end
     if not cur_time or cur_time < 0 then cur_time = 0 end
@@ -688,7 +691,9 @@ local function change_resolution(fmt, label)
     if not fmt or fmt == "" then return end
     local now = mp.get_time()
     local cur_time = mp.get_property_number("time-pos")
-    if (not cur_time or cur_time < 1.0) and last_valid_time > 1.0 then
+    local cur_path = mp.get_property("path", "")
+    local cur_p = mp.get_property_number("playlist-pos", -1)
+    if (not cur_time or cur_time < 1.0) and last_valid_time > 1.0 and last_valid_pos == cur_p and last_valid_url == cur_path then
         cur_time = last_valid_time
     end
     if not cur_time or cur_time < 0 then cur_time = 0 end
@@ -728,7 +733,9 @@ local function change_language(lang, label)
 
     -- Capture current playback timestamp to seamlessly resume without restarting
     local cur_time = mp.get_property_number("time-pos")
-    if (not cur_time or cur_time < 1.0) and last_valid_time > 1.0 then
+    local cur_path = mp.get_property("path", "")
+    local cur_p = mp.get_property_number("playlist-pos", -1)
+    if (not cur_time or cur_time < 1.0) and last_valid_time > 1.0 and last_valid_pos == cur_p and last_valid_url == cur_path then
         cur_time = last_valid_time
     end
     if not cur_time or cur_time < 0 then cur_time = 0 end
@@ -1158,6 +1165,13 @@ local function check_and_recover_stall()
     local is_remote = (path:match("^https?://") ~= nil) or (path:match("^ytdl://") ~= nil)
     if not is_remote then stall_counter = 0; return end
 
+    local now = mp.get_time()
+    -- Grace period: don't flag stalls during initial startup/resolution of a track (first 8 seconds)
+    if track_start_time and (now - track_start_time) < 8.0 then
+        stall_counter = 0
+        return
+    end
+
     local user_paused = mp.get_property_bool("pause", false)
     local cache_paused = mp.get_property_bool("paused-for-cache", false)
     local cur_time = mp.get_property_number("time-pos", nil)
@@ -1302,6 +1316,11 @@ local function on_file_end(event)
     if event.reason == "eof" then
         if resume_timer then resume_timer:kill(); resume_timer = nil end
         pending_resume_pos = nil
+        last_valid_time = 0
+        last_valid_pos = -1
+        last_valid_url = ""
+        stall_counter = 0
+        last_stall_pos = nil
     end
 
     if check_blind_mode() then
@@ -1375,9 +1394,11 @@ local function save_session_state()
 
     local u = require("mp.utils")
     local cur_time = mp.get_property_number("time-pos", 0)
-    if (not cur_time or cur_time < 1.0) and last_valid_time > 1.0 then
+    local cur_path = mp.get_property("path", "")
+    if (not cur_time or cur_time < 1.0) and last_valid_time > 1.0 and last_valid_pos == pos and last_valid_url == cur_path then
         cur_time = last_valid_time
     end
+    if not cur_time or cur_time < 0 then cur_time = 0 end
     local state_data = {
         shuffle = shuffle,
         loop_file = loop_f,
@@ -1431,7 +1452,12 @@ local function on_file_loaded()
     consecutive_lag_checks = 0
     consecutive_net_errors = 0
     last_lag_check_time = 0
+    stall_counter = 0
+    last_stall_pos = nil
     track_start_time = mp.get_time()
+    last_valid_pos = mp.get_property_number("playlist-pos", -1)
+    last_valid_time = 0
+    last_valid_url = mp.get_property("path", "")
     save_session_state()
     local path = mp.get_property("path", "")
     local saved_sp = get_saved_speed()
