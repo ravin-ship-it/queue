@@ -1482,7 +1482,10 @@ local function on_playback_restart()
 end
 
 mp.register_event("end-file", on_file_end)
-mp.register_event("file-loaded", on_file_loaded)
+mp.register_event("file-loaded", function()
+    has_restored_session = true
+    on_file_loaded()
+end)
 mp.register_event("playback-restart", on_playback_restart)
 mp.observe_property("playlist-count", "number", function(name, count)
     if check_blind_mode() then return end
@@ -1501,6 +1504,10 @@ mp.observe_property("playlist-pos", "number", function(name, val)
             save_session_state()
         end
     end
+end)
+-- Ensure session restore window closes after startup (prevents late jumps on auto-added songs)
+mp.add_timeout(2.5, function()
+    has_restored_session = true
 end)
 mp.observe_property("shuffle", "bool", on_shuffle_change)
 mp.observe_property("window-minimized", "bool", update_state)

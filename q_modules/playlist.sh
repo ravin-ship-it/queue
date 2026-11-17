@@ -390,7 +390,7 @@ cmd_playlist_list() {
             clean_url=$(echo "$clean_url" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
         fi
         local target_path=$(format_path_for_mpv "$clean_url")
-        local json_cmd=$(jq -nc --arg path "$target_path" '{"command": ["loadfile", $path, "append-play"]}')
+        local json_cmd=$(jq -nc --arg path "$target_path" '{"command": ["loadfile", $path, "append"]}')
         send_ipc "$json_cmd" > /dev/null
     done < <(echo "$urls")
     

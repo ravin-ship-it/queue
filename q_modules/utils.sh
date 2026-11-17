@@ -91,46 +91,72 @@ check_and_resume() {
     touch "$resume_cd"
     ( sleep 3; rm -f "$resume_cd" ) >/dev/null 2>&1 & disown
 
-    if [ "$MPV_RUNNING" = true ]; then
-        local raw_state=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","eof-reached"]}\n{"command":["get_property","pause"]}\n{"command":["get_property","time-pos"]}\n{"command":["get_property","playlist-count"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r 'map(select(.event == null)) | (.[0].data // false), "\t", (.[1].data // false), "\t", (.[2].data // false), "\t", (.[3].data // 0), "\t", (.[4].data // 0)')
-        IFS=$'\t' read -r is_idle is_eof is_paused time_pos pl_count <<< "$raw_state"
+    if [ "$MPV_RUNNING" = true ] && [ -S "$SOCKET" ]; then
+        local raw_state
+        raw_state=$(echo -e '{"command":["get_property","idle-active"]}\n{"command":["get_property","eof-reached"]}\n{"command":["get_property","pause"]}\n{"command":["get_property","playlist-count"]}\n{"command":["get_property","playlist-pos"]}' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -s -j -r '
+            map(select(.event == null)) |
+            (if .[0].data == null then "true" else .[0].data end), "\t",
+            (.[1].data // "false"), "\t",
+            (.[2].data // "false"), "\t",
+            (.[3].data // 0), "\t",
+            (if .[4].data == null then -1 else .[4].data end)
+        ' 2>/dev/null)
         
-        # If idle, at EOF, or paused at beginning of a track (transition glitch), resume playback!
-        local time_int=${time_pos%.*}
-        [[ ! "$time_int" =~ ^[0-9]+$ ]] && time_int=0
+        [ -z "$raw_state" ] && return
+        IFS=$'\t' read -r is_idle is_eof is_paused pl_count cur_pos <<< "$raw_state"
+        [[ ! "$pl_count" =~ ^[0-9]+$ ]] && pl_count=0
+        [[ ! "$cur_pos" =~ ^-?[0-9]+$ ]] && cur_pos=-1
+        [[ ! "$force_idx" =~ ^[0-9]+$ ]] && force_idx=0
 
-        if [ "$is_idle" == "true" ] || [ "$is_eof" == "true" ] || { [ "$is_paused" == "true" ] && [ "$time_int" -le 1 ]; }; then
-            if [ -n "$force_idx" ]; then
-                 # Wait for playlist to actually have the item (Race condition fix)
-                 for i in {1..15}; do
-                     local cnt=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // empty' 2>/dev/null | tail -n 1)
-                     [[ ! "$cnt" =~ ^[0-9]+$ ]] && cnt=0
-                     if [ "$cnt" -gt "$force_idx" ]; then break; fi
-                     sleep 0.1
-                 done
-                 # Force play specific index
-                 echo "{ \"command\": [\"playlist-play-index\", $force_idx] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
-            fi
+        # Scenario 1: Empty player started or stopped idle with no active track
+        # New item is at index 0 (force_idx == 0) and player is idle
+        if [ "$force_idx" -eq 0 ] && { [ "$is_idle" == "true" ] || [ "$cur_pos" -eq -1 ]; }; then
+            for i in {1..15}; do
+                local cnt
+                cnt=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // empty' 2>/dev/null | tail -n 1)
+                [[ ! "$cnt" =~ ^[0-9]+$ ]] && cnt=0
+                if [ "$cnt" -gt 0 ]; then break; fi
+                sleep 0.1
+            done
             if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
                 echo '{ "command": ["set_property", "pause", true] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
-                if [ -n "$force_idx" ]; then
-                    send_android_mpv_cmd "playlist-play-index $force_idx"
-                fi
+                send_android_mpv_cmd "playlist-play-index 0"
                 send_android_mpv_cmd "unpause"
-                log_now_playing "|> Playing (Auto): "
             else
+                echo '{ "command": ["playlist-play-index", 0] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
                 echo '{ "command": ["set_property", "pause", false] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
-                
-                # Check success
-                sleep 0.2
-                local new_idle=$(echo '{ "command": ["get_property", "idle-active"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r '.data // "false"')
-                if [ "$new_idle" == "false" ]; then
-                    log_now_playing "|> Playing (Auto): "
-                else
-                    echo -e "${C_GRAY}(Resume check failed: still idle)${C_RESET}"
-                fi
             fi
+            log_now_playing "|> Playing: "
+            return
         fi
+
+        # Scenario 2: Player reached the very end of queue and was waiting at EOF (--keep-open=yes)
+        # ONLY jump to force_idx if the player was on the immediately preceding track (cur_pos == force_idx - 1)
+        # AND that track has genuinely finished playing (is_eof == true or is_idle == true).
+        # If cur_pos < force_idx - 1, unplayed tracks remain ahead in the queue; NEVER jump over them!
+        if [ "$force_idx" -gt 0 ] && [ "$cur_pos" -eq "$((force_idx - 1))" ] && { [ "$is_eof" == "true" ] || [ "$is_idle" == "true" ]; }; then
+            for i in {1..15}; do
+                local cnt
+                cnt=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // empty' 2>/dev/null | tail -n 1)
+                [[ ! "$cnt" =~ ^[0-9]+$ ]] && cnt=0
+                if [ "$cnt" -gt "$force_idx" ]; then break; fi
+                sleep 0.1
+            done
+            if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
+                echo '{ "command": ["set_property", "pause", true] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                send_android_mpv_cmd "playlist-play-index $force_idx"
+                send_android_mpv_cmd "unpause"
+            else
+                echo "{ \"command\": [\"playlist-play-index\", $force_idx] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                echo '{ "command": ["set_property", "pause", false] }' | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+            fi
+            log_now_playing "|> Playing (Auto): "
+            return
+        fi
+
+        # Scenario 3: All other cases (active playback in progress, queue has unplayed tracks,
+        # or user intentionally paused during playback).
+        # MPV will naturally advance in sequential order; DO NOT force playlist index!
     fi
 }
 
@@ -1450,7 +1476,17 @@ save_current_playlist() {
             fi
 
             # Save state properties to state.json (including playback timestamp)
-            echo "$raw" | jq -c 'map(select(.data != null and (.data | type != "array"))) | {shuffle: .[0].data, loop_file: .[1].data, loop_playlist: .[2].data, pos: .[3].data, time: (.[4].data // 0)}' 2>/dev/null > "$HOME/.cache/mpv/state.json.tmp"
+            local prev_pos=0
+            [ -f "$HOME/.cache/mpv/state.json" ] && prev_pos=$(jq -r '.pos // 0' "$HOME/.cache/mpv/state.json" 2>/dev/null)
+            [[ ! "$prev_pos" =~ ^[0-9]+$ ]] && prev_pos=0
+
+            echo "$raw" | jq -c --argjson prev_p "$prev_pos" '{
+                shuffle: (.[1].data // false),
+                loop_file: (.[2].data // "no"),
+                loop_playlist: (.[3].data // "no"),
+                pos: (if .[4].data != null and (.[4].data | type == "number") then .[4].data else $prev_p end),
+                time: (if .[5].data != null and (.[5].data | type == "number") then .[5].data else 0 end)
+            }' 2>/dev/null > "$HOME/.cache/mpv/state.json.tmp"
             [ -s "$HOME/.cache/mpv/state.json.tmp" ] && mv "$HOME/.cache/mpv/state.json.tmp" "$HOME/.cache/mpv/state.json"
 
             # Mirror to Windows cache in WSL hybrid mode

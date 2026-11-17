@@ -1343,6 +1343,7 @@ queue_item_ipc() {
     
     # Get current playlist size to determine new index efficiently
     local count=$(echo '{ "command": ["get_property", "playlist-count"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null | jq -r 'select(.event == null) | .data // 0')
+    [[ ! "$count" =~ ^[0-9]+$ ]] && count=0
     local next_index=$((count + 1))
 
     if [ -n "$title" ] && [ "$title" != "$url" ]; then
@@ -1362,7 +1363,9 @@ queue_item_ipc() {
     echo -e "${C_PINK}✅ Queued ${formatted_track}"
 
     local target_path=$(format_path_for_mpv "$clean_url")
-    local json_cmd=$(jq -nc --arg path "$target_path" '{"command": ["loadfile", $path, "append-play"]}')
+    local load_mode="append"
+    [ "$count" -eq 0 ] && load_mode="append-play"
+    local json_cmd=$(jq -nc --arg path "$target_path" --arg m "$load_mode" '{"command": ["loadfile", $path, $m]}')
     send_ipc "$json_cmd" > /dev/null
 
     if [ "$IS_ANDROID" = true ] && [ "$(get_queue_mode)" == "hybrid" ]; then
