@@ -100,7 +100,7 @@ cd queue
 ./install.sh
 source ~/.bashrc   # or: source ~/.zshrc
 ```
-*(For detailed OS-specific setup guides, see [docs/INSTALLATION.md](file:///home/xen/queue/docs/INSTALLATION.md))*
+*(For detailed OS-specific setup guides, see [docs/INSTALLATION.md](docs/INSTALLATION.md))*
 
 ---
 
@@ -146,7 +146,7 @@ Queue adapts its rendering and audio engine based on the host platform:
   * **Hybrid Mobile Mode**: Hardware **MediaCodec GPU acceleration**, **AudioTrack hardware tunneling**, and Picture-in-Picture via the official [MPV Android App](https://play.google.com/store/apps/details?id=is.xyz.mpv).
 * **Linux & macOS**: Direct kernel GPU/audio hardware acceleration (Wayland, X11, PipeWire, Metal, CoreAudio).
 
-*(For architecture deep dives, see [docs/MODES.md](file:///home/xen/queue/docs/MODES.md))*
+*(For architecture deep dives, see [docs/MODES.md](docs/MODES.md))*
 
 ---
 
@@ -162,7 +162,7 @@ Queue adapts its rendering and audio engine based on the host platform:
 | `q -next` / `-prev` | Skip to next or previous track |
 | `q -stop` | Stop playback and kill MPV background daemon |
 | `q -shuf` | Toggle Smart Virtual Shuffle (Zero-repeat history stack) |
-| `q -vid` | Toggle Desktop Video Window (Instant zero-gap toggle) |
+| `q -vid` | Toggle Desktop Video Window (Instant zero-gap toggle, `small\|med\|large\|full`) |
 | `q -aud [on\|off]` | **Audio-Only Mode**: 98% bandwidth reduction / pure Opus stream |
 | `q -res [val]` | Set/Check video quality (`720`, `1080`, `1440`, `4k`, `auto`) |
 | `q -speed [val]` | Set/Check playback speed (`0.25x` - `4.0x`, `reset`) |
@@ -176,13 +176,13 @@ Queue adapts its rendering and audio engine based on the host platform:
 | `q -disl` | **Dislike Hub**: Interactive FZF blacklist manager |
 | `q -fx` | Toggle Dolby Equalizer & Spatial Audio FX |
 | `q -d [N]` | Interactive Downloader Hub (MP3, FLAC, OPUS, MP4) |
-| `q -deps` | Multi-Engine System & Dependencies Diagnostic |
-| `q -up` | Universal 1-command Updater (yt-dlp, engine, local dev auto-sync) |
+| `q -deps` / `q -doctor` | Multi-Engine System & Dependencies Diagnostic |
+| `q -up` / `q update` | Universal 1-command Updater (yt-dlp, engine, local dev auto-sync) |
 | `q -install` | Reinstall or verify Queue engine |
 | `q -uninstall` | Clean uninstallation (preserves instant reinstaller) |
 | `q -remove-setup` | Permanently wipe setup file (after uninstallation) |
 
-*(For full syntax, parameters, and keybindings, see [docs/COMMANDS.md](file:///home/xen/queue/docs/COMMANDS.md))*
+*(For full syntax, parameters, and keybindings, see [docs/COMMANDS.md](docs/COMMANDS.md))*
 
 ---
 
@@ -192,10 +192,10 @@ For in-depth guides and technical documentation:
 
 | Document | Description |
 | :--- | :--- |
-| 📦 **[Installation Guide](file:///home/xen/queue/docs/INSTALLATION.md)** | Step-by-step OS setup, prerequisites, flags, and reinstallation lifecycle |
-| ⚡ **[Multi-Engine Guide](file:///home/xen/queue/docs/MODES.md)** | Windows WSL2 Hybrid Boost, Android Termux Mobile, and Linux/macOS sinks |
-| 🕹️ **[Command Reference](file:///home/xen/queue/docs/COMMANDS.md)** | Exhaustive reference for playback, search syntax, playlists, and hotkeys |
-| 🔧 **[Troubleshooting Guide](file:///home/xen/queue/docs/TROUBLESHOOTING.md)** | Fixes for YouTube 403 throttles, premium traps, cursor scaling, and audio |
+| 📦 **[Installation Guide](docs/INSTALLATION.md)** | Step-by-step OS setup, prerequisites, flags, and reinstallation lifecycle |
+| ⚡ **[Multi-Engine Guide](docs/MODES.md)** | Windows WSL2 Hybrid Boost, Android Termux Mobile, and Linux/macOS sinks |
+| 🕹️ **[Command Reference](docs/COMMANDS.md)** | Exhaustive reference for playback, search syntax, playlists, and hotkeys |
+| 🔧 **[Troubleshooting Guide](docs/TROUBLESHOOTING.md)** | Fixes for YouTube 403 throttles, premium traps, cursor scaling, and audio |
 
 ---
 
@@ -203,4 +203,4 @@ For in-depth guides and technical documentation:
 
 Contributions, feature requests, and bug reports are warmly welcome! Feel free to open an issue or pull request.
 
-Distributed under the **GPL-3.0 License**. See [LICENSE](file:///home/xen/queue/LICENSE) for more information.
+Distributed under the **GPL-3.0 License**. See [LICENSE](LICENSE) for more information.

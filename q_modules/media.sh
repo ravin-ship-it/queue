@@ -4260,7 +4260,7 @@ cmd_blind_play() {
     elif [ "$force_vid" = true ]; then
         is_blind_aud=false
     else
-        if [ -f "$HOME/.cache/mpv/queue_audio_mode" ] && [ "$(cat "$HOME/.cache/mpv/queue_audio_mode" 2>/dev/null | tr -d '[:space:]')" == "true" ]; then
+        if is_audio_mode_active; then
             is_blind_aud=true
         fi
     fi

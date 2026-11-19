@@ -86,3 +86,12 @@ On macOS systems:
 * **Video Rendering**: Automatically leverages Apple **Metal** API via `vo=gpu-next` and `gpu-api=opengl/metal`.
 * **Audio**: Direct hardware output via **CoreAudio** with low latency.
 * **Clipboard Integration**: Seamlessly pulls YouTube and Spotify URLs from the macOS clipboard via `pbpaste`.
+
+---
+
+## ⚡ Seamless Mode Transitions (Audio vs Video)
+
+Across both Standalone and Hybrid boost engines, Queue manages dynamic media transitions without restarting playback from `0:00`:
+* **Audio-Only Stream (`q -aud on`)**: Closes/minimizes the video window and requests pure 48 kHz Opus audio (~128 kbps), reducing network bandwidth consumption by ~98%.
+* **Video Pipeline Restoration (`q -vid` / `q -aud off`)**: Re-enables the full hardware video pipeline (`vo=gpu`), demuxes 1080p/4K video tracks, and uses atomic resume seek (`arm-resume-seek`) with seek watchers to ensure playback continues at the exact same millisecond.
+* **Isolated Blind Mode Execution (`q -pb`)**: When playing one-off tracks, Queue spawns an isolated MPV instance with dedicated IPC socket (`~/.cache/mpv/blind.sock`) and isolated audio preferences, completely protecting your primary queue state, playlist, and shuffle stack.

@@ -19,8 +19,11 @@ Running `q` without arguments opens the full interactive terminal queue.
 | `CTRL-L` | **Quick Like** | Likes and saves the highlighted track to Liked Songs directly from search mode |
 | `CTRL-D` | **Quick Dislike** | Blacklists and dislikes the highlighted track directly from search mode |
 | `l` | **Like / Unlike in Inspector** | Toggles like status for track while viewing metadata (`q -i`) |
-| `x` | **Dislike in Inspector** | Dislikes track while viewing metadata (`q -i`) |
-| `v` | **Watch Video Window** | Launches the desktop video window directly from Inspector (`q -i`) |
+| `x` | **Dislike in Inspector** | Dislikes track and blacklists from auto-discovery (`q -i`) |
+| `d` | **Download Hub Wizard** | Opens interactive format and directory downloader (`q -i`) |
+| `v` | **Toggle Video Window** | Launches or toggles the desktop video window directly from Inspector (`q -i`) |
+| `a` | **Audio Language / Dub Picker** | Cycles or selects multi-track audio language dubs (`q -i`) |
+| `r` | **Stream Quality / Resolution** | Cycles through resolution tiers (`auto`, `720p`, `1080p`, `1440p`, `4k`) (`q -i`) |
 
 ---
 
@@ -135,23 +138,29 @@ Queue allows you to watch high-definition music videos alongside background audi
 # Toggle Desktop Video Window (instant zero-gap toggle)
 q -vid
 
-# Open with specific size preset: small, med, large
-q -vid small
-q -vid med
-q -vid large
+# Open with specific size preset: small (35%), med (50%), large (75%), full (100%)
+q -vid small    # 35% window size
+q -vid med      # 50% window size (Default)
+q -vid large    # 75% window size
+q -vid full     # Fullscreen window
 ```
 
 ### Video Window Hotkeys (Focused on MPV Window):
 * `F11` or `f`: Toggle Fullscreen ON/OFF
 * `ESC`: Exit fullscreen
-* `w` / `W`: Cycle window presets (Small 480p ➔ Medium 720p ➔ Large 1080p)
-* `+` / `-`: Scale window size up or down by 5%
+* `w` / `W`: Cycle window presets (Small 35% ➔ Medium 50% ➔ Large 75% ➔ Full 100%)
+* `+` / `-` (or `=` / `_`): Scale window size up or down by 5%
 * `0`: Auto / Smart Adaptive (YouTube-like ABR with automatic buffer downshift)
 * `1`: 720p HD (60 FPS fluid / bandwidth saver)
 * `2`: 1080p Full HD (60 FPS crisp)
 * `3`: 1440p 2K QHD (60 FPS ultra-crisp)
 * `4`: Max / 4K UHD (Uncapped highest quality)
-* `q`: Hide video window and return smoothly to background audio mode
+* `a` / `A` / `#`: Cycle multi-track audio language dubs with on-screen display
+* `[` / `]`: Adjust playback speed by -0.1x / +0.1x
+* `{` / `}`: Adjust playback speed by -0.25x / +0.25x
+* `Backspace` / `Alt+0`: Reset playback speed to 1.0x normal
+* `h` / `H`: Safe hide video window (cleanly minimizes and transitions to background audio)
+* `q` / `Q` (or `CLOSE_WIN` / `Alt+F4`): Stop session (or close video window)
 
 ### Video Resolution & Adaptive Network Engine (`q -res`)
 ```bash
@@ -166,6 +175,7 @@ q -res 4k     # 4K Ultra HD (Uncapped)
 q -res 480    # 480p SD (Low-bandwidth smooth)
 q -res 360    # 360p Low (Emergency smooth)
 q -res auto   # Smart Adaptive (Adapts dynamically to network fluctuations)
+q -res audio  # Switch directly to pure audio-only streaming mode
 ```
 
 #### 🧠 YouTube-like Smart Adaptive Bitrate (ABR):
@@ -177,19 +187,25 @@ q -res auto   # Smart Adaptive (Adapts dynamically to network fluctuations)
 
 ## 🎧 Audio-Only Pipeline (`q -aud`)
 
-Switch dynamically between video and pure background audio with 98% bandwidth reduction:
+Switch dynamically between video and pure background audio with **~98% bandwidth reduction**:
 
 ```bash
-# Toggle Audio-Only Mode
+# Toggle Audio-Only Mode ON/OFF
 q -aud
 
 # Explicitly enable or disable Audio-Only mode
 q -aud on
 q -aud off
 
-# Check Audio-Only pipeline status
+# Check Audio-Only pipeline status dashboard
 q -aud status
 ```
+
+### Audio-Only Architecture Highlights:
+* **Seamless Timestamp Resume**: Toggling between video and audio modes never restarts playback from `0:00`. Queue arms an in-memory seek target (`arm-resume-seek`) and actively monitors demuxer seekability to guarantee smooth, seamless continuity down to the exact second.
+* **Pristine Bandwidth Savings**: Completely eliminates video stream downloading from yt-dlp, fetching pure 48 kHz Opus audio (~128 kbps).
+* **Clean Window Management**: Closes/minimizes the desktop window cleanly with zero phantom window artifacts or black background frames.
+* **Dual-Session Isolation**: When running Blind Mode (`q -pb`), audio mode toggles operate independently on the isolated session without affecting your primary queue configuration.
 
 ---
 
@@ -270,9 +286,11 @@ q -pb -aud "https://www.youtube.com/watch?v=..."
 
 ### How Blind Mode Works:
 1. **Queue Snapshot**: Checks if a Queue playback session is active. If so, pauses it immediately.
-2. **Pristine State Guarantee**: The target track/video is **never** added to your playlist files (`last_playlist.txt`) and **never** recorded in your shuffle history stack.
-3. **Dedicated Video Window**: Automatically opens a resizable video window (supporting `F11` fullscreen, `w`/`W` sizing presets, `+/-` scaling, `0-4` quality switches, and `'a'` audio dub cycling).
-4. **Instant Queue Restoration**: When the video finishes (EOF) or when you close the window (`q` or `ESC`), Queue automatically unpauses your previous session, resuming playback at the exact second where you left off.
+2. **Pristine State Guarantee**: The target track/video is **never** added to your playlist files (`last_playlist.txt`) and **never** recorded in your shuffle history stack or session state.
+3. **Dedicated Video Window & Controls**: Automatically opens a resizable video window (supporting `F11` fullscreen, `w`/`W` sizing presets, `+/-` scaling, `0-4` quality switches, and `'a'` audio dub cycling).
+4. **Seamless Audio / Video Toggle**: If started in audio-only mode (`q -pb -aud` or inherited from active audio mode), running `q -vid` or `q -aud off` cleanly restores the full Direct3D/GPU video pipeline, re-demuxing the video stream with zero black screen and preserving your exact playback timestamp.
+5. **Isolated Language & Audio State**: Audio preferences in Blind Mode (`q -lang -pb <code|auto>`) modify only the isolated player without overwriting your global queue language preferences.
+6. **Instant Queue Restoration**: When playback finishes (EOF) or when you close the window (`q` or `ESC`), Queue automatically cleans up all isolated IPC sockets and unpauses your previous session, resuming playback at the exact second where you left off.
 
 ---
 
@@ -395,8 +413,8 @@ Supported Formats: MP3 (320k), M4A (256k AAC), FLAC (Lossless), OPUS (160k Hi-Re
 
 | Command | Purpose |
 | :--- | :--- |
-| `q -deps` | Comprehensive boxed TUI multi-engine dependency diagnostic |
-| `q -up` | Universal 1-command updater (yt-dlp, Queue engine, host bridges, local dev auto-sync) |
+| `q -deps` / `q -doctor` | Comprehensive boxed TUI multi-engine dependency diagnostic |
+| `q -up` / `q update` | Universal 1-command updater (yt-dlp, Queue engine, host bridges, local dev auto-sync) |
 | `q -install` | Reinstall or verify Queue engine |
 | `q -uninstall` | Clean uninstallation checklist (preserves instant reinstaller) |
 | `q -remove-setup` | Permanently wipe the setup file and launcher stub (only runs after uninstallation) |

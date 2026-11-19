@@ -143,7 +143,7 @@ fi
 # --- Command Parsing ---
 
 PROCESSED_ANY_FLAG=false
-SMART_CMDS="^(play|pause|stop|next|prev|vol|info|list|clear|shuffle|remove|move|swap|help|save|load|auto|fx|deps|up|install|setup|uninstall|remove-setup|pb|blind|download|dl|d|dislike|dis|disl|rmd|undis|undislike|like|liked|likel|unlike|vid|video|watch|version|ver|res|quality|hybrid|hy|lang|audio|speed|sp|aud|loop|loop-file|loop-playlist|lp|status|clean|pl-clean|rmr|rename|rname)$"
+SMART_CMDS="^(play|pause|resume|stop|next|prev|vol|info|list|clear|shuffle|remove|move|swap|help|save|load|auto|fx|deps|doctor|up|update|upgrade|install|setup|uninstall|remove-setup|pb|blind|download|dl|d|dislike|dis|disl|rmd|undis|undislike|like|liked|likel|unlike|vid|video|watch|version|ver|res|quality|hybrid|hy|lang|audio|speed|sp|aud|loop|loop-file|loop-playlist|lp|status|clean|pl-clean|rmr|rename|rname)$"
 
 while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
     PROCESSED_ANY_FLAG=true
@@ -153,7 +153,7 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
     raw_cmd="${CMD#--}"
     raw_cmd="${raw_cmd#-}"
     case "$raw_cmd" in
-        play|pause) CMD="-p" ;;
+        play|pause|resume) CMD="-p" ;;
         stop) CMD="-stop" ;;
         next) CMD="-next" ;;
         prev) CMD="-prev" ;;
@@ -170,8 +170,8 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
         load) CMD="-pl-load" ;;
         auto) CMD="-auto" ;;
         fx) CMD="-fx" ;;
-        deps) CMD="-deps" ;;
-        up) CMD="-up" ;;
+        deps|doctor) CMD="-deps" ;;
+        up|update|upgrade) CMD="-up" ;;
         install|setup) CMD="-install" ;;
         remove-setup) CMD="-remove-setup" ;;
         uninstall) CMD="-uninstall" ;;
@@ -611,8 +611,8 @@ while [[ "$1" =~ ^- ]] || [[ "$1" =~ $SMART_CMDS ]]; do
             export TARGET_PLAYLIST="$1"
             shift 
             ;; 
-        -deps) check_dependencies; shift ;;
-        -up) cmd_update_ytdlp; shift ;;
+        -deps|--deps|-doctor|--doctor) check_dependencies; shift ;;
+        -up|--up|-update|--update|-upgrade|--upgrade) cmd_update_ytdlp; shift ;;
         -install|--install)
             shift
             echo -e "${C_GREEN}✨ Queue is already installed and running active (v${QUEUE_VERSION}).${C_RESET}"

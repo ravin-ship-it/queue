@@ -4,11 +4,11 @@ This guide addresses common questions, platform edge cases, and self-healing mec
 
 ---
 
-## 🔍 First Step: Run System Diagnostic (`q -deps`)
+## 🔍 First Step: Run System Diagnostic (`q -deps` / `q -doctor`)
 
 Before debugging, run Queue's integrated multi-engine diagnostic:
 ```bash
-q -deps
+q -deps      # or: q -doctor, q doctor
 ```
 This inspects core binaries, JavaScript decryptor engines, WSLg graphics drivers, host bridges, and Android audio sinks.
 
@@ -119,3 +119,38 @@ If you uninstalled Queue or moved files, run:
 q install
 ```
 If the local setup file exists, it reinstalls Queue immediately. If deleted, it pulls directly from GitHub.
+
+---
+
+## 📺 Issue 7: Black Screen When Switching from Audio to Video in Blind Mode (`q -pb`)
+
+### Symptoms:
+When starting Blind Mode in audio-only mode (or inheriting active audio mode) and toggling video (`q -vid` or `q -aud off`), an empty black MPV window appears with audio playing.
+
+### Root Cause:
+If a stream was loaded using pure audio formats (`bestaudio`), the yt-dlp demuxer does not download video chunks, leaving zero video tracks in MPV's track list. Simply setting `vid=auto` opens the window, but lacks video frames to render.
+
+### Solution:
+Queue automatically handles this by querying active MPV track lists:
+1. When toggling video in Blind Mode, Queue inspects `track-list`.
+2. If no video track is demuxed, Queue updates `ytdl-format` to `bestvideo+bestaudio`, registers an atomic `arm-resume-seek` with your current playback position, and reloads the stream index cleanly.
+3. Playback resumes at the exact second with full hardware-accelerated video rendering.
+
+---
+
+## 📐 Issue 8: Box Border Misalignment on Custom or Ultra-Wide Terminals
+
+### Symptoms:
+Status dashboards or boxed dialogs have right borders (`│`) that extend past or fall short of the top/bottom corner lines (`╭─╮` / `╰─╯`).
+
+### Root Cause:
+Static width clamps or subshell column desynchronization.
+
+### Solution:
+Queue dynamically calculates terminal width using `get_terminal_width` across all rendering helpers:
+* `print_header_box` (`╭─╮` and `├─┤`)
+* `print_boxed_line` (`│ ... │`)
+* `print_divider_box` (`├─┤`)
+* `print_footer_box` (`╰─╯`)
+
+Every component references the identical dynamic width query and unified purple border palette, guaranteeing alignment whether your terminal is 80, 100, 120, or 156+ columns wide.
