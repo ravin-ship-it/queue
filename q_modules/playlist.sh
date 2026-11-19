@@ -31,9 +31,7 @@ cmd_playlist_save() {
     if [ -z "$name" ]; then
         print_header_box "💾 Save Current Queue"
         print_boxed_line "${C_ORANGE}Usage: q -save <name>${C_RESET}"
-        printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
-        B_LINE=${B_LINE// /─}
-        echo -e "${C_GRAY}${B_LINE}${C_RESET}"
+        print_footer_box
         return
     fi
     
@@ -47,9 +45,7 @@ cmd_playlist_save() {
     print_boxed_line "${C_TEAL}Name:   ${C_CYAN}${name}${C_RESET}"
     print_boxed_line "${C_TEAL}Tracks: ${C_ORANGE}${count}${C_RESET}"
     print_boxed_line "${C_TEAL}Path:   ${C_GRAY}${file#$HOME/}${C_RESET}"
-    printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
-    B_LINE=${B_LINE// /─}
-    echo -e "${C_GRAY}${B_LINE}${C_RESET}"
+    print_footer_box
 }
 
 cmd_playlist_opts_fzf() {
@@ -428,9 +424,7 @@ cmd_playlist_raw() {
             ((i++))
         done < <(find "$PLAYLIST_DIR" -maxdepth 1 -name "*.txt" -exec basename {} .txt \; | sort)
         
-        printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
-        B_LINE=${B_LINE// /─}
-        echo -e "${C_GRAY}${B_LINE}${C_RESET}"
+        print_footer_box
         return
     fi
 
@@ -456,18 +450,14 @@ cmd_playlist_raw() {
         ((i++))
     done < "$file"
     
-    printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
-    B_LINE=${B_LINE// /─}
-    echo -e "${C_GRAY}${B_LINE}${C_RESET}"
+    print_footer_box
 }
 
 cmd_playlist_rm() {
     if [ "$#" -eq 0 ]; then
         print_header_box "✖ Delete Playlists"
         print_boxed_line "${C_ORANGE}Usage: q -pl-rm <name|N>...${C_RESET}"
-        printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
-        B_LINE=${B_LINE// /─}
-        echo -e "${C_GRAY}${B_LINE}${C_RESET}"
+        print_footer_box
         return
     fi
     
@@ -500,9 +490,7 @@ cmd_rename() {
     if [ -z "$target" ] || [ -z "$new_name" ]; then
         print_header_box "✏️ Rename Target"
         print_boxed_line "${C_ORANGE}Usage: q -rname <target> <new_name>${C_RESET}"
-        printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
-        B_LINE=${B_LINE// /─}
-        echo -e "${C_GRAY}${B_LINE}${C_RESET}"
+        print_footer_box
         return
     fi
 

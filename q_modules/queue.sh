@@ -2233,8 +2233,6 @@ cmd_auto_status() {
         print_boxed_line "${C_TEAL}Cooldown:      ${C_GREEN}Ready for next trigger ✅${C_RESET}"
     fi
 
-    printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
-    B_LINE=${B_LINE// /─}
-    echo -e "${C_GRAY}${B_LINE}${C_RESET}"
+    print_footer_box
     echo -e "${C_GRAY}💡 Quick Controls: ${C_WHITE}q -auto on${C_GRAY} | ${C_WHITE}q -auto off${C_GRAY} | ${C_WHITE}q -auto fetch${C_GRAY} (Force next) | ${C_WHITE}q -auto reset${C_RESET}"
 }

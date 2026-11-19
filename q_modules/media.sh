@@ -264,9 +264,7 @@ fetch_and_display_url_info() {
         if [ "$is_current" == "true" ]; then
             print_stream_and_engine_info "$target_socket" "$is_blind"
         fi
-        printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
-        B_LINE=${B_LINE// /─}
-        echo -e "${C_PURPLE}${B_LINE}${C_RESET}"
+        print_footer_box
 
         if [ -t 0 ] && [ -t 1 ]; then
             echo -ne "${C_PINK}>>> Press 'l' to like/unlike, 'x' to dislike, 'd' to download, 'v' for video, 'a' for audio, 'r' for quality, or ENTER to return: ${C_RESET}"
@@ -480,9 +478,7 @@ fetch_and_display_url_info() {
             print_stream_and_engine_info "$target_socket" "$is_blind"
         fi
         
-        printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
-        B_LINE=${B_LINE// /─}
-        echo -e "${C_PURPLE}${B_LINE}${C_RESET}"
+        print_footer_box
 
         if [ -t 0 ] && [ -t 1 ]; then
             echo -ne "${C_PINK}>>> Press 'l' to like/unlike, 'x' to dislike, 'd' to download, 'v' for video, 'a' for audio, 'r' for quality, or ENTER to return: ${C_RESET}"
@@ -965,9 +961,7 @@ cmd_info() {
 
         print_stream_and_engine_info "$blind_socket" "true"
 
-        printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
-        B_LINE=${B_LINE// /─}
-        echo -e "${C_PURPLE}${B_LINE}${C_RESET}"
+        print_footer_box
 
         if [ -t 0 ] && [ -t 1 ]; then
             echo -ne "${C_PINK}>>> Press 'l' to like, 'x' to dislike, 'd' to download, 'v' for video, 'a' for audio, 'r' for quality, or ENTER to return: ${C_RESET}"
@@ -1065,9 +1059,7 @@ cmd_info() {
     if [ "$is_current_target" == "true" ]; then
         print_stream_and_engine_info "$SOCKET" "false"
     fi
-    printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
-    B_LINE=${B_LINE// /─}
-    echo -e "${C_PURPLE}${B_LINE}${C_RESET}"
+    print_footer_box
 
     if [ -t 0 ] && [ -t 1 ]; then
         echo -ne "${C_PINK}>>> Press 'l' to like/unlike, 'x' to dislike, 'd' to download, 'v' for video, 'a' for audio, 'r' for quality, or ENTER to return: ${C_RESET}"
@@ -2278,21 +2270,12 @@ cmd_audio_mode() {
             win_status="${C_GREEN}Cleanly Closed (0 video bytes demuxed)${C_RESET}"
         fi
 
-        local cols=$(get_terminal_width)
-        local width=$((cols - 2)); [ "$width" -lt 50 ] && width=50
-        [ "$width" -gt 78 ] && width=78
-        printf -v T_LINE "╭%*s╮" "$width" ""; T_LINE=${T_LINE// /─}
-        printf -v M_LINE "├%*s┤" "$width" ""; M_LINE=${M_LINE// /─}
-        printf -v B_LINE "╰%*s╯" "$width" ""; B_LINE=${B_LINE// /─}
-
-        echo -e "${C_GRAY}${T_LINE}${C_RESET}"
-        print_boxed_line "🎧 ${C_PURPLE}Queue Audio-Only Pipeline Status${C_RESET}"
-        echo -e "${C_GRAY}${M_LINE}${C_RESET}"
+        print_header_box "🎧 ${C_PURPLE}Queue Audio-Only Pipeline Status${C_RESET}"
         print_boxed_line "${C_TEAL}Audio Mode:       ${mode_status}"
         print_boxed_line "${C_TEAL}Bandwidth Saver:  ${bw_status}"
         print_boxed_line "${C_TEAL}Video Window:     ${win_status}"
         print_boxed_line "${C_TEAL}Audio Codec:      ${C_WHITE}Pristine Opus 48 kHz (Lossless Tunnel)${C_RESET}"
-        echo -e "${C_GRAY}${B_LINE}${C_RESET}"
+        print_footer_box
         if [ "$is_active" = true ]; then
             echo -e "${C_GRAY}💡 To restore desktop video: ${C_WHITE}q -vid${C_GRAY} or ${C_WHITE}q -aud off${C_RESET}"
         else
@@ -4309,9 +4292,7 @@ cmd_blind_play() {
     print_boxed_line "${C_TEAL}Status:    ${C_GREEN}Isolated Session ✅ (Zero queue or history modification)${C_RESET}"
     print_boxed_line "${C_TEAL}Controls:  ${C_GRAY}Press 'q' in window / Ctrl-C in terminal to exit & resume queue${C_RESET}"
     print_boxed_line "${C_TEAL}Hotkeys:   ${C_GRAY}F11 Fullscreen • w/W scale presets • +/- zoom • 0-4 quality • a/A audio${C_RESET}"
-    printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
-    B_LINE=${B_LINE// /─}
-    echo -e "${C_PURPLE}${B_LINE}${C_RESET}"
+    print_footer_box
 
     # Execution according to platform & mode
     local cur_mode

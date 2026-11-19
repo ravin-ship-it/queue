@@ -96,9 +96,7 @@ interactive_download_wizard() {
     print_boxed_line "${C_TEAL}Artist:   ${C_LIGHT_PINK}${uploader}${C_RESET}"
     print_boxed_line "${C_TEAL}Duration: ${C_ORANGE}${duration}${C_RESET}"
     print_boxed_line "${C_TEAL}Source:   ${C_VIOLET}${url:0:$((INNER_WIDTH-12))}${C_RESET}"
-    printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
-    B_LINE=${B_LINE// /─}
-    echo -e "${C_PURPLE}${B_LINE}${C_RESET}"
+    print_footer_box
 
     # --- STEP 1: Format Quality Selection ---
     local menu_items=""

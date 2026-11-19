@@ -145,6 +145,22 @@ print_boxed_line() {
     fi
 }
 
+print_footer_box() {
+    local width=$(get_terminal_width)
+    [ -z "$width" ] || [ "$width" -lt 40 ] && width=80
+    printf -v B_LINE "╰%*s╯" "$((width - 2))" ""
+    B_LINE=${B_LINE// /─}
+    echo -e "${C_PURPLE}${B_LINE}${C_RESET}"
+}
+
+print_divider_box() {
+    local width=$(get_terminal_width)
+    [ -z "$width" ] || [ "$width" -lt 40 ] && width=80
+    printf -v M_LINE "├%*s┤" "$((width - 2))" ""
+    M_LINE=${M_LINE// /─}
+    echo -e "${C_PURPLE}${M_LINE}${C_RESET}"
+}
+
 check_dependencies() {
     local width=$(get_terminal_width)
     [ -z "$width" ] || [ "$width" -lt 40 ] && width=80
@@ -367,9 +383,7 @@ check_dependencies() {
         print_boxed_line "  ${C_TEAL}GPU Driver:      ${C_GREEN}Kernel Direct DRM (Mesa / NVIDIA) ✅${C_RESET}"
     fi
 
-    printf -v B_LINE "╰%*s╯" "$((width - 2))" ""
-    B_LINE=${B_LINE// /─}
-    echo -e "${C_PURPLE}${B_LINE}${C_RESET}"
+    print_footer_box
 
     if [ ${#core_missing[@]} -eq 0 ]; then
         echo -e "${C_GREEN}✨ All core dependencies are healthy and ready to stream!${C_RESET}"
@@ -573,9 +587,7 @@ cmd_update_ytdlp() {
     new_q_ver=$(grep -m1 '^QUEUE_VERSION=' "$dest_dir/q_modules/utils.sh" 2>/dev/null | cut -d'"' -f2)
     [ -z "$new_q_ver" ] && new_q_ver="$QUEUE_VERSION"
 
-    printf -v B_LINE "╰%*s╯" "$((width - 2))" ""
-    B_LINE=${B_LINE// /─}
-    echo -e "${C_PURPLE}${B_LINE}${C_RESET}"
+    print_footer_box
 
     if [ "$success" = true ]; then
         echo -e "${C_GREEN}✨ Queue Engine successfully updated to ${C_YELLOW}v${new_q_ver}${C_GREEN} (All modes synced)!${C_RESET}"
@@ -748,13 +760,11 @@ show_help() {
     print_boxed_line "  q yt <q>        Force YouTube search"
     print_boxed_line "  q sc <q>        Force Soundcloud search"
     if [ "$IS_WSL" = true ]; then
-        echo -e "${C_GRAY}${H_LINE}${C_RESET}"
+        print_divider_box
         print_boxed_line "${C_GRAY}💡 Tip: Use ${C_WHITE}q -hybrid on${C_GRAY} for 120+ FPS Direct3D & native WASAPI audio!${C_RESET}"
     elif [ "$IS_ANDROID" = true ]; then
-        echo -e "${C_GRAY}${H_LINE}${C_RESET}"
+        print_divider_box
         print_boxed_line "${C_GRAY}💡 Tip: Use ${C_WHITE}q -hybrid on${C_GRAY} for Play Store MPV + Android Audio Tunneling!${C_RESET}"
     fi
-    printf -v B_LINE "╰%*s╯" "$((TERM_WIDTH - 2))" ""
-    B_LINE=${B_LINE// /─}
-    echo -e "${C_GRAY}${B_LINE}${C_RESET}"
+    print_footer_box
 }
