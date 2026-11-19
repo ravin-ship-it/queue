@@ -287,12 +287,7 @@ fetch_and_display_url_info() {
                     cmd_dislike "$clean_url"
                 fi
             elif [[ "$user_key" =~ ^[vV]$ ]]; then
-                if [ "$is_blind" == "true" ]; then
-                    echo '{"command":["cycle","video"]}' | nc ${NC_OPTS:--U} -w 1 "$target_socket" >/dev/null 2>&1
-                    echo -e "${C_CYAN}📺 Toggled video stream in Blind Mode session.${C_RESET}"
-                else
-                    cmd_video_toggle ""
-                fi
+                cmd_video_toggle ""
             elif [[ "$user_key" =~ ^[aA]$ ]]; then
                 if [ "$is_blind" == "true" ]; then
                     cmd_language -pb
@@ -508,12 +503,7 @@ fetch_and_display_url_info() {
                     cmd_dislike "$clean_url"
                 fi
             elif [[ "$user_key" =~ ^[vV]$ ]]; then
-                if [ "$is_blind" == "true" ]; then
-                    echo '{"command":["cycle","video"]}' | nc ${NC_OPTS:--U} -w 1 "$target_socket" >/dev/null 2>&1
-                    echo -e "${C_CYAN}📺 Toggled video stream in Blind Mode session.${C_RESET}"
-                else
-                    cmd_video_toggle ""
-                fi
+                cmd_video_toggle ""
             elif [[ "$user_key" =~ ^[aA]$ ]]; then
                 if [ "$is_blind" == "true" ]; then
                     cmd_language -pb
@@ -1711,8 +1701,113 @@ cmd_video_toggle() {
         local rec_sock=$(grep -m1 '^socket=' "$HOME/.cache/mpv/blind_active" 2>/dev/null | cut -d= -f2-)
         [ -n "$rec_sock" ] && blind_sock="$rec_sock"
         if [ -S "$blind_sock" ] && echo '{"command":["get_property","idle-active"]}' | nc ${NC_OPTS:--U} -w 1 "$blind_sock" >/dev/null 2>&1; then
-            echo -e "${C_CYAN}📺 Toggling video window in active Blind Mode session...${C_RESET}"
-            echo -e '{"command":["set_property","vid","auto"]}\n{"command":["set_property","video","auto"]}\n{"command":["set_property","force-window","yes"]}\n{"command":["set_property","window-minimized",false]}\n{"command":["cycle","video"]}' | nc ${NC_OPTS:--U} -w 1 "$blind_sock" >/dev/null 2>&1
+            echo -e "${C_CYAN}📺 Restoring video pipeline in active Blind Mode session...${C_RESET}"
+
+            # Query active stream properties to detect pure audio vs video demux state
+            local b_snap
+            b_snap=$(echo -e '{"command":["get_property","vid"]}\n{"command":["get_property","time-pos"]}\n{"command":["get_property","path"]}\n{"command":["get_property","track-list"]}' | nc ${NC_OPTS:--U} -w 1 "$blind_sock" 2>/dev/null | jq -s -c -r 'map(select(.event == null))')
+            local b_vid="false" b_time=0 b_path="" has_vid_track=0
+            if [ -n "$b_snap" ] && [ "$b_snap" != "[]" ]; then
+                b_vid=$(echo "$b_snap" | jq -r '.[0].data // false')
+                b_time=$(echo "$b_snap" | jq -r '.[1].data // 0')
+                b_path=$(echo "$b_snap" | jq -r '.[2].data // ""')
+                has_vid_track=$(echo "$b_snap" | jq -r '[.[3].data[]? | select(.type == "video" and .albumart != true and .image != true)] | length')
+            fi
+
+            # Record that Blind Mode is now in Video mode
+            echo "false" > "$HOME/.cache/mpv/blind_audio_mode"
+            if [ "$IS_WSL" = true ]; then
+                local win_u_dir
+                win_u_dir=$(get_windows_user_dir)
+                [ -n "$win_u_dir" ] && echo "false" > "$win_u_dir/.cache/mpv/blind_audio_mode" 2>/dev/null
+            fi
+
+            local blind_lang="auto"
+            [ -f "$HOME/.cache/mpv/blind_lang" ] && blind_lang=$(cat "$HOME/.cache/mpv/blind_lang" 2>/dev/null | tr -d '[:space:]')
+            [ -z "$blind_lang" ] && blind_lang="auto"
+            local blind_audio_fmt=""
+            if [ "$blind_lang" == "auto" ]; then
+                blind_audio_fmt="(bestaudio[acodec=opus]/bestaudio[acodec^=mp4a]/bestaudio)"
+            else
+                blind_audio_fmt="(bestaudio[language=${blind_lang}][acodec=opus]/bestaudio[language^=${blind_lang}][acodec=opus]/bestaudio[language=${blind_lang}]/bestaudio[language^=${blind_lang}]/bestaudio[acodec=opus]/bestaudio[acodec^=mp4a]/bestaudio)"
+            fi
+            local blind_video_fmt="bestvideo[height<=1080][fps<=60][format_note!*=Premium]+${blind_audio_fmt}/bestvideo[height<=1080]+${blind_audio_fmt}/best"
+
+            local target_autofit="50%x50%"
+            local target_scale="0.5"
+            local target_fs="false"
+            if [[ "$target_idx" =~ ^(small|sm|35|med|medium|50|large|lg|75|full|fs|100)$ ]]; then
+                case "$target_idx" in
+                    small|sm|35) target_autofit="35%x35%"; target_scale="0.35" ;;
+                    med|medium|50) target_autofit="50%x50%"; target_scale="0.50" ;;
+                    large|lg|75) target_autofit="75%x75%"; target_scale="0.75" ;;
+                    full|fs|100) target_fs="true" ;;
+                esac
+            fi
+
+            local b_batch=""
+            b_batch+="{\"command\":[\"set_property\",\"window-minimized\",false]}\n"
+            b_batch+="{\"command\":[\"set_property\",\"autofit\",\"$target_autofit\"]}\n"
+            b_batch+="{\"command\":[\"set_property\",\"window-scale\",$target_scale]}\n"
+            b_batch+="{\"command\":[\"set_property\",\"geometry\",\"50%:50%\"]}\n"
+            b_batch+="{\"command\":[\"set_property\",\"auto-window-resize\",false]}\n"
+            b_batch+="{\"command\":[\"set_property\",\"keepaspect-window\",false]}\n"
+            b_batch+="{\"command\":[\"apply-profile\",\"fast\"]}\n"
+            b_batch+="{\"command\":[\"set_property\",\"hwdec\",\"auto-safe\"]}\n"
+            b_batch+="{\"command\":[\"set_property\",\"opengl-pbo\",true]}\n"
+            b_batch+="{\"command\":[\"set_property\",\"swapchain-depth\",3]}\n"
+            b_batch+="{\"command\":[\"set_property\",\"video-sync\",\"audio\"]}\n"
+            b_batch+="{\"command\":[\"set_property\",\"gpu-context\",\"auto\"]}\n"
+            b_batch+="{\"command\":[\"set_property\",\"vo\",\"gpu\"]}\n"
+            b_batch+="{\"command\":[\"set_property\",\"video\",\"auto\"]}\n"
+            b_batch+="{\"command\":[\"set_property\",\"vid\",\"auto\"]}\n"
+            b_batch+="{\"command\":[\"set_property\",\"fullscreen\",$target_fs]}\n"
+            b_batch+="{\"command\":[\"set_property\",\"force-window\",\"yes\"]}\n"
+            b_batch+="{\"command\":[\"set_property\",\"pause\",false]}\n"
+            b_batch+="{\"command\":[\"set_property\",\"ytdl-format\",\"$blind_video_fmt\"]}\n"
+            b_batch+="{\"command\":[\"script-message\",\"set-audio-mode\",\"false\"]}\n"
+
+            local reload_needed=false
+            if [ "$has_vid_track" -le 0 ] || [ "$b_vid" == "false" ] || [ "$b_vid" == "no" ]; then
+                reload_needed=true
+            fi
+
+            if [ "$reload_needed" = true ] && ([[ "$b_path" =~ ^http.* ]] || [[ "$b_path" =~ ^ytdl.* ]]); then
+                b_batch+="{\"command\":[\"set_property\",\"start\",\"none\"]}\n"
+                if (( $(echo "$b_time > 1" | bc -l 2>/dev/null || echo 0) )); then
+                    b_batch+="{\"command\":[\"script-message\",\"arm-resume-seek\",\"$b_time\"]}\n"
+                fi
+                b_batch+="{\"command\":[\"playlist-play-index\",\"current\"]}\n"
+            fi
+            echo -e "$b_batch" | nc ${NC_OPTS:--U} -w 1 "$blind_sock" >/dev/null 2>&1
+
+            # Resilient seek confirmation watcher for Blind Mode video restoration
+            if [ "$reload_needed" = true ] && (( $(echo "$b_time > 1" | bc -l 2>/dev/null || echo 0) )); then
+                local seek_target="$b_time"
+                (
+                    for attempt in {1..50}; do
+                        sleep 0.15
+                        [ ! -S "$blind_sock" ] && break
+                        local probe
+                        probe=$(echo -e '{"command":["get_property","seekable"]}\n{"command":["get_property","time-pos"]}' | nc ${NC_OPTS:--U} -w 1 "$blind_sock" 2>/dev/null | jq -s -j -r 'map(select(.event == null)) | (.[0].data // false), "\t", (.[1].data // 0)')
+                        [ -z "$probe" ] && continue
+                        IFS=$'\t' read -r is_seekable t_pos <<< "$probe"
+                        if [ "$is_seekable" == "true" ] && [ -n "$t_pos" ] && [ "$t_pos" != "null" ]; then
+                            local diff=$(echo "$t_pos - $seek_target" | bc -l 2>/dev/null || echo 0)
+                            diff=${diff#-}
+                            if (( $(echo "$diff > 2.5" | bc -l 2>/dev/null || echo 0) )) && (( $(echo "$t_pos < 5.0" | bc -l 2>/dev/null || echo 0) )); then
+                                echo "{\"command\":[\"seek\",$seek_target,\"absolute\"]}" | nc ${NC_OPTS:--U} -w 1 "$blind_sock" >/dev/null 2>&1
+                            fi
+                            break
+                        fi
+                    done
+                ) >/dev/null 2>&1 & disown
+            fi
+
+            local b_title
+            b_title=$(echo '{"command":["get_property","media-title"]}' | nc ${NC_OPTS:--U} -w 1 "$blind_sock" 2>/dev/null | jq -r 'select(.event == null) | .data // "Blind Video"')
+            echo -e "📺 ${C_PINK}Blind Mode Video Window Active:${C_RESET} ${C_CYAN}${b_title}${C_RESET}"
+            echo -e "${C_GRAY}💡 Resizable window. Press ${C_WHITE}w${C_GRAY} scale, ${C_WHITE}F11${C_GRAY} fullscreen, ${C_WHITE}0${C_GRAY}-${C_WHITE}4${C_GRAY} quality, ${C_WHITE}q${C_GRAY} return to queue.${C_RESET}"
             return 0
         fi
     fi
@@ -2016,13 +2111,74 @@ cmd_audio_mode() {
         [ -n "$rec_sock" ] && blind_sock="$rec_sock"
         if [ -S "$blind_sock" ] && echo '{"command":["get_property","idle-active"]}' | nc ${NC_OPTS:--U} -w 1 "$blind_sock" >/dev/null 2>&1; then
             if [ "$action" == "on" ] || [ "$action" == "enable" ] || [ "$action" == "1" ]; then
-                echo -e '{"command":["set_property","vid","no"]}\n{"command":["set_property","video","no"]}\n{"command":["set_property","force-window","no"]}\n{"command":["set_property","window-minimized",true]}' | nc ${NC_OPTS:--U} -w 1 "$blind_sock" >/dev/null 2>&1
+                local blind_lang="auto"
+                [ -f "$HOME/.cache/mpv/blind_lang" ] && blind_lang=$(cat "$HOME/.cache/mpv/blind_lang" 2>/dev/null | tr -d '[:space:]')
+                [ -z "$blind_lang" ] && blind_lang="auto"
+                local blind_audio_fmt=""
+                if [ "$blind_lang" == "auto" ]; then
+                    blind_audio_fmt="(bestaudio[acodec=opus]/bestaudio[acodec^=mp4a]/bestaudio)"
+                else
+                    blind_audio_fmt="(bestaudio[language=${blind_lang}][acodec=opus]/bestaudio[language^=${blind_lang}][acodec=opus]/bestaudio[language=${blind_lang}]/bestaudio[language^=${blind_lang}]/bestaudio[acodec=opus]/bestaudio[acodec^=mp4a]/bestaudio)"
+                fi
+
+                echo "true" > "$HOME/.cache/mpv/blind_audio_mode"
+                if [ "$IS_WSL" = true ]; then
+                    local win_u_dir
+                    win_u_dir=$(get_windows_user_dir)
+                    [ -n "$win_u_dir" ] && echo "true" > "$win_u_dir/.cache/mpv/blind_audio_mode" 2>/dev/null
+                fi
+
+                local b_time=0 b_path=""
+                local b_probe
+                b_probe=$(echo -e '{"command":["get_property","time-pos"]}\n{"command":["get_property","path"]}' | nc ${NC_OPTS:--U} -w 1 "$blind_sock" 2>/dev/null | jq -s -c -r 'map(select(.event == null))')
+                if [ -n "$b_probe" ] && [ "$b_probe" != "[]" ]; then
+                    b_time=$(echo "$b_probe" | jq -r '.[0].data // 0')
+                    b_path=$(echo "$b_probe" | jq -r '.[1].data // ""')
+                fi
+
+                local b_batch=""
+                b_batch+="{\"command\":[\"set_property\",\"vid\",\"no\"]}\n"
+                b_batch+="{\"command\":[\"set_property\",\"video\",\"no\"]}\n"
+                b_batch+="{\"command\":[\"set_property\",\"force-window\",\"no\"]}\n"
+                b_batch+="{\"command\":[\"set_property\",\"window-minimized\",true]}\n"
+                b_batch+="{\"command\":[\"set_property\",\"ytdl-format\",\"$blind_audio_fmt\"]}\n"
+                b_batch+="{\"command\":[\"script-message\",\"set-audio-mode\",\"true\"]}\n"
+                if [[ "$b_path" =~ ^http.* ]] || [[ "$b_path" =~ ^ytdl.* ]]; then
+                    b_batch+="{\"command\":[\"set_property\",\"start\",\"none\"]}\n"
+                    if (( $(echo "$b_time > 1" | bc -l 2>/dev/null || echo 0) )); then
+                        b_batch+="{\"command\":[\"script-message\",\"arm-resume-seek\",\"$b_time\"]}\n"
+                    fi
+                    b_batch+="{\"command\":[\"playlist-play-index\",\"current\"]}\n"
+                fi
+                echo -e "$b_batch" | nc ${NC_OPTS:--U} -w 1 "$blind_sock" >/dev/null 2>&1
+
+                if (( $(echo "$b_time > 1" | bc -l 2>/dev/null || echo 0) )); then
+                    local seek_target="$b_time"
+                    (
+                        for attempt in {1..50}; do
+                            sleep 0.15
+                            [ ! -S "$blind_sock" ] && break
+                            local probe
+                            probe=$(echo -e '{"command":["get_property","seekable"]}\n{"command":["get_property","time-pos"]}' | nc ${NC_OPTS:--U} -w 1 "$blind_sock" 2>/dev/null | jq -s -j -r 'map(select(.event == null)) | (.[0].data // false), "\t", (.[1].data // 0)')
+                            [ -z "$probe" ] && continue
+                            IFS=$'\t' read -r is_seekable t_pos <<< "$probe"
+                            if [ "$is_seekable" == "true" ] && [ -n "$t_pos" ] && [ "$t_pos" != "null" ]; then
+                                local diff=$(echo "$t_pos - $seek_target" | bc -l 2>/dev/null || echo 0)
+                                diff=${diff#-}
+                                if (( $(echo "$diff > 2.5" | bc -l 2>/dev/null || echo 0) )) && (( $(echo "$t_pos < 5.0" | bc -l 2>/dev/null || echo 0) )); then
+                                    echo "{\"command\":[\"seek\",$seek_target,\"absolute\"]}" | nc ${NC_OPTS:--U} -w 1 "$blind_sock" >/dev/null 2>&1
+                                fi
+                                break
+                            fi
+                        done
+                    ) >/dev/null 2>&1 & disown
+                fi
+
                 echo -e "🎧 ${C_PINK}Blind Mode: Pure Audio Mode Enabled (Video hidden)${C_RESET}"
                 return 0
             elif [ "$action" == "off" ] || [ "$action" == "disable" ] || [ "$action" == "0" ]; then
-                echo -e '{"command":["set_property","vid","auto"]}\n{"command":["set_property","video","auto"]}\n{"command":["set_property","force-window","yes"]}\n{"command":["set_property","window-minimized",false]}' | nc ${NC_OPTS:--U} -w 1 "$blind_sock" >/dev/null 2>&1
-                echo -e "📺 ${C_GREEN}Blind Mode: Video Window Restored${C_RESET}"
-                return 0
+                cmd_video_toggle ""
+                return $?
             fi
         fi
     fi
@@ -3983,9 +4139,9 @@ cmd_blind_play() {
             kill "$bridge_pid" 2>/dev/null || true
             wait "$bridge_pid" 2>/dev/null || true
         fi
-        rm -f "$blind_socket" "$HOME/.cache/mpv/blind_active" "$HOME/.cache/mpv/blind_lang" "$HOME/.cache/mpv/blind_audio_langs.json" "$HOME/.cache/mpv/blind_audio_langs_url" "/tmp/mpv-blind-$$.sock" 2>/dev/null || true
+        rm -f "$blind_socket" "$HOME/.cache/mpv/blind_active" "$HOME/.cache/mpv/blind_lang" "$HOME/.cache/mpv/blind_audio_langs.json" "$HOME/.cache/mpv/blind_audio_langs_url" "$HOME/.cache/mpv/blind_audio_mode" "/tmp/mpv-blind-$$.sock" 2>/dev/null || true
         if [ "$IS_WSL" = true ] && [ -n "$win_u_dir" ] && [ -d "$win_u_dir/.cache/mpv" ]; then
-            rm -f "$win_u_dir/.cache/mpv/blind_active" "$win_u_dir/.cache/mpv/blind_lang" "$win_u_dir/.cache/mpv/blind_audio_langs.json" "$win_u_dir/.cache/mpv/blind_audio_langs_url" 2>/dev/null || true
+            rm -f "$win_u_dir/.cache/mpv/blind_active" "$win_u_dir/.cache/mpv/blind_lang" "$win_u_dir/.cache/mpv/blind_audio_langs.json" "$win_u_dir/.cache/mpv/blind_audio_langs_url" "$win_u_dir/.cache/mpv/blind_audio_mode" 2>/dev/null || true
         fi
 
         # 5. Restore last_playlist.txt and state.json to guarantee 100% session preservation
@@ -4115,10 +4271,41 @@ cmd_blind_play() {
     fi
     local blind_ytdl_fmt="bestvideo[height<=1080][fps<=60][format_note!*=Premium]+${blind_audio_fmt}/bestvideo[height<=1080]+${blind_audio_fmt}/best"
 
+    local is_blind_aud=false
+    if [ "$force_aud" = true ]; then
+        is_blind_aud=true
+    elif [ "$force_vid" = true ]; then
+        is_blind_aud=false
+    else
+        if [ -f "$HOME/.cache/mpv/queue_audio_mode" ] && [ "$(cat "$HOME/.cache/mpv/queue_audio_mode" 2>/dev/null | tr -d '[:space:]')" == "true" ]; then
+            is_blind_aud=true
+        fi
+    fi
+
+    if [ "$is_blind_aud" = true ]; then
+        echo "true" > "$HOME/.cache/mpv/blind_audio_mode"
+        blind_ytdl_fmt="$blind_audio_fmt"
+    else
+        echo "false" > "$HOME/.cache/mpv/blind_audio_mode"
+    fi
+
+    if [ "$IS_WSL" = true ]; then
+        local win_u_dir_init
+        win_u_dir_init=$(get_windows_user_dir)
+        if [ -n "$win_u_dir_init" ] && [ -d "$win_u_dir_init/.cache/mpv" ]; then
+            echo "$([ "$is_blind_aud" = true ] && echo "true" || echo "false")" > "$win_u_dir_init/.cache/mpv/blind_audio_mode" 2>/dev/null
+        fi
+    fi
+
     print_header_box "${C_PINK}🕶️ Queue Blind Mode (One-Time Isolated Playback)${C_RESET}"
     print_boxed_line "${C_TEAL}Playing:   ${C_CYAN}${display_title:0:$((INNER_WIDTH-12))}${C_RESET}"
     print_boxed_line "${C_TEAL}Source:    ${C_VIOLET}${play_target:0:$((INNER_WIDTH-12))}${C_RESET}"
     print_boxed_line "${C_TEAL}Audio:     ${C_WHITE}[${C_PINK}${blind_lang}${C_WHITE}] $(get_human_lang_name "$blind_lang") ${C_GRAY}(Press 'a' to cycle audio)${C_RESET}"
+    if [ "$is_blind_aud" = true ]; then
+        print_boxed_line "${C_TEAL}Mode:      ${C_PINK}🎧 Audio Only${C_RESET} ${C_GRAY}(Run 'q -vid' to restore video window)${C_RESET}"
+    else
+        print_boxed_line "${C_TEAL}Mode:      ${C_CYAN}📺 Video Mode${C_RESET} ${C_GRAY}(Run 'q -aud on' to switch to audio)${C_RESET}"
+    fi
     print_boxed_line "${C_TEAL}Status:    ${C_GREEN}Isolated Session ✅ (Zero queue or history modification)${C_RESET}"
     print_boxed_line "${C_TEAL}Controls:  ${C_GRAY}Press 'q' in window / Ctrl-C in terminal to exit & resume queue${C_RESET}"
     print_boxed_line "${C_TEAL}Hotkeys:   ${C_GRAY}F11 Fullscreen • w/W scale presets • +/- zoom • 0-4 quality • a/A audio${C_RESET}"
@@ -4175,9 +4362,9 @@ cmd_blind_play() {
             [ -n "$win_ytdl" ] && blind_script_opts="${blind_script_opts},ytdl_hook-ytdl_path=${win_ytdl}"
 
             local win_opts=(
-                "--force-window=yes"
-                "--video=auto"
-                "--vid=auto"
+                "--force-window=$([ "$is_blind_aud" = true ] && echo "no" || echo "yes")"
+                "--video=$([ "$is_blind_aud" = true ] && echo "no" || echo "auto")"
+                "--vid=$([ "$is_blind_aud" = true ] && echo "no" || echo "auto")"
                 "--vo=gpu"
                 "--gpu-context=auto"
                 "--hwdec=auto-safe"
@@ -4201,8 +4388,7 @@ cmd_blind_play() {
                 "--network-timeout=12"
                 "--script-opts=${blind_script_opts}"
             )
-            [ "$force_vid" = true ] && win_opts+=("--video=auto" "--vid=auto" "--force-window=yes")
-            [ "$force_aud" = true ] && win_opts+=("--video=no" "--vid=no" "--force-window=no")
+            [ "$is_blind_aud" = true ] && win_opts+=("--window-minimized=yes")
 
             if [ -n "$win_u_dir" ] && [ -f "$win_u_dir/AppData/Roaming/mpv/scripts/queue_video.lua" ]; then
                 local win_lua
@@ -4284,14 +4470,16 @@ cmd_blind_play() {
         "--slang=${alang_arg}"
         "--script-opts=queue_video-blind=yes,queue-blind=yes,blind=yes"
     )
-    if [ "$force_aud" = true ]; then
+    if [ "$is_blind_aud" = true ]; then
         standalone_opts+=(
             "--force-window=no"
             "--video=no"
+            "--vid=no"
+            "--window-minimized=yes"
             "--vo=null"
             "--ytdl-format=${blind_audio_fmt}"
         )
-    elif [ "$force_vid" = true ] || [ "$has_display" = true ]; then
+    elif [ "$has_display" = true ]; then
         standalone_opts+=(
             "--force-window=yes"
             "--video=auto"

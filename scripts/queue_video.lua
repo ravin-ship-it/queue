@@ -158,7 +158,7 @@ end
 local function safe_show()
     mp.set_property_bool("window-minimized", false)
     mp.set_property_bool("force-window", true)
-    if state_file then
+    if state_file and not check_blind_mode() then
         local f = io.open(state_file, "w")
         if f then
             f:write("1\n")
@@ -214,7 +214,38 @@ if home ~= "" then
     end
 end
 
+local blind_audio_mode_file = home ~= "" and (home .. "/.cache/mpv/blind_audio_mode") or nil
+local in_memory_blind_audio = nil
+
 local function is_audio_mode_active()
+    if check_blind_mode() then
+        if in_memory_blind_audio ~= nil then
+            return in_memory_blind_audio
+        end
+        if blind_audio_mode_file then
+            local bf = io.open(blind_audio_mode_file, "r")
+            if bf then
+                local c = bf:read("*l")
+                bf:close()
+                if c then
+                    c = c:match("^%s*(.-)%s*$")
+                    in_memory_blind_audio = (c == "true" or c == "1" or c == "on")
+                    return in_memory_blind_audio
+                end
+            end
+        end
+        -- Default for Blind Mode if not explicitly set:
+        -- Check if mpv options or initial vid setting was audio-only
+        local v = mp.get_property("vid", "auto")
+        local fwin = mp.get_property("force-window", "yes")
+        if v == "no" or v == "false" or fwin == "no" or fwin == "false" then
+            in_memory_blind_audio = true
+            return true
+        end
+        in_memory_blind_audio = false
+        return false
+    end
+
     if not audio_mode_file then return false end
     local f = io.open(audio_mode_file, "r")
     if not f then return false end
@@ -228,7 +259,17 @@ local function is_audio_mode_active()
 end
 
 local function save_audio_mode(enabled)
-    if check_blind_mode() then return end
+    if check_blind_mode() then
+        in_memory_blind_audio = enabled
+        if blind_audio_mode_file then
+            local f = io.open(blind_audio_mode_file, "w")
+            if f then
+                f:write(enabled and "true\n" or "false\n")
+                f:close()
+            end
+        end
+        return
+    end
     if not audio_mode_file then return end
     local f = io.open(audio_mode_file, "w")
     if f then
@@ -466,7 +507,7 @@ local is_auto_mode = (initial_saved_res == "auto")
 local current_tier = initial_saved_res
 pcall(mp.set_property, "user-data/queue-res", current_tier)
 
-if is_audio_mode_active() then
+if not check_blind_mode() and is_audio_mode_active() then
     mp.set_property("vid", "no")
     mp.set_property("video", "no")
     mp.set_property("force-window", "no")
@@ -1472,24 +1513,26 @@ local function on_file_loaded()
         mp.set_property_number("speed", saved_sp)
         pcall(mp.set_property, "user-data/queue-speed", string.format("%.2f", saved_sp))
     end
-    if is_audio_mode_active() then
-        mp.set_property("vid", "no")
-        mp.set_property("video", "no")
-        mp.set_property("force-window", "no")
-        mp.set_property_bool("window-minimized", true)
-        local fmt = get_quality_format("audio", current_lang)
-        mp.set_property("ytdl-format", fmt)
-    else
-        if path and path ~= "" and not is_quality_switch_in_flight() then
-            local is_remote = (path:match("^https?://") ~= nil) or (path:match("^ytdl://") ~= nil)
-            if is_remote and is_auto_mode and not check_blind_mode() then
-                current_tier = "auto"
-                has_downshifted_this_track = false
-                starved_buffer_seconds = 0
-                recent_stalls = {}
-                track_start_time = mp.get_time()
-                local fmt = get_quality_format("auto", current_lang)
-                mp.set_property("ytdl-format", fmt)
+    if not is_quality_switch_in_flight() then
+        if is_audio_mode_active() then
+            mp.set_property("vid", "no")
+            mp.set_property("video", "no")
+            mp.set_property("force-window", "no")
+            mp.set_property_bool("window-minimized", true)
+            local fmt = get_quality_format("audio", current_lang)
+            mp.set_property("ytdl-format", fmt)
+        else
+            if path and path ~= "" then
+                local is_remote = (path:match("^https?://") ~= nil) or (path:match("^ytdl://") ~= nil)
+                if is_remote and is_auto_mode and not check_blind_mode() then
+                    current_tier = "auto"
+                    has_downshifted_this_track = false
+                    starved_buffer_seconds = 0
+                    recent_stalls = {}
+                    track_start_time = mp.get_time()
+                    local fmt = get_quality_format("auto", current_lang)
+                    mp.set_property("ytdl-format", fmt)
+                end
             end
         end
     end
