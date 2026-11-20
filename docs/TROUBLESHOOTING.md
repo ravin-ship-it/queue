@@ -4,11 +4,11 @@ This guide addresses common questions, platform edge cases, and self-healing mec
 
 ---
 
-## 🔍 First Step: Run System Diagnostic (`q -deps` / `q -doctor`)
+## 🔍 First Step: Run System Diagnostic (`q -deps`)
 
 Before debugging, run Queue's integrated multi-engine diagnostic:
 ```bash
-q -deps      # or: q -doctor, q doctor
+q -deps      # Comprehensive multi-engine diagnostic
 ```
 This inspects core binaries, JavaScript decryptor engines, WSLg graphics drivers, host bridges, and Android audio sinks.
 

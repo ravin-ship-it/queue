@@ -176,7 +176,7 @@ Queue adapts its rendering and audio engine based on the host platform:
 | `q -disl` | **Dislike Hub**: Interactive FZF blacklist manager |
 | `q -fx` | Toggle Dolby Equalizer & Spatial Audio FX |
 | `q -d [N]` | Interactive Downloader Hub (MP3, FLAC, OPUS, MP4) |
-| `q -deps` / `q -doctor` | Multi-Engine System & Dependencies Diagnostic |
+| `q -deps` | Multi-Engine System & Dependencies Diagnostic |
 | `q -up` / `q update` | Universal 1-command Updater (yt-dlp, engine, local dev auto-sync) |
 | `q -install` | Reinstall or verify Queue engine |
 | `q -uninstall` | Clean uninstallation (preserves instant reinstaller) |

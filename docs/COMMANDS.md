@@ -413,7 +413,7 @@ Supported Formats: MP3 (320k), M4A (256k AAC), FLAC (Lossless), OPUS (160k Hi-Re
 
 | Command | Purpose |
 | :--- | :--- |
-| `q -deps` / `q -doctor` | Comprehensive boxed TUI multi-engine dependency diagnostic |
+| `q -deps` | Comprehensive boxed TUI multi-engine dependency diagnostic |
 | `q -up` / `q update` | Universal 1-command updater (yt-dlp, Queue engine, host bridges, local dev auto-sync) |
 | `q -install` | Reinstall or verify Queue engine |
 | `q -uninstall` | Clean uninstallation checklist (preserves instant reinstaller) |

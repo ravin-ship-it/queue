@@ -174,10 +174,10 @@ q -uninstall --purge
 
 ---
 
-## 🔍 System Verification (`q -deps` / `q -doctor`)
+## 🔍 System Verification (`q -deps`)
 
 After installation, verify that all dependencies and hardware profiles are healthy:
 ```bash
-q -deps      # or: q -doctor
+q -deps      # Comprehensive multi-engine diagnostic
 ```
 This runs a multi-engine diagnostic checking core binaries, JS decryptor engines, WSLg hardware acceleration, Windows bridges, and Android audio sinks.
