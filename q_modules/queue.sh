@@ -1199,6 +1199,11 @@ cmd_clean() {
     # Initialize memory cache once
     load_cache_to_memory
 
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local clean_checker="$script_dir/clean_checker.py"
+    [ ! -f "$clean_checker" ] && clean_checker="$HOME/.local/bin/mpv/q_modules/clean_checker.py"
+    [ ! -f "$clean_checker" ] && clean_checker="/home/xen/queue/q_modules/clean_checker.py"
+
     if [ -n "$playlist_file" ]; then
         # --- File Mode ---
         if [ ! -f "$playlist_file" ]; then 
@@ -1206,47 +1211,88 @@ cmd_clean() {
             return
         fi
 
-        echo -e "${C_PINK}🧹 Scanning playlist for dead tracks (Cache-based)...${C_RESET}"
+        echo -e "${C_PINK}🧹 Scanning playlist for dead tracks...${C_RESET}"
+        
+        local total_count=$(grep -cve '^\s*$' -e '^\s*#' "$playlist_file" 2>/dev/null || echo 0)
+        if [ "$total_count" -le 0 ]; then
+            echo -e "${C_ORANGE}⚠️ Playlist is empty.${C_RESET}"
+            return
+        fi
+
+        local dead_raw=""
+        if command -v python3 >/dev/null 2>&1 && [ -f "$clean_checker" ]; then
+            dead_raw=$(python3 "$clean_checker" --file "$playlist_file" 2>/dev/null)
+        fi
+
         local temp=$(mktemp)
         local removed_count=0
-        local total_count=0
         
-        while IFS= read -r url; do
-             [ -z "$url" ] && continue
-             ((total_count++))
-             
-             # Clean URL for lookup
-             local clean_url="$url"
-             if [[ "$url" =~ ^http ]]; then
-                 clean_url="${url%%\\t*}"
-                 clean_url="${clean_url%%[[:space:]]*}"
-             fi
+        if [ -n "$dead_raw" ]; then
+            local -A dead_urls_map
+            while IFS=$'\t' read -r d_idx d_url d_title d_reason; do
+                [ -z "$d_url" ] && continue
+                dead_urls_map["$d_url"]=1
+                local disp_t="${d_title:-$d_url}"
+                echo -e "   ${C_PINK}❌ [${C_ORANGE}$((d_idx + 1))${C_PINK}] ${C_WHITE}${disp_t}${C_RESET} ${C_GRAY}(${d_reason})${C_RESET}"
+                ((removed_count++))
+                # Purge from persistent cache
+                grep -v -F "$d_url" "$CACHE_FILE" > "$CACHE_FILE.tmp" 2>/dev/null && mv "$CACHE_FILE.tmp" "$CACHE_FILE" 2>/dev/null
+                unset "CACHE_MEM[$d_url]"
+            done <<< "$dead_raw"
 
-             local is_dead=false
-             local cached_row="${CACHE_MEM[$clean_url]}"
-             local cached_title=$(echo -e "$cached_row" | awk -F'\t' '{print $1}')
-             local cached_artist=$(echo -e "$cached_row" | awk -F'\t' '{print $2}')
+            while IFS= read -r url; do
+                [ -z "$url" ] && continue
+                local clean_u="${url%%$'\t'*}"
+                clean_u="${clean_u%%[[:space:]]*}"
+                if [ -z "${dead_urls_map[$clean_u]}" ]; then
+                    echo "$url" >> "$temp"
+                fi
+            done < "$playlist_file"
+        else
+            # Fallback legacy cache scan
+            while IFS= read -r url; do
+                [ -z "$url" ] && continue
+                local clean_url="$url"
+                if [[ "$url" =~ ^http ]]; then
+                    clean_url="${url%%\\t*}"
+                    clean_url="${clean_url%%[[:space:]]*}"
+                fi
 
-             if [[ "$cached_title" == "[Private video]" ]] || [[ "$cached_title" == "[Deleted video]" ]] || [[ "$cached_title" == "Video unavailable" ]]; then
-                 is_dead=true
-             elif [[ "$cached_title" == "Loading Metadata..." ]] && [[ "$cached_artist" == "Unknown" ]]; then
-                 is_dead=true
-             fi
-             
-             if [ "$is_dead" = true ]; then
-                 ((removed_count++))
-             else
-                 echo "$url" >> "$temp"
-             fi
-        done < "$playlist_file"
+                local is_dead=false
+                local cached_row="${CACHE_MEM[$clean_url]}"
+                local cached_title=$(echo -e "$cached_row" | awk -F'\t' '{print $1}')
+                local cached_artist=$(echo -e "$cached_row" | awk -F'\t' '{print $2}')
+
+                if [[ "$cached_title" == "[Private video]" ]] || [[ "$cached_title" == "[Deleted video]" ]] || [[ "$cached_title" == "Video unavailable" ]]; then
+                    is_dead=true
+                elif [[ "$cached_title" == "Loading Metadata..." ]] && [[ "$cached_artist" == "Unknown" ]]; then
+                    is_dead=true
+                fi
+                
+                if [ "$is_dead" = true ]; then
+                    ((removed_count++))
+                else
+                    echo "$url" >> "$temp"
+                fi
+            done < "$playlist_file"
+        fi
         
         mv "$temp" "$playlist_file"
         
         local alive_count=$((total_count - removed_count))
-        echo -e "${C_PINK}✨ Removed ${C_ORANGE}${removed_count}${C_PINK} dead tracks.${C_RESET}"
-        echo -e "${C_TEAL}📊 Status: ${C_CYAN}${alive_count}${C_RESET} Alive | ${C_PINK}${removed_count}${C_RESET} Removed"
+        [ "$alive_count" -lt 0 ] && alive_count=0
+        if [ "$removed_count" -eq 0 ]; then
+            echo -e "${C_GREEN}✅ No dead or junk tracks found.${C_RESET}"
+            echo -e "${C_TEAL}📊 Status: ${C_CYAN}${total_count}${C_RESET} Alive"
+        else
+            local unit="tracks"
+            [ "$removed_count" -eq 1 ] && unit="track"
+            echo -e "${C_PINK}✨ Removed ${C_ORANGE}${removed_count}${C_PINK} dead/junk ${unit}.${C_RESET}"
+            echo -e "${C_TEAL}📊 Status: ${C_CYAN}${alive_count}${C_RESET} Alive | ${C_PINK}${removed_count}${C_RESET} Removed"
+        fi
     else
         # --- Socket Mode ---
+        ensure_mpv_running
         local track_info=$(echo '{ "command": ["get_property", "playlist"] }' | nc $NC_OPTS -w 1 "$SOCKET" 2>/dev/null)
         local total_count=$(echo "$track_info" | jq -r '.data | length // 0' 2>/dev/null); : "${total_count:=0}"
         
@@ -1257,68 +1303,96 @@ cmd_clean() {
 
         echo -e "${C_PINK}🧹 Scanning for dead or junk tracks...${C_RESET}"
         
-        local dead_indices=""
-        local i=0
-        # Process each track
-        while IFS='|' read -r filename mpv_title; do
-            local is_junk=false
-            
-            # 1. Clean filename for cache lookup
-            local clean_fname="$filename"
-            if [[ "$filename" =~ ^http ]]; then
-                clean_fname="${filename%%\\t*}"
-                clean_fname="${clean_fname%%$'\t'*}"
-                clean_fname="${clean_fname%%[[:space:]]*}"
-            fi
+        local dead_raw=""
+        if command -v python3 >/dev/null 2>&1 && [ -f "$clean_checker" ]; then
+            dead_raw=$(python3 "$clean_checker" --socket "$SOCKET" 2>/dev/null)
+        fi
 
-            # 2. Check for explicit dead markers in current title
-            if [[ "$mpv_title" == "[Private video]" ]] || [[ "$mpv_title" == "[Deleted video]" ]] || [[ "$mpv_title" == "Video unavailable" ]]; then
-                is_junk=true
-            fi
+        local removed_count=0
 
-            # 3. Check for non-media files (Local files only)
-            if [ "$is_junk" = false ]; then
-                if ! is_media_file "$clean_fname"; then
+        if [ -n "$dead_raw" ]; then
+            # High-speed parallel detection
+            # Sort descending by index (column 1) to remove safely without index shifting
+            local sorted_dead
+            sorted_dead=$(echo "$dead_raw" | sort -k1,1nr)
+
+            while IFS=$'\t' read -r d_idx d_url d_title d_reason; do
+                [ -z "$d_idx" ] && continue
+                local disp_t="$d_title"
+                [ -z "$disp_t" ] && disp_t=$(get_cached_title "$d_url")
+                [ -z "$disp_t" ] && disp_t="$d_url"
+                
+                echo -e "   ${C_PINK}❌ [${C_ORANGE}$((d_idx + 1))${C_PINK}] ${C_WHITE}${disp_t}${C_RESET} ${C_GRAY}(${d_reason})${C_RESET}"
+                echo "{ \"command\": [\"playlist-remove\", $d_idx] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                ((removed_count++))
+
+                # Purge from titles cache and memory
+                grep -v -F "$d_url" "$CACHE_FILE" > "$CACHE_FILE.tmp" 2>/dev/null && mv "$CACHE_FILE.tmp" "$CACHE_FILE" 2>/dev/null
+                unset "CACHE_MEM[$d_url]"
+                
+                # Clean from last_playlist.txt
+                if [ -f "$LAST_PLAYLIST_FILE" ]; then
+                    grep -v -F "$d_url" "$LAST_PLAYLIST_FILE" > "$LAST_PLAYLIST_FILE.tmp" 2>/dev/null && mv "$LAST_PLAYLIST_FILE.tmp" "$LAST_PLAYLIST_FILE" 2>/dev/null
+                fi
+            done <<< "$sorted_dead"
+        else
+            # Fallback legacy cache scan
+            local dead_indices=""
+            local i=0
+            while IFS='|' read -r filename mpv_title; do
+                local is_junk=false
+                local clean_fname="$filename"
+                if [[ "$filename" =~ ^http ]]; then
+                    clean_fname="${filename%%\\t*}"
+                    clean_fname="${clean_fname%%$'\t'*}"
+                    clean_fname="${clean_fname%%[[:space:]]*}"
+                fi
+
+                if [[ "$mpv_title" == "[Private video]" ]] || [[ "$mpv_title" == "[Deleted video]" ]] || [[ "$mpv_title" == "Video unavailable" ]]; then
                     is_junk=true
                 fi
-            fi
 
-            # 4. Always check Cache (even if title exists, it might be a stale embedded one)
-            if [ "$is_junk" = false ]; then
-                local cached_row="${CACHE_MEM[$clean_fname]}"
-                local cached_title=$(echo -e "$cached_row" | awk -F'\t' '{print $1}')
-                local cached_artist=$(echo -e "$cached_row" | awk -F'\t' '{print $2}')
-
-                if [[ "$cached_title" == "[Private video]" ]] || [[ "$cached_title" == "[Deleted video]" ]] || [[ "$cached_title" == "Video unavailable" ]]; then
-                    is_junk=true
-                elif [[ "$cached_title" == "Loading Metadata..." ]] && [[ "$cached_artist" == "Unknown" ]]; then
-                    is_junk=true
+                if [ "$is_junk" = false ]; then
+                    if ! is_media_file "$clean_fname"; then
+                        is_junk=true
+                    fi
                 fi
-            fi
 
-            if [ "$is_junk" = true ]; then
-                dead_indices="${i} ${dead_indices}"
-            fi
-            ((i++))
-        done < <(echo "$track_info" | jq -r '.data[] | "\(.filename)|\(.title // "")"')
+                if [ "$is_junk" = false ]; then
+                    local cached_row="${CACHE_MEM[$clean_fname]}"
+                    local cached_title=$(echo -e "$cached_row" | awk -F'\t' '{print $1}')
+                    local cached_artist=$(echo -e "$cached_row" | awk -F'\t' '{print $2}')
 
-        if [ -z "$dead_indices" ]; then
+                    if [[ "$cached_title" == "[Private video]" ]] || [[ "$cached_title" == "[Deleted video]" ]] || [[ "$cached_title" == "Video unavailable" ]]; then
+                        is_junk=true
+                    elif [[ "$cached_title" == "Loading Metadata..." ]] && [[ "$cached_artist" == "Unknown" ]]; then
+                        is_junk=true
+                    fi
+                fi
+
+                if [ "$is_junk" = true ]; then
+                    dead_indices="${i} ${dead_indices}"
+                fi
+                ((i++))
+            done < <(echo "$track_info" | jq -r '.data[] | "\(.filename)|\(.title // "")"')
+
+            if [ -n "$dead_indices" ]; then
+                local sorted_dead=$(echo "$dead_indices" | tr ' ' '\n' | sort -nr)
+                for idx in $sorted_dead; do
+                    echo "{ \"command\": [\"playlist-remove\", $idx] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
+                    ((removed_count++))
+                done
+            fi
+        fi
+
+        if [ "$removed_count" -eq 0 ]; then
             echo -e "${C_GREEN}✅ No dead or junk tracks found.${C_RESET}"
             echo -e "${C_TEAL}📊 Status: ${C_CYAN}${total_count}${C_RESET} Alive"
             return
         fi
 
-        local removed_count=0
-        # Reverse indices to prevent shift issues
-        local sorted_dead=$(echo "$dead_indices" | tr ' ' '\n' | sort -nr)
-        
-        for idx in $sorted_dead;
-         do
-            echo "{ \"command\": [\"playlist-remove\", $idx] }" | nc $NC_OPTS -w 1 "$SOCKET" > /dev/null 2>&1
-            ((removed_count++))
-        done
-        
         local alive_count=$((total_count - removed_count))
+        [ "$alive_count" -lt 0 ] && alive_count=0
         local unit="tracks"
         [ "$removed_count" -eq 1 ] && unit="track"
         
